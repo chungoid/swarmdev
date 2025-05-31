@@ -1,1 +1,0 @@
-Create a simple Python calculator that can perform basic arithmetic operations (addition, subtraction, multiplication, division). The calculator should have a command-line interface where users can input expressions and get results. 
