@@ -1,0 +1,14 @@
+Create a simple web-based task management application with the following features:
+
+1. A clean, modern user interface for managing daily tasks
+2. The ability to add, edit, and delete tasks
+3. Task categories (work, personal, shopping)
+4. Due date tracking with visual indicators
+5. Mark tasks as complete/incomplete
+6. Basic task filtering (all, active, completed)
+7. Local storage to persist tasks between sessions
+
+The application should be built using HTML, CSS, and JavaScript, and should work in modern web browsers without requiring a backend server. The design should be responsive and work well on both desktop and mobile devices.
+
+Target Users: Individuals looking for a simple, offline task management solution
+Success Criteria: Users can effectively manage their daily tasks with an intuitive interface that loads quickly and works offline. 

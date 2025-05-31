@@ -1,0 +1,2 @@
+[console_scripts]
+swarmdev = swarmdev.cli:main

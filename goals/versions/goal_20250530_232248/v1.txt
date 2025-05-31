@@ -1,0 +1,9 @@
+Create a Python password generator CLI tool with the following features:
+
+1. Generate random passwords with customizable length (default 12)
+2. Options for including/excluding uppercase, lowercase, numbers, and symbols  
+3. Command-line interface with proper argument parsing
+4. Save generated passwords to a file (optional)
+
+Target Users: Developers and security-conscious users
+Success Criteria: Users can quickly generate secure passwords from the command line with various options. 
