@@ -1169,7 +1169,9 @@ class DevelopmentAgent(BaseAgent):
                                 files_created: List[str], files_modified: List[str]):
         """Save an implementation file and log the action."""
         try:
-            full_path = os.path.join(project_dir, file_path)
+            # Organize files by technology into folders  
+            organized_path = self._organize_file_path(file_path)
+            full_path = os.path.join(project_dir, organized_path)
             os.makedirs(os.path.dirname(full_path), exist_ok=True)
             
             content = '\n'.join(content_lines)
@@ -1201,29 +1203,63 @@ class DevelopmentAgent(BaseAgent):
                         with open(full_path, 'w') as f:
                             f.write(enhanced_content)
                         
-                        files_modified.append(file_path)
-                        self.logger.info(f"MODIFIED: {file_path} - {improvement}")
+                        files_modified.append(organized_path)
+                        self.logger.info(f"MODIFIED: {organized_path} - {improvement}")
                         
                     except Exception as e:
-                        self.logger.error(f"Failed to modify existing file {file_path}: {e}")
+                        self.logger.error(f"Failed to modify existing file {organized_path}: {e}")
                         # Fallback to creating with timestamp
-                        timestamp_path = file_path.replace('.py', f'_{datetime.now().strftime("%H%M%S")}.py')
-                        full_timestamp_path = os.path.join(project_dir, timestamp_path)
+                        ext = os.path.splitext(file_path)[1]
+                        timestamp_path = file_path.replace(ext, f'_{datetime.now().strftime("%H%M%S")}{ext}')
+                        organized_timestamp_path = self._organize_file_path(timestamp_path)
+                        full_timestamp_path = os.path.join(project_dir, organized_timestamp_path)
+                        os.makedirs(os.path.dirname(full_timestamp_path), exist_ok=True)
                         with open(full_timestamp_path, 'w') as f:
                             f.write(content)
-                        files_created.append(timestamp_path)
-                        self.logger.info(f"CREATED: {timestamp_path} - {improvement} (timestamped due to merge conflict)")
+                        files_created.append(organized_timestamp_path)
+                        self.logger.info(f"CREATED: {organized_timestamp_path} - {improvement} (timestamped due to merge conflict)")
                 
             else:
                 # File doesn't exist - create it
                 with open(full_path, 'w') as f:
                     f.write(content)
                 
-                files_created.append(file_path)
-                self.logger.info(f"CREATED: {file_path} - {improvement}")
+                files_created.append(organized_path)
+                self.logger.info(f"CREATED: {organized_path} - {improvement}")
             
         except Exception as e:
             self.logger.error(f"Failed to save {file_path}: {e}")
+    
+    def _organize_file_path(self, file_path: str) -> str:
+        """Organize file path into appropriate technology folder structure."""
+        try:
+            # Get file extension to determine technology
+            _, ext = os.path.splitext(file_path)
+            
+            # Simple technology-based folder mapping
+            if ext in ['.pine']:
+                return f"indicators/{file_path}"
+            elif ext in ['.py']:
+                return f"python/{file_path}"
+            elif ext in ['.js', '.ts']:
+                return f"javascript/{file_path}"
+            elif ext in ['.go']:
+                return f"golang/{file_path}"
+            elif ext in ['.rs']:
+                return f"rust/{file_path}"
+            elif ext in ['.html', '.css']:
+                return f"web/{file_path}"
+            elif ext in ['.java']:
+                return f"java/{file_path}"
+            elif ext in ['.cpp', '.c', '.h']:
+                return f"cpp/{file_path}"
+            else:
+                # For unknown extensions, keep in root or create 'misc' folder
+                return file_path
+                
+        except Exception as e:
+            self.logger.error(f"Failed to organize file path {file_path}: {e}")
+            return file_path  # Fallback to original path
     
     def _merge_file_content(self, existing_content: str, new_content: str, file_path: str) -> str:
         """
@@ -1907,6 +1943,9 @@ class AnalysisAgent(BaseAgent):
             # Read the goal to understand target technology BEFORE analyzing
             target_technology = self._detect_target_technology()
             
+            # Analyze file organization issues
+            organization_analysis = self._analyze_file_organization(project_files, target_technology)
+            
             # Use LLM to analyze the project structure and functionality with technology context
             analysis_prompt = f"""
             Analyze this project structure and content for a {target_technology} project:
@@ -1918,12 +1957,16 @@ class AnalysisAgent(BaseAgent):
             File contents:
             {self._format_files_for_analysis(project_files)}
             
+            FILE ORGANIZATION ANALYSIS:
+            {organization_analysis}
+            
             Provide a comprehensive analysis including:
             1. Project type and technology stack (focus on {target_technology})
             2. Current functionality and features implemented in {target_technology}
             3. Code quality and structure assessment for {target_technology}
-            4. Potential issues or limitations
-            5. Architecture overview for {target_technology} projects
+            4. File organization and structure recommendations
+            5. Potential issues or limitations
+            6. Architecture overview for {target_technology} projects
             
             Keep the analysis focused on {target_technology} development patterns and best practices.
             """
@@ -1936,7 +1979,8 @@ class AnalysisAgent(BaseAgent):
                 "total_lines": sum(f["lines"] for f in project_files.values()),
                 "analysis": analysis_text,
                 "target_technology": target_technology,
-                "structure": self._identify_project_structure(project_files, target_technology)
+                "structure": self._identify_project_structure(project_files, target_technology),
+                "organization_issues": organization_analysis
             }
             
         except Exception as e:
@@ -1980,6 +2024,67 @@ class AnalysisAgent(BaseAgent):
         except Exception as e:
             self.logger.error(f"Failed to identify project structure: {e}")
             return "unknown"
+    
+    def _analyze_file_organization(self, project_files: Dict, target_technology: str) -> str:
+        """Analyze file organization and suggest improvements."""
+        try:
+            files = list(project_files.keys())
+            
+            # Check if files are properly organized
+            misplaced_files = []
+            
+            for file_path in files:
+                _, ext = os.path.splitext(file_path)
+                
+                # Check if file is in root but should be in a technology folder
+                if '/' not in file_path and ext in ['.pine', '.py', '.js', '.ts', '.go', '.rs', '.java', '.cpp', '.c', '.h']:
+                    expected_folder = self._get_expected_folder_for_extension(ext)
+                    if expected_folder:
+                        misplaced_files.append({
+                            "current": file_path,
+                            "suggested": f"{expected_folder}/{file_path}",
+                            "reason": f"{target_technology} files should be organized in {expected_folder}/ folder"
+                        })
+            
+            if misplaced_files:
+                organization_prompt = f"""
+                CRITICAL PROJECT ORGANIZATION ISSUES DETECTED:
+                
+                TARGET TECHNOLOGY: {target_technology}
+                CURRENT FILES: {files}
+                
+                MISPLACED FILES REQUIRING REORGANIZATION:
+                {chr(10).join([f"• {item['current']} → {item['suggested']} ({item['reason']})" for item in misplaced_files])}
+                
+                Provide specific reorganization recommendations to improve project structure for {target_technology} development.
+                Focus on creating a clean, professional folder structure that follows {target_technology} best practices.
+                """
+                
+                return self.llm_provider.generate_text(organization_prompt, temperature=0.2)
+            else:
+                return f"Project files are properly organized for {target_technology} development."
+                
+        except Exception as e:
+            self.logger.error(f"Failed to analyze file organization: {e}")
+            return "Unable to analyze file organization"
+    
+    def _get_expected_folder_for_extension(self, ext: str) -> str:
+        """Get the expected folder for a file extension."""
+        folder_mapping = {
+            '.pine': 'indicators',
+            '.py': 'python', 
+            '.js': 'javascript',
+            '.ts': 'javascript',
+            '.go': 'golang',
+            '.rs': 'rust',
+            '.html': 'web',
+            '.css': 'web',
+            '.java': 'java',
+            '.cpp': 'cpp',
+            '.c': 'cpp',
+            '.h': 'cpp'
+        }
+        return folder_mapping.get(ext, '')
     
     def _detect_target_technology(self) -> str:
         """Detect the target technology for the project from the goal."""
@@ -2054,6 +2159,10 @@ class AnalysisAgent(BaseAgent):
         # Get target technology for context
         target_technology = project_state.get('target_technology', 'unknown')
         
+        # Check for organization issues that should be addressed
+        organization_issues = project_state.get('organization_issues', '')
+        has_organization_issues = 'CRITICAL PROJECT ORGANIZATION ISSUES' in organization_issues
+        
         # Create creative expansion prompt that forces innovative thinking
         improvement_prompt = f"""
         CREATIVE {target_technology.upper()} PROJECT EXPANSION ANALYSIS (Iteration {iteration_count})
@@ -2065,6 +2174,9 @@ class AnalysisAgent(BaseAgent):
         - Files: {project_state.get('file_count', 0)} files, {project_state.get('total_lines', 0)} lines
         - Structure: {project_state.get('structure', 'unknown')}
         - Current Analysis: {project_state.get('analysis', 'No analysis available')}
+        
+        {'URGENT: PROJECT ORGANIZATION ISSUES DETECTED:' if has_organization_issues else ''}
+        {organization_issues if has_organization_issues else ''}
         
         ALREADY IMPLEMENTED FEATURES (DO NOT SUGGEST THESE AGAIN):
         {implemented_features}
@@ -2094,6 +2206,7 @@ class AnalysisAgent(BaseAgent):
         7. **{target_technology} Specific**: What advanced {target_technology} features could be implemented?
         
         CREATIVITY REQUIREMENTS:
+        {f'- FIRST PRIORITY: Address file organization issues detected above' if has_organization_issues else ''}
         - Suggest 5+ entirely NEW {target_technology} capabilities that don't exist yet
         - Each suggestion must add substantial user value and expand project scope
         - Focus on features that would differentiate this project from similar tools
