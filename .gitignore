@@ -3,4 +3,6 @@
 /__pycache__
 /scanner_test
 /swarmdev.log
-src/swarmdev.egg-info
+/src/swarmdev.egg-info
+/src/swarmdev/__pycache__
+/src/*/__pycache__
