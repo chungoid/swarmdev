@@ -18,7 +18,7 @@ class GoalStorage:
     project goals, including versioning and backup capabilities.
     """
     
-    def __init__(self, base_dir: str = "./goals"):
+    def __init__(self, base_dir: str = "./.swarmdev/goals"):
         """
         Initialize the goal storage system.
         

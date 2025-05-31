@@ -1,53 +1,32 @@
 {
+  "enabled": true,
   "mcpServers": {
     "sequentialthinking": {
       "command": "docker",
       "args": [
-        "run",
-        "--rm",
-        "-i",
-        "mcp/sequentialthinking"
+        "run", "--rm", "-i", "mcp/sequentialthinking"
       ],
-      "timeout": 30,
-      "autoApprove": [],
-      "disabled": false,
       "transportType": "stdio",
-      "capabilities": [
-        "reasoning",
-        "planning", 
-        "analysis",
-        "problem_solving"
-      ],
-      "description": "Sequential thinking MCP server for complex reasoning and planning tasks"
+      "timeout": 30,
+      "capabilities": ["reasoning", "sequential_thinking", "problem_solving"],
+      "autoApprove": []
     },
     "context7": {
-      "autoApprove": [],
-      "disabled": false,
-      "timeout": 60,
       "command": "docker",
       "args": [
-        "run", 
-        "-i", 
-        "--rm", 
-        "context7-mcp"
+        "run", "-i", "--rm", "context7-mcp"
       ],
       "transportType": "stdio",
-      "capabilities": [
-        "context_management",
-        "reasoning",
-        "documentation",
-        "library_lookup"
-      ],
-      "description": "Context7 MCP server for advanced context management and library documentation"
+      "timeout": 60,
+      "capabilities": ["documentation", "context_management", "library_lookup"],
+      "autoApprove": []
     }
   },
   "mcpSettings": {
     "globalTimeout": 120,
-    "retryAttempts": 3,
-    "dockerNetwork": "swarmdev",
-    "dockerMemoryLimit": "2g",
-    "dockerCpuLimit": 1,
-    "logLevel": "info",
-    "enableMetrics": true
+    "dockerNetwork": null,
+    "enableLogging": true,
+    "logLevel": "DEBUG",
+    "persistentConnections": true
   }
-} 
+}

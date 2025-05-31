@@ -910,8 +910,8 @@ class Orchestrator:
             # Also check for goal files on disk (check both goals directory and project root for backward compatibility)
             try:
                 import os
-                # First check goals directory (new location)
-                goals_dir_path = os.path.join("goals", f"goal_iteration_{iteration_count}.txt")
+                # First check .swarmdev/goals directory (new location)
+                goals_dir_path = os.path.join(".swarmdev", "goals", f"goal_iteration_{iteration_count}.txt")
                 if os.path.exists(goals_dir_path):
                     with open(goals_dir_path, 'r') as f:
                         evolved_goal = f.read().strip()

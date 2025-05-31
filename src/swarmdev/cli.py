@@ -39,12 +39,15 @@ from swarmdev.swarm_builder.workflows import list_available_workflows
 load_dotenv()
  
 # Configure logging
+# Create .swarmdev/logs directory if it doesn't exist
+os.makedirs('.swarmdev/logs', exist_ok=True)
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
         logging.StreamHandler(),
-        logging.FileHandler('swarmdev.log')
+        logging.FileHandler('.swarmdev/logs/swarmdev.log')
     ]
 )
  
@@ -107,7 +110,7 @@ def setup_parser():
     
     # Analyze logs command
     logs_parser = subparsers.add_parser('analyze-logs', help='Analyze agent logs and generate workflow report')
-    logs_parser.add_argument('--logs-dir', default='logs', help='Directory containing log files')
+    logs_parser.add_argument('--logs-dir', default='.swarmdev/logs', help='Directory containing log files')
     logs_parser.add_argument('--output', '-o', default='workflow_analysis.md', help='Output file for analysis report')
     logs_parser.add_argument('--workflow-id', help='Filter analysis by specific workflow ID')
     logs_parser.add_argument('--show-report', action='store_true', help='Display report summary in terminal')
@@ -378,7 +381,10 @@ def _find_project_directory(project_id: str) -> str:
     ]
     
     for path in possible_paths:
-        metadata_file = os.path.join(path, "project_metadata.json")
+        # Look in .swarmdev first, then fallback to legacy location
+        metadata_file = os.path.join(path, ".swarmdev", "project_metadata.json")
+        if not os.path.exists(metadata_file):
+            metadata_file = os.path.join(path, "project_metadata.json")
         if os.path.exists(metadata_file):
             try:
                 with open(metadata_file, 'r') as f:

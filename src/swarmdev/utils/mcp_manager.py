@@ -69,8 +69,8 @@ class MCPManager:
     
     def _setup_mcp_logging(self):
         """Set up dedicated MCP logging to mcp.log file."""
-        # Create logs directory if it doesn't exist
-        os.makedirs("logs", exist_ok=True)
+        # Create .swarmdev/logs directory if it doesn't exist
+        os.makedirs(".swarmdev/logs", exist_ok=True)
         
         # Create MCP-specific logger
         self.mcp_logger = logging.getLogger("swarmdev.mcp")
@@ -81,7 +81,7 @@ class MCPManager:
             self.mcp_logger.removeHandler(handler)
         
         # Create file handler for mcp.log
-        mcp_file_handler = logging.FileHandler("logs/mcp.log")
+        mcp_file_handler = logging.FileHandler(".swarmdev/logs/mcp.log")
         mcp_file_handler.setLevel(logging.DEBUG)
         
         # Create console handler for immediate feedback
@@ -107,7 +107,9 @@ class MCPManager:
     def _load_mcp_config(self):
         """Load MCP configuration from file."""
         try:
-            config_file = self.config.get("config_file", "./mcp_config.json")
+            # Default to .swarmdev/mcp_config.json, fallback to ./mcp_config.json for compatibility
+            default_config = "./.swarmdev/mcp_config.json" if os.path.exists("./.swarmdev/mcp_config.json") else "./mcp_config.json"
+            config_file = self.config.get("config_file", default_config)
             self.mcp_logger.debug(f"Loading MCP config from: {config_file}")
             
             if not Path(config_file).exists():

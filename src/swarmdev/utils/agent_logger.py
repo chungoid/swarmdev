@@ -18,7 +18,7 @@ class AgentLogger:
     """
     
     _loggers: Dict[str, logging.Logger] = {}
-    _log_dir = "logs"
+    _log_dir = ".swarmdev/logs"  # Use .swarmdev directory for internal logs
     
     @classmethod
     def get_logger(cls, agent_class: str, agent_id: str) -> logging.Logger:

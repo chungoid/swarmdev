@@ -171,10 +171,12 @@ class SwarmBuilder:
         try:
             from ..utils.mcp_manager import MCPManager
             
-            # Get MCP configuration from config
+            # Get MCP configuration from config  
+            # Default to .swarmdev location, fallback to root for compatibility
+            default_mcp_config = './.swarmdev/mcp_config.json' if os.path.exists('./.swarmdev/mcp_config.json') else './mcp_config.json'
             mcp_config = self.config.get('mcp', {
                 'enabled': True,
-                'config_file': './mcp_config.json',
+                'config_file': default_mcp_config,
                 'docker_enabled': True,
                 'docker_network': None  # Don't use a specific network by default
             })
@@ -240,7 +242,16 @@ class SwarmBuilder:
     
     def _update_project_status(self, status: str, execution_id: Optional[str] = None, error: Optional[str] = None):
         """Update the project status in metadata."""
-        metadata_file = os.path.join(self.project_dir, "project_metadata.json")
+        # Use .swarmdev directory for internal metadata, create if needed
+        swarmdev_dir = os.path.join(self.project_dir, ".swarmdev")
+        os.makedirs(swarmdev_dir, exist_ok=True)
+        metadata_file = os.path.join(swarmdev_dir, "project_metadata.json")
+        
+        # Check for legacy location and migrate if needed
+        legacy_metadata = os.path.join(self.project_dir, "project_metadata.json")
+        if os.path.exists(legacy_metadata) and not os.path.exists(metadata_file):
+            import shutil
+            shutil.move(legacy_metadata, metadata_file)
         
         try:
             with open(metadata_file, 'r') as f:
@@ -268,7 +279,10 @@ class SwarmBuilder:
     
     def _update_metadata(self, metadata: Dict):
         """Update the project metadata file."""
-        metadata_file = os.path.join(self.project_dir, "project_metadata.json")
+        # Use .swarmdev directory for internal metadata
+        swarmdev_dir = os.path.join(self.project_dir, ".swarmdev")
+        os.makedirs(swarmdev_dir, exist_ok=True)
+        metadata_file = os.path.join(swarmdev_dir, "project_metadata.json")
         with open(metadata_file, 'w') as f:
             json.dump(metadata, f, indent=2)
     
@@ -310,7 +324,10 @@ class SwarmBuilder:
         Returns:
             Dict: Status information including orchestrator execution status
         """
-        metadata_file = os.path.join(self.project_dir, "project_metadata.json")
+        # Look in .swarmdev first, then fallback to legacy location
+        metadata_file = os.path.join(self.project_dir, ".swarmdev", "project_metadata.json")
+        if not os.path.exists(metadata_file):
+            metadata_file = os.path.join(self.project_dir, "project_metadata.json")
         
         if not os.path.exists(metadata_file):
             return {"status": "not_found"}
@@ -352,7 +369,10 @@ class SwarmBuilder:
             bool: True if successful, False otherwise
         """
         try:
-            metadata_file = os.path.join(self.project_dir, "project_metadata.json")
+            # Look in .swarmdev first, then fallback to legacy location
+            metadata_file = os.path.join(self.project_dir, ".swarmdev", "project_metadata.json")
+            if not os.path.exists(metadata_file):
+                metadata_file = os.path.join(self.project_dir, "project_metadata.json")
             
             if not os.path.exists(metadata_file):
                 return False

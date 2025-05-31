@@ -679,7 +679,7 @@ class DevelopmentAgent(BaseAgent):
         
         # 3. Check if improvements are stored in a shared location
         try:
-            agent_work_dir = os.path.join(".", "agent_work")
+            agent_work_dir = os.path.join(".", ".swarmdev", "agent_work")
             self.logger.debug(f"Checking for improvements in: {agent_work_dir}")
             if os.path.exists(agent_work_dir):
                 improvements_from_files = self._load_improvements_from_artifacts(agent_work_dir)
@@ -961,9 +961,9 @@ class DevelopmentAgent(BaseAgent):
         existing_files = {}
         
         for root, dirs, files in os.walk(project_dir):
-            # Skip hidden and cache directories, agent work, and goals
+            # Skip hidden and cache directories and .swarmdev (which contains agent_work, goals, logs, config)
             dirs[:] = [d for d in dirs if not d.startswith('.') and d not in 
-                      ['__pycache__', 'node_modules', 'target', 'build', 'dist', 'agent_work', 'goals']]
+                      ['__pycache__', 'node_modules', 'target', 'build', 'dist']]
             
             for file in files:
                 if file.startswith('.') or file.endswith(('.pyc', '.log')):
@@ -1619,8 +1619,8 @@ class DevelopmentAgent(BaseAgent):
     def _save_development_artifact(self, content: str, artifact_type: str):
         """Save development work artifacts for visibility."""
         try:
-            # Create agent work directory
-            agent_work_dir = os.path.join(".", "agent_work")
+            # Create agent work directory in .swarmdev
+            agent_work_dir = os.path.join(".", ".swarmdev", "agent_work")
             os.makedirs(agent_work_dir, exist_ok=True)
             
             # Save artifact with timestamp
@@ -1638,7 +1638,7 @@ class DevelopmentAgent(BaseAgent):
     def _save_iteration_progress(self, iteration_count: int, files_created: List[str], files_modified: List[str], improvements_implemented: List[Dict]):
         """Save iteration progress to prevent losing track of what's been built."""
         try:
-            agent_work_dir = os.path.join(".", "agent_work")
+            agent_work_dir = os.path.join(".", ".swarmdev", "agent_work")
             os.makedirs(agent_work_dir, exist_ok=True)
             
             progress_file = os.path.join(agent_work_dir, "iteration_progress.json")
@@ -1683,7 +1683,7 @@ class DevelopmentAgent(BaseAgent):
     def _get_previous_iteration_progress(self) -> Dict:
         """Get previous iteration progress to understand what's been built."""
         try:
-            progress_file = os.path.join(".", "agent_work", "iteration_progress.json")
+            progress_file = os.path.join(".", ".swarmdev", "agent_work", "iteration_progress.json")
             if os.path.exists(progress_file):
                 with open(progress_file, 'r') as f:
                     return json.loads(f.read())
@@ -2134,9 +2134,9 @@ class AnalysisAgent(BaseAgent):
             
             # Read all files in the project directory
             for root, dirs, files in os.walk(project_dir):
-                # Skip hidden directories, build/cache directories, and agent work directories
+                # Skip hidden directories, build/cache directories, and .swarmdev (which contains internal state)
                 dirs[:] = [d for d in dirs if not d.startswith('.') and d not in 
-                          ['__pycache__', 'node_modules', 'target', 'build', 'dist', 'agent_work', 'goals']]
+                          ['__pycache__', 'node_modules', 'target', 'build', 'dist']]
                 
                 for file in files:
                     if file.startswith('.') or file.endswith(('.pyc', '.log')):
@@ -2537,8 +2537,8 @@ class AnalysisAgent(BaseAgent):
         try:
             import os
             
-            # Create agent work directory
-            agent_work_dir = os.path.join(".", "agent_work")
+            # Create agent work directory in .swarmdev
+            agent_work_dir = os.path.join(".", ".swarmdev", "agent_work")
             os.makedirs(agent_work_dir, exist_ok=True)
             
             # Save detailed analysis
@@ -2802,8 +2802,8 @@ class AnalysisAgent(BaseAgent):
         try:
             import os
             
-            # Save as agent artifact
-            agent_work_dir = os.path.join(".", "agent_work")
+            # Save as agent artifact in .swarmdev
+            agent_work_dir = os.path.join(".", ".swarmdev", "agent_work")
             os.makedirs(agent_work_dir, exist_ok=True)
             
             artifact_file = os.path.join(agent_work_dir, f"evolved_goal_iteration_{iteration_number}.md")
@@ -2814,8 +2814,8 @@ class AnalysisAgent(BaseAgent):
                 f.write("## Evolved Goal Text\n\n")
                 f.write(evolved_goal)
             
-            # Also save as a goal file that can be used by other agents (in goals directory for cleaner organization)
-            goals_dir = "goals"
+            # Also save as a goal file that can be used by other agents (in .swarmdev/goals directory)
+            goals_dir = ".swarmdev/goals"
             os.makedirs(goals_dir, exist_ok=True)
             goal_file = os.path.join(goals_dir, f"goal_iteration_{iteration_number}.txt")
             with open(goal_file, 'w') as f:
