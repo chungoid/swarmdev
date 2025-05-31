@@ -2033,3 +2033,463 @@ class AnalysisAgent(BaseAgent):
         except Exception as e:
             self.logger.error(f"Failed to detect target technology: {e}")
             return "python"
+    
+    def _analyze_improvements(self, goal: str, project_state: Dict, iteration_count: int) -> Dict:
+        """
+        Analyze potential improvements for the project.
+        
+        Args:
+            goal: Original project goal
+            project_state: Current project state analysis
+            iteration_count: Current iteration number
+            
+        Returns:
+            Dict: Improvement analysis and suggestions
+        """
+        self.logger.info(f"Starting deep improvement analysis for iteration {iteration_count}")
+        
+        # Extract what's already been implemented to avoid repetitive suggestions
+        implemented_features = self._extract_implemented_features(project_state)
+        
+        # Get target technology for context
+        target_technology = project_state.get('target_technology', 'unknown')
+        
+        # Create creative expansion prompt that forces innovative thinking
+        improvement_prompt = f"""
+        CREATIVE {target_technology.upper()} PROJECT EXPANSION ANALYSIS (Iteration {iteration_count})
+        
+        TARGET TECHNOLOGY: {target_technology}
+        ORIGINAL GOAL: {goal}
+        
+        CURRENT PROJECT STATE:
+        - Files: {project_state.get('file_count', 0)} files, {project_state.get('total_lines', 0)} lines
+        - Structure: {project_state.get('structure', 'unknown')}
+        - Current Analysis: {project_state.get('analysis', 'No analysis available')}
+        
+        ALREADY IMPLEMENTED FEATURES (DO NOT SUGGEST THESE AGAIN):
+        {implemented_features}
+        
+        Your role is to identify opportunities for CREATIVE EXPANSION of this {target_technology} project with substantial new capabilities.
+        
+        CRITICAL: DO NOT suggest features that are already implemented (listed above).
+        
+        FORBIDDEN SUGGESTIONS (NEVER suggest these repetitive improvements):
+        - Error handling improvements
+        - Documentation enhancements  
+        - Logging improvements
+        - Code refactoring
+        - Performance optimizations
+        - Testing improvements
+        - Security enhancements
+        - Configuration management
+        - Code organization
+        
+        REQUIRED CREATIVE EXPANSION APPROACH FOR {target_technology.upper()}:
+        1. **Understand the Domain**: What problem space does this {target_technology} project operate in?
+        2. **Identify User Needs**: What do users in this domain typically struggle with?
+        3. **Think Adjacent**: What related problems could this project solve?
+        4. **Expand Scope**: What entirely NEW {target_technology} capabilities would be transformative?
+        5. **Consider Workflows**: What new user workflows are missing?
+        6. **Integration Opportunities**: What external systems or data sources could be leveraged?
+        7. **{target_technology} Specific**: What advanced {target_technology} features could be implemented?
+        
+        CREATIVITY REQUIREMENTS:
+        - Suggest 5+ entirely NEW {target_technology} capabilities that don't exist yet
+        - Each suggestion must add substantial user value and expand project scope
+        - Focus on features that would differentiate this project from similar tools
+        - Think about what would make users say "I can't live without this feature"
+        - Propose capabilities that would make this project a "must-have" tool
+        
+        PROVIDE SPECIFIC, CREATIVE {target_technology.upper()} EXPANSIONS:
+        For each expansion, specify:
+        - WHAT new {target_technology} capability to build (be very specific)
+        - WHY users would find this transformative (real user value)
+        - HOW to implement it (new {target_technology} modules, functions, features needed)
+        - PRIORITY (critical/high/medium/low)
+        - EFFORT level (small/medium/large)
+        - IMPACT level (low/medium/high/transformative)
+        - USER_BENEFIT (how this changes users' workflows)
+        
+        Focus on INNOVATIVE {target_technology} expansions that would make this project significantly more valuable!
+        """
+        
+        self.logger.info("Sending analysis prompt to LLM...")
+        analysis_text = self.llm_provider.generate_text(improvement_prompt, temperature=0.4)
+        self.logger.info(f"Received analysis response: {len(analysis_text)} characters")
+        
+        # Save the full analysis as an artifact for visibility
+        self._save_analysis_artifact(analysis_text, iteration_count)
+        
+        # Parse specific improvements from the analysis
+        improvements = self._parse_specific_improvements(analysis_text)
+        
+        # Filter out any suggestions that match already implemented features
+        filtered_improvements = self._filter_duplicate_improvements(improvements, implemented_features)
+        
+        self.logger.info(f"Parsed {len(improvements)} improvements, filtered to {len(filtered_improvements)} unique ones")
+        for i, improvement in enumerate(filtered_improvements):
+            self.logger.info(f"Improvement {i+1}: {improvement.get('what', 'Unknown')[:100]}...")
+        
+        return {
+            "full_analysis": analysis_text,
+            "improvements": filtered_improvements,
+            "improvement_count": len(filtered_improvements),
+            "has_significant_improvements": len(filtered_improvements) > 0,
+            "analysis_depth": "comprehensive",
+            "iteration": iteration_count,
+            "implemented_features": implemented_features
+        }
+    
+    def _extract_implemented_features(self, project_state: Dict) -> str:
+        """Extract already implemented features from the project state."""
+        try:
+            files = project_state.get('files', [])
+            analysis = project_state.get('analysis', '')
+            target_tech = project_state.get('target_technology', 'unknown')
+            
+            # Use LLM to analyze what's been implemented
+            extraction_prompt = f"""
+            Based on this {target_tech} project analysis and file list, what features have been implemented?
+            
+            Files: {files}
+            Analysis: {analysis}
+            
+            List the specific features/capabilities that are already working in this {target_tech} project.
+            Focus on functional features, not just file existence.
+            Format as a bulleted list.
+            """
+            
+            implemented_features = self.llm_provider.generate_text(extraction_prompt, temperature=0.2)
+            
+            if not implemented_features.strip():
+                return f"No major {target_tech} features implemented yet - this is a new project."
+            
+            return implemented_features
+            
+        except Exception as e:
+            self.logger.error(f"Failed to extract implemented features: {e}")
+            return "Unable to determine implemented features"
+    
+    def _filter_duplicate_improvements(self, improvements: List[Dict], implemented_features: str) -> List[Dict]:
+        """Filter out improvements that match already implemented features."""
+        filtered = []
+        implemented_lower = implemented_features.lower()
+        
+        for improvement in improvements:
+            what = improvement.get('what', '').lower()
+            
+            # Use LLM to check if this improvement is already implemented
+            duplication_check = f"""
+            Is this improvement already implemented based on the existing features?
+            
+            Proposed Improvement: {what}
+            Existing Features: {implemented_features}
+            
+            Return only "YES" if already implemented, "NO" if it's a new feature.
+            """
+            
+            try:
+                result = self.llm_provider.generate_text(duplication_check, temperature=0.1).strip().upper()
+                if result == "NO":
+                    filtered.append(improvement)
+                else:
+                    self.logger.info(f"Filtered duplicate suggestion: {improvement.get('what', 'Unknown')[:50]}...")
+            except:
+                # If LLM call fails, include the improvement to be safe
+                filtered.append(improvement)
+        
+        return filtered
+    
+    def _save_analysis_artifact(self, analysis_text: str, iteration_count: int):
+        """Save analysis as an artifact for visibility into agent thinking."""
+        try:
+            import os
+            
+            # Create agent work directory
+            agent_work_dir = os.path.join(".", "agent_work")
+            os.makedirs(agent_work_dir, exist_ok=True)
+            
+            # Save detailed analysis
+            analysis_file = os.path.join(agent_work_dir, f"analysis_iteration_{iteration_count}.md")
+            with open(analysis_file, 'w') as f:
+                f.write(f"# Analysis Agent Work - Iteration {iteration_count}\n\n")
+                f.write(f"**Timestamp:** {datetime.now().isoformat()}\n\n")
+                f.write(f"**Agent:** {self.agent_id}\n\n")
+                f.write("## Detailed Analysis\n\n")
+                f.write(analysis_text)
+            
+            self.logger.info(f"Saved analysis artifact to: {analysis_file}")
+            
+        except Exception as e:
+            self.logger.error(f"Failed to save analysis artifact: {e}")
+    
+    def _parse_specific_improvements(self, analysis_text: str) -> List[Dict]:
+        """Parse specific, actionable improvements from analysis text."""
+        improvements = []
+        
+        # Use LLM to extract structured improvements
+        extraction_prompt = f"""
+        From this analysis, extract SPECIFIC, ACTIONABLE improvements:
+        
+        {analysis_text}
+        
+        Return a JSON array of improvements, each with:
+        {{
+            "what": "Specific description of what to improve",
+            "why": "Why this improvement is important",
+            "how": "Concrete implementation steps",
+            "priority": "critical|high|medium|low",
+            "effort": "small|medium|large", 
+            "impact": "low|medium|high|transformative",
+            "files_affected": ["list", "of", "files"],
+            "implementation_notes": "Specific technical details"
+        }}
+        
+        Focus on the most impactful improvements. Return valid JSON only.
+        """
+        
+        try:
+            improvements_json = self.llm_provider.generate_text(extraction_prompt, temperature=0.2)
+            
+            # Clean up the JSON response
+            import json
+            import re
+            
+            # Extract JSON from response
+            json_match = re.search(r'\[.*\]', improvements_json, re.DOTALL)
+            if json_match:
+                improvements_data = json.loads(json_match.group())
+                
+                for imp in improvements_data:
+                    if isinstance(imp, dict) and "what" in imp:
+                        improvements.append(imp)
+                        
+        except Exception as e:
+            self.logger.error(f"Failed to parse structured improvements: {e}")
+            
+            # Fallback: parse simple improvements from text
+            lines = analysis_text.split('\n')
+            current_improvement = {}
+            
+            for line in lines:
+                line = line.strip()
+                if line.startswith(('*', '-', '1.', '2.', '3.', '4.', '5.', '6.', '7.', '8.', '9.')):
+                    if current_improvement and "what" in current_improvement:
+                        improvements.append(current_improvement)
+                    
+                    current_improvement = {
+                        "what": re.sub(r'^[1-9*-]\.\s*', '', line),
+                        "priority": "medium",
+                        "effort": "medium",
+                        "impact": "medium"
+                    }
+                elif "priority" in line.lower() and current_improvement:
+                    if "critical" in line.lower():
+                        current_improvement["priority"] = "critical"
+                    elif "high" in line.lower():
+                        current_improvement["priority"] = "high"
+                    elif "low" in line.lower():
+                        current_improvement["priority"] = "low"
+            
+            if current_improvement and "what" in current_improvement:
+                improvements.append(current_improvement)
+        
+        # Ensure we have at least some improvements
+        if not improvements:
+            improvements = [{
+                "what": "Enhance project based on comprehensive analysis",
+                "why": "Project needs meaningful improvements to better fulfill its goals",
+                "how": "Implement improvements based on detailed analysis findings",
+                "priority": "high",
+                "effort": "medium",
+                "impact": "high",
+                "files_affected": ["multiple"],
+                "implementation_notes": "See full analysis for details"
+            }]
+        
+        return improvements[:8]  # Limit to top 8 improvements
+    
+    def _should_continue_iteration(self, improvement_analysis: Dict, iteration_count: int, 
+                                 max_iterations: Optional[int], workflow_type: str) -> bool:
+        """
+        Determine if another iteration should be run based on iteration limits.
+        
+        Args:
+            improvement_analysis: Analysis of potential improvements
+            iteration_count: Current iteration count
+            max_iterations: Maximum iterations allowed (None for indefinite)
+            workflow_type: Type of workflow (indefinite or iteration)
+            
+        Returns:
+            bool: True if another iteration should be run
+        """
+        # Simple logic - continue if we haven't hit the max iterations limit
+        if workflow_type == "iteration" and max_iterations is not None:
+            return iteration_count < max_iterations
+        
+        # For indefinite workflows, always continue (user will stop manually)
+        if workflow_type == "indefinite":
+            return True
+            
+        # Default to continuing for reasonable number of iterations
+        return iteration_count < 10
+    
+    def _create_evolved_goal(self, original_goal: str, project_state: Dict, improvement_analysis: Dict, iteration_count: int) -> str:
+        """
+        Create an evolved, more comprehensive goal for the next iteration.
+        
+        Args:
+            original_goal: The original goal text
+            project_state: Current project state analysis
+            improvement_analysis: Analysis of potential improvements
+            iteration_count: Current iteration number
+            
+        Returns:
+            str: Evolved goal text for next iteration
+        """
+        self.logger.info(f"Creating evolved goal for iteration {iteration_count + 1}")
+        
+        target_technology = project_state.get('target_technology', 'unknown')
+        
+        # Gather context about what's been built
+        current_features = self._analyze_implemented_features(project_state)
+        missing_features = improvement_analysis.get("improvements", [])
+        
+        evolution_prompt = f"""
+        COMPREHENSIVE {target_technology.upper()} TECHNICAL SPECIFICATION FOR ITERATION {iteration_count + 1}
+        
+        TARGET TECHNOLOGY: {target_technology}
+        ORIGINAL PROJECT GOAL: {original_goal}
+        
+        CURRENT PROJECT STATE (Iteration {iteration_count}):
+        - Files: {project_state.get('file_count', 0)} files
+        - Structure: {project_state.get('structure', 'unknown')}
+        - Implementation Status: {project_state.get('analysis', 'No analysis')}
+        
+        FEATURES SUCCESSFULLY IMPLEMENTED:
+        {current_features}
+        
+        CREATIVE EXPANSION OPPORTUNITIES:
+        {self._format_improvements_for_goal(missing_features)}
+        
+        Create a COMPREHENSIVE {target_technology.upper()} TECHNICAL SPECIFICATION for iteration {iteration_count + 1} structured as follows:
+        
+        **ITERATION {iteration_count + 1} {target_technology.upper()} TECHNICAL SPECIFICATIONS:**
+        
+        **PROJECT VISION:**
+        [Brief description of what this {target_technology} project should become]
+        
+        **EXISTING {target_technology.upper()} CAPABILITIES (maintain and build upon):**
+        - [Complete inventory of all current {target_technology} features and modules]
+        - [List all working {target_technology} functionality from previous iterations]
+        
+        **NEW {target_technology.upper()} CAPABILITIES TO BUILD THIS ITERATION:**
+        
+        **Major {target_technology} Feature 1: [Feature Name]**
+        - Purpose: [What user need does this address in {target_technology}]
+        - Implementation: [Specific {target_technology} modules/files to create - be very detailed]
+        - Acceptance Criteria: [How to know it's complete and working]
+        - User Benefit: [Why users will find this transformative]
+        - Technical Requirements: [{target_technology} APIs, libraries, functions needed]
+        
+        **Major {target_technology} Feature 2: [Feature Name]**
+        - Purpose: [What problem does this solve in {target_technology}]
+        - Implementation: [Technical specifications - {target_technology} modules, functions]
+        - Integration: [How it connects to existing {target_technology} features]
+        - Success Metrics: [Measurable outcomes]
+        - Technical Requirements: [Specific {target_technology} implementation details]
+        
+        **TECHNICAL REQUIREMENTS FOR {target_technology.upper()}:**
+        - Minimum 300+ lines of new functional {target_technology} code
+        - 3-5 new {target_technology} modules or major components
+        - Complete user workflows implemented in {target_technology}
+        - Supporting {target_technology} utilities and configurations
+        - Integration with existing {target_technology} architecture
+        
+        **{target_technology.upper()} QUALITY STANDARDS:**
+        - [{target_technology} specific performance targets]
+        - [{target_technology} user experience requirements]
+        - [{target_technology} reliability and robustness standards]
+        
+        **EXPANSION PHILOSOPHY:**
+        This iteration should make the {target_technology} project significantly more capable and valuable to users while maintaining all existing functionality and adding substantial new value.
+        
+        EVOLVED {target_technology.upper()} TECHNICAL SPECIFICATION FOR ITERATION {iteration_count + 1}:
+        """
+        
+        try:
+            evolved_goal_text = self.llm_provider.generate_text(evolution_prompt, temperature=0.3)
+            
+            # Save the evolved goal as an artifact and file
+            self._save_evolved_goal(evolved_goal_text, iteration_count + 1)
+            
+            return evolved_goal_text
+            
+        except Exception as e:
+            self.logger.error(f"Failed to create evolved goal: {e}")
+            return original_goal  # Fallback to original goal
+    
+    def _analyze_implemented_features(self, project_state: Dict) -> str:
+        """Analyze what features have been successfully implemented."""
+        try:
+            target_tech = project_state.get('target_technology', 'unknown')
+            
+            # Use LLM to analyze what's been implemented
+            analysis_prompt = f"""
+            Based on this {target_tech} project analysis, summarize what features have been successfully implemented:
+            
+            {project_state.get('analysis', 'No detailed analysis available')}
+            
+            Files: {project_state.get('files', [])}
+            
+            Provide a concise summary of working {target_tech} features and capabilities.
+            """
+            
+            implemented_features = self.llm_provider.generate_text(analysis_prompt, temperature=0.2)
+            return implemented_features
+            
+        except Exception as e:
+            self.logger.error(f"Failed to analyze implemented features: {e}")
+            return "Feature analysis unavailable"
+    
+    def _format_improvements_for_goal(self, improvements: List[Dict]) -> str:
+        """Format improvement suggestions for inclusion in evolved goal."""
+        if not improvements:
+            return "No specific improvements identified"
+        
+        formatted = "Key opportunities for expansion:\n"
+        for i, imp in enumerate(improvements[:8], 1):  # Limit to top 8
+            what = imp.get("what", "Unknown improvement")
+            why = imp.get("why", "No reason specified")
+            formatted += f"{i}. {what} - {why}\n"
+        
+        return formatted
+    
+    def _save_evolved_goal(self, evolved_goal: str, iteration_number: int):
+        """Save the evolved goal as both an artifact and a goal file."""
+        try:
+            import os
+            
+            # Save as agent artifact
+            agent_work_dir = os.path.join(".", "agent_work")
+            os.makedirs(agent_work_dir, exist_ok=True)
+            
+            artifact_file = os.path.join(agent_work_dir, f"evolved_goal_iteration_{iteration_number}.md")
+            with open(artifact_file, 'w') as f:
+                f.write(f"# Evolved Goal - Iteration {iteration_number}\n\n")
+                f.write(f"**Created:** {datetime.now().isoformat()}\n\n")
+                f.write(f"**Agent:** {self.agent_id}\n\n")
+                f.write("## Evolved Goal Text\n\n")
+                f.write(evolved_goal)
+            
+            # Also save as a goal file that can be used by other agents (in goals directory for cleaner organization)
+            goals_dir = "goals"
+            os.makedirs(goals_dir, exist_ok=True)
+            goal_file = os.path.join(goals_dir, f"goal_iteration_{iteration_number}.txt")
+            with open(goal_file, 'w') as f:
+                f.write(evolved_goal)
+            
+            self.logger.info(f"Saved evolved goal to: {artifact_file} and {goal_file}")
+            
+        except Exception as e:
+            self.logger.error(f"Failed to save evolved goal: {e}")
