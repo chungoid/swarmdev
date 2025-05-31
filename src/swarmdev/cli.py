@@ -105,6 +105,13 @@ def setup_parser():
     workflows_parser = subparsers.add_parser('workflows', help='List available workflows')
     workflows_parser.add_argument('--verbose', action='store_true', help='Show detailed workflow descriptions')
     
+    # Analyze logs command
+    logs_parser = subparsers.add_parser('analyze-logs', help='Analyze agent logs and generate workflow report')
+    logs_parser.add_argument('--logs-dir', default='logs', help='Directory containing log files')
+    logs_parser.add_argument('--output', '-o', default='workflow_analysis.md', help='Output file for analysis report')
+    logs_parser.add_argument('--workflow-id', help='Filter analysis by specific workflow ID')
+    logs_parser.add_argument('--show-report', action='store_true', help='Display report summary in terminal')
+    
     return parser
  
  
@@ -568,6 +575,92 @@ def cmd_workflows(args):
 
 
 # Helper function to get all available status commands
+def cmd_analyze_logs(args):
+    """Analyze agent logs and generate workflow performance report."""
+    try:
+        from swarmdev.utils.log_analyzer import LogAnalyzer
+        
+        print(f"Analyzing logs from: {args.logs_dir}")
+        
+        # Create analyzer
+        analyzer = LogAnalyzer(args.logs_dir)
+        
+        if not analyzer.log_files:
+            print(f"No log files found in {args.logs_dir}")
+            print("Make sure you have run some workflows to generate logs.")
+            return
+        
+        print(f"Found {len(analyzer.log_files)} log files:")
+        for agent_type, log_file in analyzer.log_files.items():
+            print(f"  - {agent_type}: {log_file}")
+        
+        # Generate analysis
+        print("\nAnalyzing workflow execution...")
+        analysis = analyzer.analyze_workflow_execution(args.workflow_id)
+        
+        # Generate report
+        print(f"Generating report to: {args.output}")
+        report = analyzer.generate_workflow_report(args.output)
+        
+        print(f"\n✓ Analysis complete! Report saved to: {args.output}")
+        
+        # Show summary if requested
+        if args.show_report:
+            print("\n" + "="*60)
+            print("WORKFLOW ANALYSIS SUMMARY")
+            print("="*60)
+            
+            # Show key metrics
+            summary = analysis.get('workflow_summary', {})
+            metrics = analysis.get('performance_metrics', {})
+            
+            print(f"\nEXECUTION SUMMARY")
+            print(f"  Duration: {summary.get('total_duration', 0):.1f} seconds")
+            print(f"  Tasks: {summary.get('total_tasks', 0)}")
+            print(f"  Success Rate: {summary.get('success_rate', 0)*100:.1f}%")
+            print(f"  Files Created: {summary.get('total_files_created', 0)}")
+            print(f"  Files Modified: {summary.get('total_files_modified', 0)}")
+            
+            print(f"\nPERFORMANCE METRICS")
+            print(f"  Avg Task Duration: {metrics.get('avg_task_duration', 0):.1f}s")
+            print(f"  Total LLM Calls: {metrics.get('total_llm_calls', 0)}")
+            print(f"  Productivity Score: {metrics.get('productivity_score', 0):.2f}")
+            print(f"  Error Rate: {metrics.get('error_rate', 0)*100:.1f}%")
+            
+            # Show agent breakdown
+            print(f"\nAGENT PERFORMANCE")
+            for agent_type, agent_metrics in analysis.get('agent_executions', {}).items():
+                print(f"  {agent_type.title()}Agent:")
+                print(f"    Tasks: {agent_metrics['total_tasks']} ({agent_metrics['completed_tasks']} completed)")
+                print(f"    Files: {agent_metrics['files_created']} created, {agent_metrics['files_modified']} modified")
+                print(f"    Avg Duration: {agent_metrics['avg_duration']:.1f}s")
+            
+            # Show insights
+            insights = analysis.get('insights', [])
+            if insights:
+                print(f"\nINSIGHTS")
+                for insight in insights:
+                    print(f"  - {insight}")
+            
+            # Show recommendations  
+            recommendations = analysis.get('recommendations', [])
+            if recommendations:
+                print(f"\nRECOMMENDATIONS")
+                for rec in recommendations:
+                    print(f"  - {rec}")
+            
+            print(f"\nFull report available in: {args.output}")
+        
+    except ImportError as e:
+        logger.error(f"Failed to import log analyzer: {e}")
+        print("Make sure the swarmdev package is properly installed.")
+        sys.exit(1)
+    except Exception as e:
+        logger.error(f"Error analyzing logs: {e}")
+        print(f"Failed to analyze logs: {e}")
+        sys.exit(1)
+
+
 def show_status_help():
     """Show available status commands and examples."""
     print("""
@@ -628,6 +721,8 @@ def main():
         cmd_status(args)
     elif args.command == "workflows":
         cmd_workflows(args)
+    elif args.command == "analyze-logs":
+        cmd_analyze_logs(args)
     else:
         print(f"Unknown command: {args.command}")
         parser.print_help()

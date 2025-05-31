@@ -5,6 +5,9 @@
 /src/swarmdev.egg-info
 /goals
 /goals/*
+/logs
+/agent_work
+
 # Python cache directories at any level
 __pycache__/
 *.py[cod]

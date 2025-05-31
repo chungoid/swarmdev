@@ -9,8 +9,10 @@ from typing import Dict, List, Optional, Any
 from datetime import datetime
 import logging
 import json
+import time
 
 from swarmdev.utils.llm_provider import LLMProviderInterface
+from swarmdev.utils.agent_logger import AgentLogger
 from .base_agent import BaseAgent
 
 
@@ -462,8 +464,10 @@ class DevelopmentAgent(BaseAgent):
         super().__init__(agent_id, "development", config)
         self.llm_provider = llm_provider
         
-        # Initialize logger
-        self.logger = logging.getLogger(f"swarmdev.agents.{agent_id}")
+        # Initialize comprehensive logger
+        self.logger = AgentLogger.get_logger("DevelopmentAgent", agent_id)
+        self.logger.info(f"DevelopmentAgent initialized with ID: {agent_id}")
+        self.logger.debug(f"Configuration: {json.dumps(config or {}, indent=2)}")
     
     def process_task(self, task: Dict) -> Dict:
         """
@@ -475,18 +479,20 @@ class DevelopmentAgent(BaseAgent):
         Returns:
             Dict: Development results including code and tests
         """
+        start_time = time.time()
         self.status = "processing"
         
-        # DEBUG: Add basic logging to track execution
-        print(f"[DEBUG] DevelopmentAgent.process_task called with task: {task.get('task_id', 'unknown')}")
-        self.logger.info(f"DevelopmentAgent processing task: {task.get('task_id', 'unknown')}")
+        # Log task start with comprehensive details
+        AgentLogger.log_task_start(self.logger, task)
         
         try:
             # Extract task details and goal
             goal = task.get("goal", "")
             project_dir = task.get("project_dir", ".")
             
-            print(f"[DEBUG] Development task details: goal='{goal[:50]}...', project_dir='{project_dir}'")
+            self.logger.info(f"Processing development task")
+            self.logger.info(f"Goal (first 200 chars): {goal[:200]}...")
+            self.logger.info(f"Project directory: {project_dir}")
             
             # Check if this is an incremental improvement task
             implementation_style = task.get("implementation_style", "")
@@ -495,19 +501,32 @@ class DevelopmentAgent(BaseAgent):
             # Set incremental task flag if needed
             self._is_incremental_task = (implementation_style == "incremental" or focus_on_improvements)
             
-            print(f"[DEBUG] Incremental task: {self._is_incremental_task}")
+            AgentLogger.log_decision(
+                self.logger,
+                f"Task type determined: {'Incremental' if self._is_incremental_task else 'New Project'}",
+                f"Based on implementation_style='{implementation_style}' and focus_on_improvements={focus_on_improvements}",
+                {"implementation_style": implementation_style, "focus_on_improvements": focus_on_improvements}
+            )
             
             # Get improvement suggestions from various sources
+            self.logger.info("Gathering improvement suggestions from multiple sources...")
             self._improvement_suggestions = self._get_improvement_suggestions(task)
             
-            print(f"[DEBUG] Found {len(self._improvement_suggestions)} improvement suggestions")
-            self.logger.info(f"Development task: incremental={self._is_incremental_task}, "
-                           f"improvements={len(self._improvement_suggestions)}")
+            self.logger.info(f"Found {len(self._improvement_suggestions)} improvement suggestions")
+            for i, suggestion in enumerate(self._improvement_suggestions):
+                self.logger.debug(f"Suggestion {i+1}: {suggestion.get('what', 'Unknown')[:100]}...")
             
             # Create implementation directly using MCP tools
+            self.logger.info("Starting implementation creation...")
             implementation = self._create_implementation_with_tools(goal, project_dir)
             
-            print(f"[DEBUG] Implementation completed")
+            self.logger.info("Implementation completed successfully")
+            AgentLogger.log_analysis_metrics(self.logger, {
+                "files_created": len(implementation.get("files_created", [])),
+                "files_modified": len(implementation.get("files_modified", [])),
+                "total_lines_created": implementation.get("total_lines_created", 0),
+                "improvement_suggestions_used": len(self._improvement_suggestions)
+            })
             
             # Prepare result
             result = {
@@ -523,6 +542,7 @@ class DevelopmentAgent(BaseAgent):
             # Save iteration progress for future reference
             iteration_count = task.get("iteration_count", 0)
             if hasattr(self, '_improvement_suggestions'):
+                self.logger.info(f"Saving iteration progress for iteration {iteration_count}")
                 self._save_iteration_progress(
                     iteration_count,
                     implementation.get("files_created", []),
@@ -530,12 +550,21 @@ class DevelopmentAgent(BaseAgent):
                     self._improvement_suggestions
                 )
             
-            print(f"[DEBUG] DevelopmentAgent task completed successfully")
             self.status = "ready"
+            duration = time.time() - start_time
+            AgentLogger.log_task_complete(self.logger, task, result, duration)
+            
             return result
             
         except Exception as e:
-            print(f"[DEBUG] DevelopmentAgent error: {e}")
+            duration = time.time() - start_time
+            self.logger.error(f"Task failed after {duration:.2f} seconds")
+            AgentLogger.log_error_with_context(self.logger, e, {
+                "task_id": task.get("task_id"),
+                "goal": goal[:100] if 'goal' in locals() else "unknown",
+                "project_dir": project_dir if 'project_dir' in locals() else "unknown",
+                "duration": duration
+            })
             return self.handle_error(e, task)
     
     def _get_improvement_suggestions(self, task: Dict) -> List[Dict]:
@@ -548,43 +577,64 @@ class DevelopmentAgent(BaseAgent):
         Returns:
             List[Dict]: List of improvement suggestions
         """
+        self.logger.info("Starting improvement suggestion gathering process")
         improvements = []
         
         # 1. Direct improvement suggestions in task context
         context = task.get("context", {})
         if "improvement_suggestions" in context:
-            improvements.extend(context["improvement_suggestions"])
-            self.logger.info(f"Found {len(context['improvement_suggestions'])} improvements in task context")
+            context_improvements = context["improvement_suggestions"]
+            improvements.extend(context_improvements)
+            self.logger.info(f"Found {len(context_improvements)} improvements in task context")
+            for i, imp in enumerate(context_improvements[:3]):  # Log first 3
+                self.logger.debug(f"Context improvement {i+1}: {imp.get('what', 'Unknown')[:80]}...")
+        else:
+            self.logger.info("No improvement suggestions found in task context")
         
         # 2. Look for recent analysis results in the same execution
         execution_id = task.get("execution_id", "")
         if execution_id and hasattr(self, 'orchestrator'):
+            self.logger.info(f"Checking for recent analysis results with execution_id: {execution_id}")
             recent_improvements = self._get_recent_analysis_results(execution_id)
             improvements.extend(recent_improvements)
             self.logger.info(f"Found {len(recent_improvements)} improvements from recent analysis")
+        else:
+            self.logger.info("No execution_id or orchestrator available for recent analysis lookup")
         
         # 3. Check if improvements are stored in a shared location
         try:
-            import os
             agent_work_dir = os.path.join(".", "agent_work")
+            self.logger.debug(f"Checking for improvements in: {agent_work_dir}")
             if os.path.exists(agent_work_dir):
                 improvements_from_files = self._load_improvements_from_artifacts(agent_work_dir)
                 improvements.extend(improvements_from_files)
                 self.logger.info(f"Found {len(improvements_from_files)} improvements from artifacts")
+                
+                # Log which files were processed
+                if improvements_from_files:
+                    analysis_files = [f for f in os.listdir(agent_work_dir) 
+                                    if f.startswith("analysis_iteration_")]
+                    self.logger.debug(f"Processed analysis files: {analysis_files}")
+            else:
+                self.logger.info(f"Agent work directory does not exist: {agent_work_dir}")
         except Exception as e:
             self.logger.error(f"Failed to load improvements from artifacts: {e}")
         
         # Remove duplicates and return
+        self.logger.info("Deduplicating improvement suggestions")
         unique_improvements = []
         seen_descriptions = set()
         
-        for imp in improvements:
+        for i, imp in enumerate(improvements):
             desc = imp.get("what", imp.get("description", ""))
             if desc and desc not in seen_descriptions:
                 unique_improvements.append(imp)
                 seen_descriptions.add(desc)
+                self.logger.debug(f"Unique improvement {len(unique_improvements)}: {desc[:80]}...")
+            else:
+                self.logger.debug(f"Skipped duplicate improvement: {desc[:50]}...")
         
-        self.logger.info(f"Total unique improvements found: {len(unique_improvements)}")
+        self.logger.info(f"Improvement gathering complete: {len(improvements)} total → {len(unique_improvements)} unique")
         return unique_improvements
     
     def _load_improvements_from_artifacts(self, agent_work_dir: str) -> List[Dict]:
@@ -1010,11 +1060,19 @@ class DevelopmentAgent(BaseAgent):
         BUILD SUBSTANTIAL NEW {target_technology.upper()} FEATURES that implement the creative expansions!
         """
         
+        self.logger.info("Sending implementation prompt to LLM...")
+        AgentLogger.log_llm_call(self.logger, "specific_improvements", len(prompt), 0, 0.2)
+        
         response = self.llm_provider.generate_text(prompt, temperature=0.2)
         
+        self.logger.info("Received LLM response for implementation")
+        AgentLogger.log_llm_call(self.logger, "specific_improvements", len(prompt), len(response), 0.2)
+        
         # Save the LLM response for debugging
+        self.logger.debug("Saving LLM implementation response artifact")
         self._save_development_artifact(response, "llm_implementation_response")
         
+        self.logger.info("Parsing implementation response...")
         return self._parse_implementation_response(response, project_dir)
     
     def _implement_comprehensive_improvements(self, goal: str, existing_files: Dict, project_dir: str) -> Dict:
@@ -1169,22 +1227,36 @@ class DevelopmentAgent(BaseAgent):
                                 files_created: List[str], files_modified: List[str]):
         """Save an implementation file and log the action."""
         try:
+            self.logger.debug(f"Processing file save: {file_path} (action: {action})")
+            
             # Organize files by technology into folders  
             organized_path = self._organize_file_path(file_path)
             full_path = os.path.join(project_dir, organized_path)
-            os.makedirs(os.path.dirname(full_path), exist_ok=True)
             
+            if organized_path != file_path:
+                self.logger.info(f"File organized: {file_path} → {organized_path}")
+            
+            os.makedirs(os.path.dirname(full_path), exist_ok=True)
             content = '\n'.join(content_lines)
+            
+            self.logger.debug(f"Content length: {len(content)} characters, {len(content_lines)} lines")
             
             # Check if file already exists
             file_exists = os.path.exists(full_path)
             
             if file_exists:
+                self.logger.info(f"File exists: {organized_path}")
+                
                 # File exists - determine if we should extend or replace
                 if action == "CREATE":
                     # Change action to MODIFY since file already exists
                     action = "MODIFY"
-                    self.logger.info(f"File {file_path} already exists - changing CREATE to MODIFY")
+                    AgentLogger.log_decision(
+                        self.logger,
+                        f"Changed action from CREATE to MODIFY for existing file",
+                        f"File {organized_path} already exists",
+                        {"original_action": "CREATE", "new_action": "MODIFY", "file": organized_path}
+                    )
                 
                 if action == "MODIFY":
                     # Read existing content to avoid overwriting
@@ -1192,19 +1264,30 @@ class DevelopmentAgent(BaseAgent):
                         with open(full_path, 'r') as f:
                             existing_content = f.read()
                         
+                        existing_lines = len(existing_content.split('\n'))
+                        self.logger.debug(f"Existing file has {existing_lines} lines, {len(existing_content)} characters")
+                        
                         # Check if this is just a duplicate of existing content
                         if content.strip() in existing_content or existing_content.strip() in content:
-                            self.logger.info(f"SKIPPED: {file_path} - content already exists or is duplicate")
+                            self.logger.warning(f"SKIPPED: {organized_path} - content already exists or is duplicate")
                             return
                         
                         # Append new content instead of overwriting
+                        self.logger.info(f"Merging content for: {organized_path}")
                         enhanced_content = self._merge_file_content(existing_content, content, file_path)
                         
                         with open(full_path, 'w') as f:
                             f.write(enhanced_content)
                         
+                        new_lines = len(enhanced_content.split('\n'))
                         files_modified.append(organized_path)
-                        self.logger.info(f"MODIFIED: {organized_path} - {improvement}")
+                        
+                        AgentLogger.log_file_operation(
+                            self.logger, 
+                            "MODIFIED", 
+                            organized_path, 
+                            f"{improvement} | {existing_lines} → {new_lines} lines"
+                        )
                         
                     except Exception as e:
                         self.logger.error(f"Failed to modify existing file {organized_path}: {e}")
@@ -1217,18 +1300,37 @@ class DevelopmentAgent(BaseAgent):
                         with open(full_timestamp_path, 'w') as f:
                             f.write(content)
                         files_created.append(organized_timestamp_path)
-                        self.logger.info(f"CREATED: {organized_timestamp_path} - {improvement} (timestamped due to merge conflict)")
+                        
+                        AgentLogger.log_file_operation(
+                            self.logger,
+                            "CREATED",
+                            organized_timestamp_path,
+                            f"{improvement} (timestamped due to merge conflict) | {len(content_lines)} lines"
+                        )
                 
             else:
                 # File doesn't exist - create it
+                self.logger.info(f"Creating new file: {organized_path}")
                 with open(full_path, 'w') as f:
                     f.write(content)
                 
                 files_created.append(organized_path)
-                self.logger.info(f"CREATED: {organized_path} - {improvement}")
+                
+                AgentLogger.log_file_operation(
+                    self.logger,
+                    "CREATED", 
+                    organized_path,
+                    f"{improvement} | {len(content_lines)} lines"
+                )
             
         except Exception as e:
             self.logger.error(f"Failed to save {file_path}: {e}")
+            AgentLogger.log_error_with_context(self.logger, e, {
+                "file_path": file_path,
+                "action": action,
+                "improvement": improvement,
+                "content_lines": len(content_lines) if content_lines else 0
+            })
     
     def _organize_file_path(self, file_path: str) -> str:
         """Organize file path into appropriate technology folder structure."""
@@ -1827,8 +1929,10 @@ class AnalysisAgent(BaseAgent):
         super().__init__(agent_id, "analysis", config)
         self.llm_provider = llm_provider
         
-        # Initialize logger
-        self.logger = logging.getLogger(f"swarmdev.agents.{agent_id}")
+        # Initialize comprehensive logger
+        self.logger = AgentLogger.get_logger("AnalysisAgent", agent_id)
+        self.logger.info(f"AnalysisAgent initialized with ID: {agent_id}")
+        self.logger.debug(f"Configuration: {json.dumps(config or {}, indent=2)}")
     
     def process_task(self, task: Dict) -> Dict:
         """
@@ -1840,11 +1944,11 @@ class AnalysisAgent(BaseAgent):
         Returns:
             Dict: Analysis results including improvement suggestions and evolved goal
         """
+        start_time = time.time()
         self.status = "processing"
         
-        # DEBUG: Add basic logging to track execution
-        print(f"[DEBUG] AnalysisAgent.process_task called with task: {task.get('task_id', 'unknown')}")
-        self.logger.info(f"AnalysisAgent processing task: {task.get('task_id', 'unknown')}")
+        # Log task start with comprehensive details
+        AgentLogger.log_task_start(self.logger, task)
         
         try:
             # Extract task details
@@ -1854,30 +1958,54 @@ class AnalysisAgent(BaseAgent):
             max_iterations = task.get("max_iterations", None)
             workflow_type = task.get("workflow_type", "indefinite")
             
-            print(f"[DEBUG] Analysis task details: goal='{goal[:50]}...', iteration={iteration_count}")
+            self.logger.info(f"Processing analysis task for iteration {iteration_count}")
+            self.logger.info(f"Goal (first 200 chars): {goal[:200]}...")
+            self.logger.info(f"Project directory: {project_dir}")
+            self.logger.info(f"Workflow type: {workflow_type}, Max iterations: {max_iterations}")
             
             # Analyze current project state
+            self.logger.info("Starting project state analysis...")
             project_state = self._analyze_project_state(project_dir)
             
-            print(f"[DEBUG] Project state analyzed: {project_state.get('file_count', 0)} files")
+            AgentLogger.log_analysis_metrics(self.logger, {
+                "files_analyzed": project_state.get('file_count', 0),
+                "total_lines": project_state.get('total_lines', 0),
+                "target_technology": project_state.get('target_technology', 'unknown'),
+                "project_structure": project_state.get('structure', 'unknown')
+            })
             
             # Compare against original goal and suggest improvements
+            self.logger.info("Starting improvement analysis...")
             improvement_analysis = self._analyze_improvements(goal, project_state, iteration_count)
             
-            print(f"[DEBUG] Improvements analyzed: {improvement_analysis.get('improvement_count', 0)} suggestions")
+            improvement_count = improvement_analysis.get('improvement_count', 0)
+            self.logger.info(f"Improvement analysis complete: {improvement_count} suggestions generated")
             
             # Create evolved goal for next iteration (if not the final iteration)
             evolved_goal = None
             if iteration_count > 0 and iteration_count < (max_iterations or 10):
+                self.logger.info(f"Creating evolved goal for next iteration ({iteration_count + 1})")
                 evolved_goal = self._create_evolved_goal(goal, project_state, improvement_analysis, iteration_count)
-                print(f"[DEBUG] Evolved goal created for iteration {iteration_count + 1}")
+                self.logger.info("Evolved goal created successfully")
+            else:
+                self.logger.info(f"Skipping evolved goal creation (iteration {iteration_count}, max {max_iterations})")
             
             # Determine if another iteration is needed
             should_continue = self._should_continue_iteration(
                 improvement_analysis, iteration_count, max_iterations, workflow_type
             )
             
-            print(f"[DEBUG] Should continue: {should_continue}")
+            AgentLogger.log_decision(
+                self.logger,
+                f"Continue iterations: {should_continue}",
+                f"Based on workflow_type={workflow_type}, iteration={iteration_count}, max={max_iterations}, improvements={improvement_count}",
+                {
+                    "workflow_type": workflow_type,
+                    "current_iteration": iteration_count,
+                    "max_iterations": max_iterations,
+                    "improvement_count": improvement_count
+                }
+            )
             
             # Prepare result
             result = {
@@ -1891,12 +2019,21 @@ class AnalysisAgent(BaseAgent):
                 "evolved_goal": evolved_goal  # New: evolved goal for next iteration
             }
             
-            print(f"[DEBUG] AnalysisAgent task completed successfully")
             self.status = "ready"
+            duration = time.time() - start_time
+            AgentLogger.log_task_complete(self.logger, task, result, duration)
+            
             return result
             
         except Exception as e:
-            print(f"[DEBUG] AnalysisAgent error: {e}")
+            duration = time.time() - start_time
+            self.logger.error(f"Analysis task failed after {duration:.2f} seconds")
+            AgentLogger.log_error_with_context(self.logger, e, {
+                "task_id": task.get("task_id"),
+                "goal": goal[:100] if 'goal' in locals() else "unknown",
+                "iteration_count": iteration_count if 'iteration_count' in locals() else "unknown",
+                "duration": duration
+            })
             return self.handle_error(e, task)
     
     def _analyze_project_state(self, project_dir: str) -> Dict:
