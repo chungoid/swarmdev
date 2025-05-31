@@ -8,6 +8,7 @@ import re
 from typing import Dict, List, Optional, Any
 from datetime import datetime
 import logging
+import json
 
 from swarmdev.utils.llm_provider import LLMProviderInterface
 from .base_agent import BaseAgent
@@ -519,6 +520,16 @@ class DevelopmentAgent(BaseAgent):
                 "improvements_implemented": len(self._improvement_suggestions)
             }
             
+            # Save iteration progress for future reference
+            iteration_count = task.get("iteration_count", 0)
+            if hasattr(self, '_improvement_suggestions'):
+                self._save_iteration_progress(
+                    iteration_count,
+                    implementation.get("files_created", []),
+                    implementation.get("files_modified", []),
+                    self._improvement_suggestions
+                )
+            
             print(f"[DEBUG] DevelopmentAgent task completed successfully")
             self.status = "ready"
             return result
@@ -770,6 +781,13 @@ class DevelopmentAgent(BaseAgent):
         try:
             self.logger.info("Starting incremental improvements implementation")
             
+            # Get previous iteration progress to understand what's been built
+            previous_progress = self._get_previous_iteration_progress()
+            previously_created_files = previous_progress.get("all_files_created", [])
+            previously_modified_files = previous_progress.get("all_files_modified", [])
+            
+            self.logger.info(f"Previous iterations created {len(previously_created_files)} files, modified {len(previously_modified_files)}")
+            
             # Read existing project files with better analysis
             existing_files = self._read_project_files(project_dir)
             self.logger.info(f"Read {len(existing_files)} existing files for analysis")
@@ -779,7 +797,7 @@ class DevelopmentAgent(BaseAgent):
             self.logger.info(f"Found {len(improvement_suggestions)} improvement suggestions")
             
             # Save development work plan for visibility
-            work_plan = self._create_work_plan(goal, improvement_suggestions, existing_files)
+            work_plan = self._create_work_plan(goal, improvement_suggestions, existing_files, previous_progress)
             self._save_development_artifact(work_plan, "work_plan")
             
             if improvement_suggestions:
@@ -842,7 +860,7 @@ class DevelopmentAgent(BaseAgent):
         
         return existing_files
     
-    def _create_work_plan(self, goal: str, improvements: List[Dict], existing_files: Dict) -> str:
+    def _create_work_plan(self, goal: str, improvements: List[Dict], existing_files: Dict, previous_progress: Dict) -> str:
         """Create a detailed work plan showing what will be implemented."""
         plan = f"""# Development Agent Work Plan
 
@@ -855,9 +873,22 @@ class DevelopmentAgent(BaseAgent):
 - **Total Lines:** {sum(f.get('lines', 0) for f in existing_files.values())}
 - **File Types:** {set(f.get('extension', '') for f in existing_files.values())}
 
-## Existing Files Analysis
+## Previous Iteration History
+- **Total Previous Iterations:** {len(previous_progress.get('iterations', []))}
+- **Files Created Across All Iterations:** {len(previous_progress.get('all_files_created', []))}
+- **Files Modified Across All Iterations:** {len(previous_progress.get('all_files_modified', []))}
+
+### Previously Created Files:
 """
         
+        for file in previous_progress.get('all_files_created', []):
+            plan += f"- {file}\n"
+        
+        plan += "\n### Previously Modified Files:\n"
+        for file in previous_progress.get('all_files_modified', []):
+            plan += f"- {file}\n"
+        
+        plan += "\n## Existing Files Analysis\n"
         for file_path, file_info in list(existing_files.items())[:10]:
             plan += f"- **{file_path}**: {file_info.get('lines', 0)} lines\n"
         
@@ -878,12 +909,12 @@ class DevelopmentAgent(BaseAgent):
             plan += "No specific improvement suggestions found. Will perform comprehensive analysis.\n"
         
         plan += "\n## Implementation Strategy\n"
-        plan += "1. Analyze each improvement suggestion\n"
-        plan += "2. Modify existing files where possible\n"
-        plan += "3. Create new files only when necessary\n"
+        plan += "1. CHECK existing files to avoid overwriting\n"
+        plan += "2. EXTEND existing files where possible instead of recreating\n"
+        plan += "3. Create new files only for genuinely new capabilities\n"
         plan += "4. Preserve existing functionality\n"
-        plan += "5. Add comprehensive error handling\n"
-        plan += "6. Improve user experience\n"
+        plan += "5. Build upon previous iterations' work\n"
+        plan += "6. Focus on substantial new functionality\n"
         
         return plan
     
@@ -910,23 +941,33 @@ class DevelopmentAgent(BaseAgent):
         CREATIVE EXPANSIONS TO BUILD INTO NEW FEATURES:
         {improvements_text}
         
-        EXISTING PROJECT FILES:
+        EXISTING PROJECT FILES TO BUILD UPON:
         {self._format_files_for_implementation(existing_files)}
         
         Your task is to BUILD these creative expansions into substantial new capabilities:
         
+        CRITICAL REQUIREMENT: DO NOT recreate or overwrite existing files. BUILD UPON what exists.
+        
         BUILDING REQUIREMENTS:
-        - Create 300+ lines of new, working code this iteration
-        - Build 2-3 entirely new modules implementing the suggested expansions
+        - Create 500+ lines of new, working code this iteration
+        - Build 3-5 entirely new modules implementing the suggested expansions
         - Implement complete, functional features (not stubs or placeholders)
         - Create supporting utilities and configurations
         - Focus on additive development that brings the expansions to life
+        - EXTEND existing files where appropriate instead of recreating them
         
         FORBIDDEN ACTIONS:
+        - Recreating files that already exist (vulnerability_prediction.py, threat_intelligence_integration.py, remediation_suggestions.py)
         - Making small modifications to existing files
         - Creating incomplete stub functions
         - Generic technical improvements (error handling, logging, documentation)
         - Refactoring existing code without adding new functionality
+        
+        INTELLIGENT FILE HANDLING:
+        1. If a file already exists, EXTEND it with new functionality using ACTION: MODIFY
+        2. Only use ACTION: CREATE for genuinely new files
+        3. Check existing files and build complementary features
+        4. Create new directories/modules for major new capability areas
         
         SUBSTANTIAL BUILDING FOCUS:
         1. Focus on the CREATIVE EXPANSIONS listed above, not technical improvements
@@ -938,10 +979,18 @@ class DevelopmentAgent(BaseAgent):
         
         For each new capability you build, return:
         
-        === ACTION: CREATE ===
+        === ACTION: CREATE ===  (only for new files)
         === FILENAME: path/filename.ext ===
         === IMPROVEMENT: Description of new capability/expansion implemented ===
         [complete file content with substantial new functionality]
+        === END FILE ===
+        
+        OR for extending existing files:
+        
+        === ACTION: MODIFY ===  (for existing files)
+        === FILENAME: path/existing_filename.ext ===
+        === IMPROVEMENT: Description of new functionality added to existing file ===
+        [new functionality to add to the existing file]
         === END FILE ===
         
         BUILD SUBSTANTIAL NEW FEATURES that implement the creative expansions!
@@ -1094,18 +1143,197 @@ class DevelopmentAgent(BaseAgent):
             os.makedirs(os.path.dirname(full_path), exist_ok=True)
             
             content = '\n'.join(content_lines)
-            with open(full_path, 'w') as f:
-                f.write(content)
             
-            if action == "CREATE":
+            # Check if file already exists
+            file_exists = os.path.exists(full_path)
+            
+            if file_exists:
+                # File exists - determine if we should extend or replace
+                if action == "CREATE":
+                    # Change action to MODIFY since file already exists
+                    action = "MODIFY"
+                    self.logger.info(f"File {file_path} already exists - changing CREATE to MODIFY")
+                
+                if action == "MODIFY":
+                    # Read existing content to avoid overwriting
+                    try:
+                        with open(full_path, 'r') as f:
+                            existing_content = f.read()
+                        
+                        # Check if this is just a duplicate of existing content
+                        if content.strip() in existing_content or existing_content.strip() in content:
+                            self.logger.info(f"SKIPPED: {file_path} - content already exists or is duplicate")
+                            return
+                        
+                        # Append new content instead of overwriting
+                        enhanced_content = self._merge_file_content(existing_content, content, file_path)
+                        
+                        with open(full_path, 'w') as f:
+                            f.write(enhanced_content)
+                        
+                        files_modified.append(file_path)
+                        self.logger.info(f"MODIFIED: {file_path} - {improvement}")
+                        
+                    except Exception as e:
+                        self.logger.error(f"Failed to modify existing file {file_path}: {e}")
+                        # Fallback to creating with timestamp
+                        timestamp_path = file_path.replace('.py', f'_{datetime.now().strftime("%H%M%S")}.py')
+                        full_timestamp_path = os.path.join(project_dir, timestamp_path)
+                        with open(full_timestamp_path, 'w') as f:
+                            f.write(content)
+                        files_created.append(timestamp_path)
+                        self.logger.info(f"CREATED: {timestamp_path} - {improvement} (timestamped due to merge conflict)")
+                
+            else:
+                # File doesn't exist - create it
+                with open(full_path, 'w') as f:
+                    f.write(content)
+                
                 files_created.append(file_path)
                 self.logger.info(f"CREATED: {file_path} - {improvement}")
-            elif action == "MODIFY":
-                files_modified.append(file_path)
-                self.logger.info(f"MODIFIED: {file_path} - {improvement}")
             
         except Exception as e:
             self.logger.error(f"Failed to save {file_path}: {e}")
+    
+    def _merge_file_content(self, existing_content: str, new_content: str, file_path: str) -> str:
+        """
+        Intelligently merge new content with existing file content.
+        
+        Args:
+            existing_content: Current file content
+            new_content: New content to add
+            file_path: File path for context
+            
+        Returns:
+            str: Merged content
+        """
+        # For Python files, try to merge intelligently
+        if file_path.endswith('.py'):
+            return self._merge_python_content(existing_content, new_content)
+        
+        # For other files, append with separator
+        return f"{existing_content}\n\n# === ADDED CONTENT ===\n{new_content}"
+    
+    def _merge_python_content(self, existing_content: str, new_content: str) -> str:
+        """
+        Merge Python file content intelligently by combining imports, classes, and functions.
+        
+        Args:
+            existing_content: Existing Python code
+            new_content: New Python code to merge
+            
+        Returns:
+            str: Merged Python content
+        """
+        try:
+            import ast
+            import re
+            
+            # Parse existing and new content
+            existing_lines = existing_content.split('\n')
+            new_lines = new_content.split('\n')
+            
+            # Extract imports from both
+            existing_imports = []
+            existing_code = []
+            new_imports = []
+            new_code = []
+            
+            # Simple parsing for imports and code
+            for line in existing_lines:
+                if line.strip().startswith(('import ', 'from ')):
+                    existing_imports.append(line)
+                elif line.strip():
+                    existing_code.append(line)
+            
+            for line in new_lines:
+                if line.strip().startswith(('import ', 'from ')):
+                    if line not in existing_imports:  # Avoid duplicate imports
+                        new_imports.append(line)
+                elif line.strip():
+                    new_code.append(line)
+            
+            # Combine imports (existing first, then new unique ones)
+            all_imports = existing_imports + new_imports
+            
+            # Check for function/class conflicts
+            existing_definitions = self._extract_definitions(existing_content)
+            new_definitions = self._extract_definitions(new_content)
+            
+            # If there are conflicting definitions, create versioned functions
+            merged_code = existing_code.copy()
+            
+            for definition in new_definitions:
+                if definition['name'] in [d['name'] for d in existing_definitions]:
+                    # Rename conflicting definition
+                    timestamp = datetime.now().strftime("%H%M")
+                    new_name = f"{definition['name']}_v{timestamp}"
+                    
+                    # Replace the definition name in new_code
+                    pattern = rf"\b{re.escape(definition['name'])}\b"
+                    new_code_str = '\n'.join(new_code)
+                    new_code_str = re.sub(pattern, new_name, new_code_str, count=1)
+                    new_code = new_code_str.split('\n')
+                    
+                    self.logger.info(f"Renamed conflicting {definition['type']} '{definition['name']}' to '{new_name}'")
+            
+            # Combine all content
+            result_lines = []
+            
+            # Add imports
+            if all_imports:
+                result_lines.extend(all_imports)
+                result_lines.append('')  # Blank line after imports
+            
+            # Add existing code
+            if existing_code:
+                result_lines.extend(existing_code)
+                result_lines.append('')  # Blank line
+            
+            # Add separator comment
+            result_lines.append('# === ADDED FUNCTIONALITY ===')
+            result_lines.append('')
+            
+            # Add new code
+            if new_code:
+                result_lines.extend(new_code)
+            
+            return '\n'.join(result_lines)
+            
+        except Exception as e:
+            self.logger.error(f"Failed to merge Python content intelligently: {e}")
+            # Fallback to simple append
+            return f"{existing_content}\n\n# === ADDED CONTENT ===\n{new_content}"
+    
+    def _extract_definitions(self, content: str) -> List[Dict]:
+        """Extract function and class definitions from Python content."""
+        definitions = []
+        
+        try:
+            import re
+            
+            # Find class definitions
+            class_matches = re.finditer(r'^class\s+(\w+)', content, re.MULTILINE)
+            for match in class_matches:
+                definitions.append({
+                    'type': 'class',
+                    'name': match.group(1),
+                    'line': content[:match.start()].count('\n') + 1
+                })
+            
+            # Find function definitions
+            func_matches = re.finditer(r'^def\s+(\w+)', content, re.MULTILINE)
+            for match in func_matches:
+                definitions.append({
+                    'type': 'function',
+                    'name': match.group(1),
+                    'line': content[:match.start()].count('\n') + 1
+                })
+                
+        except Exception as e:
+            self.logger.error(f"Failed to extract definitions: {e}")
+        
+        return definitions
     
     def _format_files_for_implementation(self, existing_files: Dict) -> str:
         """Format existing files for implementation analysis."""
@@ -1162,6 +1390,63 @@ class DevelopmentAgent(BaseAgent):
             
         except Exception as e:
             self.logger.error(f"Failed to save development artifact: {e}")
+    
+    def _save_iteration_progress(self, iteration_count: int, files_created: List[str], files_modified: List[str], improvements_implemented: List[Dict]):
+        """Save iteration progress to prevent losing track of what's been built."""
+        try:
+            agent_work_dir = os.path.join(".", "agent_work")
+            os.makedirs(agent_work_dir, exist_ok=True)
+            
+            progress_file = os.path.join(agent_work_dir, "iteration_progress.json")
+            
+            # Load existing progress
+            if os.path.exists(progress_file):
+                with open(progress_file, 'r') as f:
+                    progress = json.loads(f.read())
+            else:
+                progress = {"iterations": [], "all_files_created": [], "all_files_modified": []}
+            
+            # Add current iteration
+            current_iteration = {
+                "iteration": iteration_count,
+                "timestamp": datetime.now().isoformat(),
+                "files_created": files_created,
+                "files_modified": files_modified,
+                "improvements": [imp.get('what', 'Unknown') for imp in improvements_implemented],
+                "agent_id": self.agent_id
+            }
+            
+            progress["iterations"].append(current_iteration)
+            
+            # Update cumulative lists
+            for file in files_created:
+                if file not in progress["all_files_created"]:
+                    progress["all_files_created"].append(file)
+            
+            for file in files_modified:
+                if file not in progress["all_files_modified"]:
+                    progress["all_files_modified"].append(file)
+            
+            # Save updated progress
+            with open(progress_file, 'w') as f:
+                f.write(json.dumps(progress, indent=2))
+            
+            self.logger.info(f"Saved iteration progress: iteration {iteration_count}")
+            
+        except Exception as e:
+            self.logger.error(f"Failed to save iteration progress: {e}")
+    
+    def _get_previous_iteration_progress(self) -> Dict:
+        """Get previous iteration progress to understand what's been built."""
+        try:
+            progress_file = os.path.join(".", "agent_work", "iteration_progress.json")
+            if os.path.exists(progress_file):
+                with open(progress_file, 'r') as f:
+                    return json.loads(f.read())
+        except Exception as e:
+            self.logger.error(f"Failed to load iteration progress: {e}")
+        
+        return {"iterations": [], "all_files_created": [], "all_files_modified": []}
 
 
 class AnalysisAgent(BaseAgent):
@@ -1378,6 +1663,9 @@ class AnalysisAgent(BaseAgent):
         """
         self.logger.info(f"Starting deep improvement analysis for iteration {iteration_count}")
         
+        # Extract what's already been implemented to avoid repetitive suggestions
+        implemented_features = self._extract_implemented_features(project_state)
+        
         # Create creative expansion prompt that forces innovative thinking
         improvement_prompt = f"""
         CREATIVE PROJECT EXPANSION ANALYSIS (Iteration {iteration_count})
@@ -1389,10 +1677,15 @@ class AnalysisAgent(BaseAgent):
         - Structure: {project_state.get('structure', 'unknown')}
         - Current Analysis: {project_state.get('analysis', 'No analysis available')}
         
+        ALREADY IMPLEMENTED FEATURES (DO NOT SUGGEST THESE AGAIN):
+        {implemented_features}
+        
         EXISTING FILES TO ANALYZE:
         {project_state.get('analysis', 'No file content available')}
         
-        Your role is to identify opportunities for CREATIVE EXPANSION and substantial new capabilities.
+        Your role is to identify opportunities for CREATIVE EXPANSION and substantial new capabilities that BUILD UPON what already exists.
+        
+        CRITICAL: DO NOT suggest features that are already implemented (listed above).
         
         FORBIDDEN SUGGESTIONS (NEVER suggest these repetitive improvements):
         - Error handling improvements
@@ -1404,6 +1697,9 @@ class AnalysisAgent(BaseAgent):
         - Security enhancements
         - Configuration management
         - Code organization
+        - Machine Learning-Based Vulnerability Prediction (already exists)
+        - Integration with Threat Intelligence Platforms (already exists)
+        - Automated Remediation Suggestions (already exists)
         
         REQUIRED CREATIVE EXPANSION APPROACH:
         1. **Understand the Domain**: What problem space does this project operate in? Who are the users?
@@ -1415,7 +1711,7 @@ class AnalysisAgent(BaseAgent):
         7. **Automation Potential**: What manual tasks in this domain could be automated for users?
         
         CREATIVITY REQUIREMENTS:
-        - Suggest 5+ entirely NEW capabilities that don't currently exist
+        - Suggest 5+ entirely NEW capabilities that don't currently exist and aren't listed above
         - Each suggestion must add substantial user value and expand project scope
         - Focus on features that would differentiate this project from similar tools
         - Think about different user personas and their unmet needs
@@ -1452,18 +1748,110 @@ class AnalysisAgent(BaseAgent):
         # Parse specific improvements from the analysis
         improvements = self._parse_specific_improvements(analysis_text)
         
-        self.logger.info(f"Parsed {len(improvements)} specific improvements")
-        for i, improvement in enumerate(improvements):
+        # Filter out any suggestions that match already implemented features
+        filtered_improvements = self._filter_duplicate_improvements(improvements, implemented_features)
+        
+        self.logger.info(f"Parsed {len(improvements)} improvements, filtered to {len(filtered_improvements)} unique ones")
+        for i, improvement in enumerate(filtered_improvements):
             self.logger.info(f"Improvement {i+1}: {improvement.get('what', 'Unknown')[:100]}...")
         
         return {
             "full_analysis": analysis_text,
-            "improvements": improvements,
-            "improvement_count": len(improvements),
-            "has_significant_improvements": len(improvements) > 0,
+            "improvements": filtered_improvements,
+            "improvement_count": len(filtered_improvements),
+            "has_significant_improvements": len(filtered_improvements) > 0,
             "analysis_depth": "comprehensive",
-            "iteration": iteration_count
+            "iteration": iteration_count,
+            "implemented_features": implemented_features
         }
+    
+    def _extract_implemented_features(self, project_state: Dict) -> str:
+        """Extract already implemented features from the project state."""
+        try:
+            files = project_state.get('files', [])
+            analysis = project_state.get('analysis', '')
+            
+            implemented = []
+            
+            # Check for specific file patterns that indicate implemented features
+            for file_path in files:
+                if 'vulnerability_prediction' in file_path:
+                    implemented.append("- Vulnerability Prediction (machine learning)")
+                elif 'threat_intelligence' in file_path:
+                    implemented.append("- Threat Intelligence Integration")
+                elif 'remediation' in file_path:
+                    implemented.append("- Automated Remediation Suggestions")
+                elif 'network_visualization' in file_path:
+                    implemented.append("- Network Visualization")
+                elif 'incident_response' in file_path:
+                    implemented.append("- Incident Response Integration")
+                elif 'dashboard' in file_path:
+                    implemented.append("- Web Dashboard")
+                elif 'collaborative' in file_path:
+                    implemented.append("- Collaborative Platform")
+                elif 'compliance' in file_path:
+                    implemented.append("- Compliance Auditing")
+                elif 'anomaly_detection' in file_path:
+                    implemented.append("- Anomaly Detection")
+            
+            # Also extract from analysis text
+            analysis_lower = analysis.lower()
+            if 'machine learning' in analysis_lower or 'vulnerability prediction' in analysis_lower:
+                if "- Machine Learning/AI Capabilities" not in implemented:
+                    implemented.append("- Machine Learning/AI Capabilities")
+            
+            if 'threat intelligence' in analysis_lower:
+                if "- Threat Intelligence Integration" not in implemented:
+                    implemented.append("- Threat Intelligence Integration")
+            
+            if 'remediation' in analysis_lower:
+                if "- Automated Remediation Suggestions" not in implemented:
+                    implemented.append("- Automated Remediation Suggestions")
+            
+            if not implemented:
+                return "No major features implemented yet - this is a new project."
+            
+            return '\n'.join(implemented)
+            
+        except Exception as e:
+            self.logger.error(f"Failed to extract implemented features: {e}")
+            return "Unable to determine implemented features"
+    
+    def _filter_duplicate_improvements(self, improvements: List[Dict], implemented_features: str) -> List[Dict]:
+        """Filter out improvements that match already implemented features."""
+        filtered = []
+        implemented_lower = implemented_features.lower()
+        
+        for improvement in improvements:
+            what = improvement.get('what', '').lower()
+            
+            # Check if this improvement is already implemented
+            is_duplicate = False
+            
+            # Common duplicate patterns
+            duplicate_patterns = [
+                'vulnerability prediction',
+                'threat intelligence',
+                'remediation suggestion',
+                'machine learning',
+                'network visualization',
+                'incident response',
+                'dashboard',
+                'collaborative',
+                'compliance',
+                'anomaly detection'
+            ]
+            
+            for pattern in duplicate_patterns:
+                if pattern in what and pattern in implemented_lower:
+                    is_duplicate = True
+                    self.logger.info(f"Filtered duplicate suggestion: {improvement.get('what', 'Unknown')[:50]}...")
+                    break
+            
+            if not is_duplicate:
+                filtered.append(improvement)
+        
+        return filtered
     
     def _save_analysis_artifact(self, analysis_text: str, iteration_count: int):
         """Save analysis as an artifact for visibility into agent thinking."""
