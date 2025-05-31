@@ -46,7 +46,7 @@ class SwarmBuilder:
         self.goal_file = goal_file
         self.goal_id = goal_id
         self.config = config or {}
-        self.goal_storage = GoalStorage()
+        self.goal_storage = GoalStorage(os.path.join(project_dir, ".swarmdev", "goals"))
         self.logger = logging.getLogger("swarmdev.builder")
         
         # Create project directory if it doesn't exist
@@ -181,8 +181,8 @@ class SwarmBuilder:
                 'docker_network': None  # Don't use a specific network by default
             })
             
-            # Initialize MCP manager
-            self.mcp_manager = MCPManager(mcp_config)
+            # Initialize MCP manager with project directory
+            self.mcp_manager = MCPManager(mcp_config, self.project_dir)
             
             # Initialize tools if enabled
             if self.mcp_manager.is_enabled():
@@ -198,6 +198,10 @@ class SwarmBuilder:
     def _register_agents(self):
         """Register specialized agents with the orchestrator."""
         try:
+            # Set up agent logging for the project directory
+            from ..utils.agent_logger import AgentLogger
+            AgentLogger.set_project_dir(self.project_dir)
+            
             # Create specialized agents with LLM provider and MCP manager
             research_agent = ResearchAgent("research_agent_1", "research", self.llm_provider, self.mcp_manager, self.config)
             planning_agent = PlanningAgent("planning_agent_1", "planning", self.llm_provider, self.mcp_manager, self.config)
@@ -343,6 +347,13 @@ class SwarmBuilder:
                 # Merge execution status into metadata
                 metadata["execution_status"] = execution_status
                 metadata["tasks"] = execution_status.get("tasks", {})
+                
+                # Include MCP and LLM metrics in status
+                if "mcp_metrics" in execution_status:
+                    metadata["mcp_metrics"] = execution_status["mcp_metrics"]
+                
+                if "llm_metrics" in execution_status:
+                    metadata["llm_metrics"] = execution_status["llm_metrics"]
                 
                 # Update overall status based on execution status
                 exec_status = execution_status.get("status")

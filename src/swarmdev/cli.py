@@ -30,6 +30,7 @@ from datetime import datetime
 from dotenv import load_dotenv
 
 from swarmdev.utils.llm_provider import OpenAIProvider, AnthropicProvider, GoogleProvider, ProviderRegistry
+from swarmdev.utils.blueprint_manager import BlueprintManager
 from swarmdev.interactive_agent import LLMEnabledInteractiveAgent
 from swarmdev.interactive_agent.enhanced_agent import EnhancedInteractiveAgent
 from swarmdev.goal_processor import GoalStorage, SwarmBuilder
@@ -38,17 +39,11 @@ from swarmdev.swarm_builder.workflows import list_available_workflows
 # Load environment variables from .env file
 load_dotenv()
  
-# Configure logging
-# Create .swarmdev/logs directory if it doesn't exist
-os.makedirs('.swarmdev/logs', exist_ok=True)
-
+# Initialize basic logging (will be reconfigured per command)
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler('.swarmdev/logs/swarmdev.log')
-    ]
+    handlers=[logging.StreamHandler()]  # Only console logging initially
 )
  
 logger = logging.getLogger('swarmdev_cli')
@@ -115,10 +110,37 @@ def setup_parser():
     logs_parser.add_argument('--workflow-id', help='Filter analysis by specific workflow ID')
     logs_parser.add_argument('--show-report', action='store_true', help='Display report summary in terminal')
     
+    # Blueprint management command
+    blueprint_parser = subparsers.add_parser('blueprint', help='Manage project blueprints and user feedback')
+    blueprint_subparsers = blueprint_parser.add_subparsers(dest='blueprint_action', help='Blueprint management actions')
+    
+    # Blueprint status
+    status_bp = blueprint_subparsers.add_parser('status', help='Show current blueprint status')
+    status_bp.add_argument('--project-dir', '-d', default='.', help='Project directory')
+    
+    # Blueprint show
+    show_bp = blueprint_subparsers.add_parser('show', help='Display detailed blueprint')
+    show_bp.add_argument('--project-dir', '-d', default='.', help='Project directory')
+    show_bp.add_argument('--format', choices=['markdown', 'json'], default='markdown', help='Output format')
+    
+    # Blueprint feedback
+    feedback_bp = blueprint_subparsers.add_parser('feedback', help='Add user feedback to guide development')
+    feedback_bp.add_argument('feedback_text', help='Feedback text to add')
+    feedback_bp.add_argument('--project-dir', '-d', default='.', help='Project directory')
+    feedback_bp.add_argument('--run-number', type=int, help='Run number for feedback (auto-detected if not provided)')
+    
+    # Blueprint modify
+    modify_bp = blueprint_subparsers.add_parser('modify', help='Modify specific blueprint items')
+    modify_bp.add_argument('--project-dir', '-d', default='.', help='Project directory')
+    modify_bp.add_argument('--phase', help='Phase name or ID to modify')
+    modify_bp.add_argument('--item', help='Item description to modify')
+    modify_bp.add_argument('--status', choices=['complete', 'in_progress', 'not_started', 'removed', 'high_priority'], 
+                          help='New status for the item')
+    
     return parser
  
  
-def configure_logging(args):
+def configure_logging(args, project_dir=None):
     """Configure logging based on command-line arguments."""
     if args.quiet:
         logging.root.setLevel(logging.ERROR)
@@ -127,6 +149,27 @@ def configure_logging(args):
     else:
         log_level = getattr(logging, args.log_level.upper())
         logging.root.setLevel(log_level)
+    
+    # Set up project-specific file logging if project_dir is provided
+    if project_dir:
+        setup_project_logging(project_dir)
+
+
+def setup_project_logging(project_dir: str):
+    """Set up logging to write to the project's .swarmdev/logs directory."""
+    # Create .swarmdev/logs directory in the PROJECT directory, not the current directory
+    logs_dir = os.path.join(project_dir, '.swarmdev', 'logs')
+    os.makedirs(logs_dir, exist_ok=True)
+    
+    # Add file handler for project-specific logging
+    log_file = os.path.join(logs_dir, 'swarmdev.log')
+    file_handler = logging.FileHandler(log_file)
+    file_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+    
+    # Add to root logger
+    logging.root.addHandler(file_handler)
+    
+    logger.info(f"Project logging initialized: {log_file}")
  
  
 def get_llm_provider(provider_name, model=None):
@@ -292,6 +335,9 @@ def cmd_build(args):
     
     # Create the project directory
     os.makedirs(args.project_dir, exist_ok=True)
+    
+    # Set up project-specific logging AFTER creating the project directory
+    setup_project_logging(args.project_dir)
     
     # Initialize the swarm builder with the goal file
     builder = SwarmBuilder(
@@ -475,6 +521,14 @@ def _display_status_content(status: dict, args, detailed_header: bool = True):
             for task_id, task_status in exec_status['tasks'].items():
                 print(f"  {task_id.replace('exec_', '').replace(args.project_id.split('_')[-1] + '_', '')}: {task_status}")
     
+    # Show MCP tool usage metrics
+    if status.get('mcp_metrics'):
+        _display_mcp_metrics(status['mcp_metrics'])
+    
+    # Show LLM usage metrics
+    if status.get('llm_metrics'):
+        _display_llm_metrics(status['llm_metrics'])
+    
     # Show recent logs if requested
     if hasattr(args, 'logs') and args.logs:
         _display_recent_logs(status)
@@ -488,6 +542,125 @@ def _display_status_content(status: dict, args, detailed_header: bool = True):
     
     if status.get('completed_at'):
         print(f"\nCompleted: {status['completed_at']}")
+
+
+def _display_mcp_metrics(mcp_metrics: dict):
+    """Display MCP tool usage metrics - SINGLE SOURCE OF TRUTH from BaseAgent.use_mcp_tool()."""
+    print(f"\nMCP Tool Usage:")
+    
+    # NO FALLBACKS - ONLY use agent-level metrics from BaseAgent.use_mcp_tool()
+    total_calls = 0
+    total_successful = 0
+    total_failed = 0
+    total_cache_hits = 0
+    total_cache_misses = 0
+    total_throttled = 0
+    all_server_calls = {}
+    
+    for agent_id, agent_metrics in mcp_metrics.items():
+        if not agent_metrics:
+            continue
+            
+        # ONLY get metrics from agent_metrics (BaseAgent.use_mcp_tool tracking)
+        agent_data = agent_metrics.get("agent_metrics", {})
+        
+        # Fail loudly if agent metrics are missing
+        if not agent_data:
+            print(f"  ❌ ERROR: Agent {agent_id} has no MCP metrics!")
+            print(f"  This means the agent is NOT using BaseAgent.use_mcp_tool()!")
+            print(f"  ALL MCP calls must go through the unified interface!")
+            continue
+        
+        # Extract unified metrics
+        agent_total = agent_data.get("total_calls", 0)
+        agent_success = agent_data.get("successful_calls", 0)
+        agent_failed = agent_data.get("failed_calls", 0)
+        agent_cache_hits = agent_data.get("cache_hits", 0)
+        agent_cache_misses = agent_data.get("cache_misses", 0)
+        agent_throttled = agent_data.get("throttled_calls", 0)
+        
+        total_calls += agent_total
+        total_successful += agent_success
+        total_failed += agent_failed
+        total_cache_hits += agent_cache_hits
+        total_cache_misses += agent_cache_misses
+        total_throttled += agent_throttled
+        
+        # Get tool usage from agent metrics ONLY
+        tools_used = agent_data.get("tools_used", {})
+        for tool_id, count in tools_used.items():
+            # Map tool_id to readable server name
+            server_name = tool_id  # Could be enhanced with name mapping
+            all_server_calls[server_name] = all_server_calls.get(server_name, 0) + count
+    
+    # Display unified metrics
+    print(f"  Total MCP Calls: {total_calls}")
+    if total_calls > 0:
+        success_rate = (total_successful / total_calls) * 100
+        print(f"  Success Rate: {success_rate:.1f}% ({total_successful} successful, {total_failed} failed)")
+        
+        # EFFICIENCY METRICS
+        if total_cache_hits > 0 or total_cache_misses > 0:
+            cache_rate = (total_cache_hits / (total_cache_hits + total_cache_misses)) * 100
+            print(f"  Cache Efficiency: {cache_rate:.1f}% ({total_cache_hits} hits, {total_cache_misses} misses)")
+        
+        if total_throttled > 0:
+            print(f"  Throttled Calls: {total_throttled} (prevented wasteful usage)")
+    
+    # Display per-server usage (from unified tracking)
+    if all_server_calls:
+        print(f"  Server Usage:")
+        for server_name, call_count in sorted(all_server_calls.items()):
+            print(f"    {server_name}: {call_count} calls")
+    else:
+        if total_calls == 0:
+            print(f"  No MCP calls made through unified interface")
+        else:
+            print(f"  ERROR: Calls detected but no server mapping!")
+            print(f"  This indicates a bug in the metrics collection!")
+
+
+def _display_llm_metrics(llm_metrics: dict):
+    """Display LLM usage metrics."""
+    print(f"\nLLM Usage:")
+    
+    # Aggregate metrics across all agents
+    total_calls = 0
+    total_input_tokens = 0
+    total_output_tokens = 0
+    models_used = set()
+    providers_used = set()
+    
+    for agent_id, agent_metrics in llm_metrics.items():
+        if not agent_metrics:
+            continue
+            
+        total_calls += agent_metrics.get("total_calls", 0)
+        total_input_tokens += agent_metrics.get("total_input_tokens", 0)
+        total_output_tokens += agent_metrics.get("total_output_tokens", 0)
+        
+        model = agent_metrics.get("model", "unknown")
+        provider = agent_metrics.get("provider", "unknown")
+        
+        if model != "unknown":
+            models_used.add(model)
+        if provider != "unknown":
+            providers_used.add(provider)
+    
+    # Display model information
+    if models_used:
+        print(f"  Model(s): {', '.join(sorted(models_used))}")
+    if providers_used:
+        print(f"  Provider(s): {', '.join(sorted(providers_used))}")
+    
+    # Display token usage
+    print(f"  Total LLM Calls: {total_calls}")
+    print(f"  Input Tokens: {total_input_tokens:,}")
+    print(f"  Output Tokens: {total_output_tokens:,}")
+    print(f"  Total Tokens: {(total_input_tokens + total_output_tokens):,}")
+    
+    if total_input_tokens + total_output_tokens == 0:
+        print(f"  No token usage recorded")
 
 
 def _monitor_build_progress(builder: SwarmBuilder, project_id: str, project_dir: str):
@@ -667,6 +840,132 @@ def cmd_analyze_logs(args):
         sys.exit(1)
 
 
+def cmd_blueprint(args):
+    """Handle blueprint management commands."""
+    try:
+        # Initialize blueprint manager
+        blueprint_manager = BlueprintManager(args.project_dir, logger)
+        
+        if args.blueprint_action == 'status':
+            # Show blueprint status
+            blueprint = blueprint_manager.load_existing_blueprint()
+            
+            if blueprint is None:
+                print("No blueprint found for this project.")
+                print("Run a SwarmDev build to create an initial blueprint.")
+                return
+            
+            status = blueprint_manager.get_blueprint_status(blueprint)
+            
+            print(f"\nBlueprint Status for: {blueprint.project_name}")
+            print("=" * 60)
+            print(f"Created: {blueprint.created_date[:10]}")
+            print(f"Last Updated: {blueprint.last_updated[:10]}")
+            print(f"Current Run: {blueprint.run_number}")
+            print(f"Total Phases: {status['total_phases']}")
+            print(f"Total Items: {status['total_items']}")
+            print(f"Completion: {status['completion_percentage']:.1f}%")
+            print(f"Complete: {status['complete_items']}")
+            print(f"In Progress: {status['in_progress_items']}")
+            print(f"High Priority: {status['high_priority_items']}")
+            print(f"Removed: {status['removed_items']}")
+            print(f"Feedback Entries: {status['feedback_entries']}")
+            
+            # Show incomplete items summary
+            incomplete_items = blueprint_manager.get_incomplete_items(blueprint)
+            if incomplete_items:
+                print(f"\nNext Priority Items:")
+                for item in incomplete_items[:5]:
+                    status_symbol = {
+                        'high_priority': '!',
+                        'in_progress': '~',
+                        'not_started': ' '
+                    }.get(item.status, ' ')
+                    print(f"  [{status_symbol}] {item.description}")
+                
+                if len(incomplete_items) > 5:
+                    print(f"  ... and {len(incomplete_items) - 5} more items")
+            else:
+                print("\nAll blueprint items complete!")
+                print("Future runs will generate creative expansions.")
+        
+        elif args.blueprint_action == 'show':
+            # Show detailed blueprint
+            blueprint = blueprint_manager.load_existing_blueprint()
+            
+            if blueprint is None:
+                print("No blueprint found for this project.")
+                return
+            
+            if args.format == 'json':
+                import json
+                from dataclasses import asdict
+                print(json.dumps(asdict(blueprint), indent=2, default=str))
+            else:
+                # Read and display the markdown blueprint
+                blueprint_file = os.path.join(args.project_dir, '.swarmdev', 'project_blueprint.md')
+                if os.path.exists(blueprint_file):
+                    with open(blueprint_file, 'r') as f:
+                        print(f.read())
+                else:
+                    print("Blueprint file not found.")
+        
+        elif args.blueprint_action == 'feedback':
+            # Add user feedback
+            blueprint = blueprint_manager.load_existing_blueprint()
+            
+            if blueprint is None:
+                print("No blueprint found for this project.")
+                print("Run a SwarmDev build first to create a blueprint.")
+                return
+            
+            # Determine run number
+            run_number = args.run_number or (blueprint.run_number + 1)
+            
+            # Add feedback
+            success = blueprint_manager.add_user_feedback(args.feedback_text, run_number)
+            
+            if success:
+                print(f"Feedback added for run {run_number}:")
+                print(f"  \"{args.feedback_text}\"")
+                print("\nThis feedback will be applied in the next SwarmDev run.")
+            else:
+                print("Failed to add feedback.")
+        
+        elif args.blueprint_action == 'modify':
+            # Modify blueprint item
+            blueprint = blueprint_manager.load_existing_blueprint()
+            
+            if blueprint is None:
+                print("No blueprint found for this project.")
+                return
+            
+            if not args.item or not args.status:
+                print("Both --item and --status are required for modify command.")
+                return
+            
+            # Update item status
+            success = blueprint_manager.update_item_status(
+                blueprint, args.item, args.status, datetime.now().isoformat()
+            )
+            
+            if success:
+                blueprint_manager.save_blueprint(blueprint)
+                print(f"Updated item status: {args.item[:50]}...")
+                print(f"New status: {args.status}")
+            else:
+                print(f"Item not found: {args.item}")
+                print("Use 'swarmdev blueprint show' to see available items.")
+        
+        else:
+            print(f"Unknown blueprint action: {args.blueprint_action}")
+            print("Available actions: status, show, feedback, modify")
+    
+    except Exception as e:
+        logger.error(f"Blueprint command failed: {e}")
+        print(f"Error: {e}")
+
+
 def show_status_help():
     """Show available status commands and examples."""
     print("""
@@ -729,6 +1028,8 @@ def main():
         cmd_workflows(args)
     elif args.command == "analyze-logs":
         cmd_analyze_logs(args)
+    elif args.command == "blueprint":
+        cmd_blueprint(args)
     else:
         print(f"Unknown command: {args.command}")
         parser.print_help()

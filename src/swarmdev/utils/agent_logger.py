@@ -18,7 +18,13 @@ class AgentLogger:
     """
     
     _loggers: Dict[str, logging.Logger] = {}
-    _log_dir = ".swarmdev/logs"  # Use .swarmdev directory for internal logs
+    _log_dir: Optional[str] = None  # Will be set to project-specific .swarmdev/logs directory
+    
+    @classmethod
+    def set_project_dir(cls, project_dir: str):
+        """Set the project directory for all agent logging."""
+        cls._log_dir = os.path.join(project_dir, ".swarmdev", "logs")
+        os.makedirs(cls._log_dir, exist_ok=True)
     
     @classmethod
     def get_logger(cls, agent_class: str, agent_id: str) -> logging.Logger:
@@ -42,7 +48,9 @@ class AgentLogger:
     @classmethod
     def _create_logger(cls, agent_class: str, agent_id: str) -> logging.Logger:
         """Create and configure a new logger for an agent."""
-        # Ensure log directory exists
+        # Ensure log directory is set and exists
+        if cls._log_dir is None:
+            raise RuntimeError("AgentLogger.set_project_dir() must be called before creating loggers")
         os.makedirs(cls._log_dir, exist_ok=True)
         
         # Create logger

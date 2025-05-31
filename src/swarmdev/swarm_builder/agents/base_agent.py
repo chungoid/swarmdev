@@ -36,6 +36,18 @@ class BaseAgent(ABC):
         self.llm_provider = llm_provider
         self.mcp_manager = mcp_manager
         
+        # Set up basic logging
+        self.logger = logging.getLogger(f"swarmdev.{agent_type}_agent")
+        
+        # EXECUTION-SCOPED CACHE (shared across all agents in same execution)
+        if not hasattr(BaseAgent, '_execution_cache'):
+            BaseAgent._execution_cache = {
+                'documentation': {},  # tech_name -> docs
+                'sequential_thinking': {},  # problem_hash -> result  
+                'execution_id': None,
+                'call_counts': {}  # tool_id -> count
+            }
+        
         # Enhanced MCP integration setup with detailed logging
         if mcp_manager:
             # Use the shared MCP logger with agent-specific context
@@ -47,6 +59,9 @@ class BaseAgent(ABC):
                 "total_calls": 0,
                 "successful_calls": 0,
                 "failed_calls": 0,
+                "cache_hits": 0,
+                "cache_misses": 0,
+                "throttled_calls": 0,
                 "agent_id": agent_id,
                 "agent_type": agent_type
             }
@@ -75,9 +90,8 @@ class BaseAgent(ABC):
         else:
             self.mcp_logger = None
             self.mcp_usage = None
-            # Create a basic logger for non-MCP agents
-            basic_logger = logging.getLogger(f"swarmdev.{agent_type}_agent")
-            basic_logger.info(f"Agent {agent_id} initialized without MCP support")
+            # Basic logger already set up above
+            self.logger.info(f"Agent {agent_id} initialized without MCP support")
     
     @abstractmethod
     def process_task(self, task: Dict) -> Dict:
@@ -185,61 +199,186 @@ class BaseAgent(ABC):
         
         self.mcp_logger.info(f"Agent MCP tool testing complete for {self.agent_type}")
     
-    def use_mcp_tool(self, tool_id: str, method: str, params: Dict, timeout: Optional[int] = None) -> Dict:
+    def use_mcp_tool(self, tool_id: str, method: str, params: Dict, timeout: Optional[int] = None, justification: str = None) -> Dict:
         """
-        Use an MCP tool with automatic logging and error handling.
+        UNIFIED MCP TOOL INTERFACE - The ONLY way agents should call MCP tools.
+        
+        Features:
+        - Intelligent caching to prevent wasteful repeat calls
+        - Usage throttling to prevent spam
+        - Single source of truth for all MCP metrics
+        - Fail loudly instead of hiding issues with fallbacks
         
         Args:
             tool_id: ID of the MCP tool to call
             method: JSON-RPC method name
             params: Parameters for the method call
             timeout: Optional timeout override
+            justification: Why this call is necessary (for debugging wasteful usage)
             
         Returns:
-            Dict: Response from the MCP tool
+            Dict: Response from the MCP tool or cached result
         """
         if not self.mcp_manager:
-            return {"error": "MCP manager not available"}
+            raise Exception("MCP manager not available - agents MUST have MCP support")
         
+        # INTELLIGENT CACHING CHECKS
+        cache_key = self._generate_cache_key(tool_id, method, params)
+        cached_result = self._check_cache(cache_key, tool_id, method, params)
+        if cached_result:
+            self.mcp_usage["cache_hits"] += 1
+            if self.mcp_logger:
+                self.mcp_logger.info(f"🎯 CACHE HIT: {tool_id}.{method} - using cached result")
+            return cached_result
+        
+        self.mcp_usage["cache_misses"] += 1
+        
+        # INTELLIGENT THROTTLING
+        if self._should_throttle_call(tool_id, method, params, justification):
+            self.mcp_usage["throttled_calls"] += 1
+            throttle_msg = f"🚫 THROTTLED: {tool_id}.{method} - excessive usage detected"
+            if self.mcp_logger:
+                self.mcp_logger.warning(throttle_msg)
+                self.mcp_logger.warning(f"Justification: {justification or 'None provided'}")
+            return {"error": throttle_msg, "throttled": True}
+        
+        # USAGE LOGGING
         if self.mcp_logger:
-            self.mcp_logger.info(f"=== AGENT MCP CALL START ===")
+            self.mcp_logger.info(f"=== INTELLIGENT MCP CALL ===")
             self.mcp_logger.info(f"Agent: {self.agent_type} ({self.agent_id})")
             self.mcp_logger.info(f"Tool: '{tool_id}', Method: '{method}'")
+            self.mcp_logger.info(f"Justification: {justification or 'None provided'}")
             self.mcp_logger.debug(f"Parameters: {json.dumps(params, indent=2)}")
         
-        # Track usage
-        if self.mcp_usage:
-            self.mcp_usage["total_calls"] += 1
-            if tool_id not in self.mcp_usage["tools_used"]:
-                self.mcp_usage["tools_used"][tool_id] = 0
-            self.mcp_usage["tools_used"][tool_id] += 1
+        # TRACK USAGE BEFORE CALL
+        self.mcp_usage["total_calls"] += 1
+        if tool_id not in self.mcp_usage["tools_used"]:
+            self.mcp_usage["tools_used"][tool_id] = 0
+        self.mcp_usage["tools_used"][tool_id] += 1
         
-        # Call the tool
+        # INCREMENT EXECUTION-WIDE COUNTER
+        if tool_id not in BaseAgent._execution_cache["call_counts"]:
+            BaseAgent._execution_cache["call_counts"][tool_id] = 0
+        BaseAgent._execution_cache["call_counts"][tool_id] += 1
+        
+        # MAKE THE ACTUAL CALL
         start_time = datetime.now()
         result = self.mcp_manager.call_tool(tool_id, method, params, timeout)
         end_time = datetime.now()
         
         duration = (end_time - start_time).total_seconds()
         
-        # Log the result
-        if self.mcp_logger:
-            if result.get("error"):
-                if self.mcp_usage:
-                    self.mcp_usage["failed_calls"] += 1
-                self.mcp_logger.error(f"=== AGENT MCP CALL FAILED ===")
-                self.mcp_logger.error(f"Agent: {self.agent_type}, Tool: {tool_id}")
+        # UPDATE METRICS
+        if result.get("error"):
+            self.mcp_usage["failed_calls"] += 1
+            if self.mcp_logger:
+                self.mcp_logger.error(f"❌ MCP CALL FAILED: {tool_id}")
                 self.mcp_logger.error(f"Error: {result['error']}")
                 self.mcp_logger.error(f"Duration: {duration:.2f}s")
-            else:
-                if self.mcp_usage:
-                    self.mcp_usage["successful_calls"] += 1
-                self.mcp_logger.info(f"=== AGENT MCP CALL SUCCESS ===")
-                self.mcp_logger.info(f"Agent: {self.agent_type}, Tool: {tool_id}")
+        else:
+            self.mcp_usage["successful_calls"] += 1
+            # CACHE SUCCESSFUL RESULTS
+            self._cache_result(cache_key, result, tool_id, method, params)
+            if self.mcp_logger:
+                self.mcp_logger.info(f"✅ MCP CALL SUCCESS: {tool_id}")
                 self.mcp_logger.info(f"Duration: {duration:.2f}s")
-            
+                self.mcp_logger.info(f"Cached for future use")
+        
+        if self.mcp_logger:
             self.mcp_logger.debug(f"Full response: {json.dumps(result, indent=2)}")
         
         return result
+    
+    def _generate_cache_key(self, tool_id: str, method: str, params: Dict) -> str:
+        """Generate a cache key for this MCP call."""
+        import hashlib
+        
+        # For documentation tools, key by library name only
+        if 'context7' in tool_id or 'documentation' in tool_id:
+            if method == "resolve-library-id":
+                library_name = params.get("libraryName", "unknown")
+                return f"doc_resolve_{library_name}"
+            elif method == "get-library-docs":
+                library_id = params.get("context7CompatibleLibraryID", "unknown")
+                topic = params.get("topic", "general")
+                return f"doc_get_{library_id}_{topic}"
+        
+        # For sequential thinking, hash the problem text
+        if 'sequential' in tool_id and method == "sequentialthinking":
+            thought = params.get("thought", "")
+            if len(thought) > 100:
+                problem_hash = hashlib.md5(thought.encode()).hexdigest()[:12]
+                return f"thinking_{problem_hash}"
+        
+        # Default: hash all parameters
+        param_str = json.dumps(params, sort_keys=True)
+        param_hash = hashlib.md5(param_str.encode()).hexdigest()[:12]
+        return f"{tool_id}_{method}_{param_hash}"
+    
+    def _check_cache(self, cache_key: str, tool_id: str, method: str, params: Dict) -> Optional[Dict]:
+        """Check if we have a cached result for this call."""
+        cache = BaseAgent._execution_cache
+        
+        # Documentation caching
+        if cache_key.startswith("doc_"):
+            return cache["documentation"].get(cache_key)
+        
+        # Sequential thinking caching  
+        if cache_key.startswith("thinking_"):
+            return cache["sequential_thinking"].get(cache_key)
+        
+        return None
+    
+    def _cache_result(self, cache_key: str, result: Dict, tool_id: str, method: str, params: Dict):
+        """Cache a successful result."""
+        if result.get("error"):
+            return  # Don't cache errors
+        
+        cache = BaseAgent._execution_cache
+        
+        # Documentation caching
+        if cache_key.startswith("doc_"):
+            cache["documentation"][cache_key] = result
+            if self.mcp_logger:
+                self.mcp_logger.debug(f"📚 Cached documentation: {cache_key}")
+        
+        # Sequential thinking caching
+        elif cache_key.startswith("thinking_"):
+            cache["sequential_thinking"][cache_key] = result
+            if self.mcp_logger:
+                self.mcp_logger.debug(f"🧠 Cached thinking result: {cache_key}")
+    
+    def _should_throttle_call(self, tool_id: str, method: str, params: Dict, justification: str) -> bool:
+        """Intelligent throttling to prevent wasteful MCP usage."""
+        cache = BaseAgent._execution_cache
+        current_count = cache["call_counts"].get(tool_id, 0)
+        
+        # CONTEXT7/DOCUMENTATION THROTTLING: Max 3 calls per unique library
+        if 'context7' in tool_id or 'documentation' in tool_id:
+            if method == "resolve-library-id":
+                library_name = params.get("libraryName", "unknown")
+                library_calls = sum(1 for key in cache["documentation"].keys() 
+                                  if key.startswith(f"doc_resolve_{library_name}"))
+                if library_calls >= 2:  # Already resolved this library
+                    return True
+            
+            elif method == "get-library-docs":
+                library_id = params.get("context7CompatibleLibraryID", "unknown")
+                lib_doc_calls = sum(1 for key in cache["documentation"].keys() 
+                                  if key.startswith(f"doc_get_{library_id}"))
+                if lib_doc_calls >= 3:  # Max 3 doc calls per library
+                    return True
+        
+        # SEQUENTIAL THINKING THROTTLING: Max 20 calls per execution
+        if 'sequential' in tool_id and current_count >= 20:
+            if not justification or len(justification) < 20:
+                return True  # Require good justification for >20 calls
+        
+        # GENERAL THROTTLING: Max 50 calls per tool per execution
+        if current_count >= 50:
+            return True
+        
+        return False
     
     def get_reasoning_tool(self) -> Optional[str]:
         """
@@ -313,7 +452,12 @@ class BaseAgent(ABC):
             if context:
                 params.update(context)
             
-            result = self.mcp_manager.call_specific_tool(reasoning_tool, "sequentialthinking", params)
+            # USE UNIFIED INTERFACE with justification
+            justification = f"Sequential thinking for: {problem[:50]}..."
+            result = self.use_mcp_tool(reasoning_tool, "tools/call", {
+                "name": "sequentialthinking",
+                "arguments": params
+            }, justification=justification)
             
             if not result.get("error"):
                 # Extract the actual thinking result
@@ -436,8 +580,12 @@ class BaseAgent(ABC):
                 self.mcp_logger.info(f"Looking up documentation for '{library_name}'" + 
                                    (f" (topic: {topic})" if topic else ""))
             
-            # First resolve the library ID
-            resolve_result = self.mcp_manager.call_specific_tool(doc_tool, "resolve-library-id", {"libraryName": library_name})
+            # First resolve the library ID using UNIFIED INTERFACE
+            justification = f"Resolving library ID for: {library_name}"
+            resolve_result = self.use_mcp_tool(doc_tool, "tools/call", {
+                "name": "resolve-library-id",
+                "arguments": {"libraryName": library_name}
+            }, justification=justification)
             
             if resolve_result.get("error"):
                 return f"Error resolving library '{library_name}': {resolve_result['error']}"
@@ -456,12 +604,16 @@ class BaseAgent(ABC):
             if self.mcp_logger:
                 self.mcp_logger.info(f"Resolved library ID: {library_id}")
             
-            # Get the documentation
+            # Get the documentation using UNIFIED INTERFACE
             doc_params = {"context7CompatibleLibraryID": library_id}
             if topic:
                 doc_params["topic"] = topic
             
-            doc_result = self.mcp_manager.call_specific_tool(doc_tool, "get-library-docs", doc_params)
+            justification = f"Getting docs for {library_name} ({library_id})" + (f" topic: {topic}" if topic else "")
+            doc_result = self.use_mcp_tool(doc_tool, "tools/call", {
+                "name": "get-library-docs", 
+                "arguments": doc_params
+            }, justification=justification)
             
             if not doc_result.get("error"):
                 result_content = doc_result.get("result", {})
@@ -578,16 +730,354 @@ class BaseAgent(ABC):
         return self.mcp_usage.copy() if self.mcp_usage else {}
     
     def log_mcp_usage_summary(self):
-        """Log a summary of MCP tool usage for this agent."""
-        if not self.mcp_logger or not self.mcp_usage:
+        """Log summary of MCP tool usage by this agent."""
+        if not self.mcp_manager or not self.mcp_manager.is_enabled():
             return
         
-        self.mcp_logger.info(f"=== MCP Usage Summary for {self.agent_id} ===")
+        self.mcp_logger.info(f"=== {self.agent_type.upper()} AGENT MCP USAGE SUMMARY ===")
         self.mcp_logger.info(f"Total MCP calls: {self.mcp_usage['total_calls']}")
         self.mcp_logger.info(f"Successful calls: {self.mcp_usage['successful_calls']}")
         self.mcp_logger.info(f"Failed calls: {self.mcp_usage['failed_calls']}")
+        self.mcp_logger.info(f"Cache hits: {self.mcp_usage['cache_hits']}")
+        self.mcp_logger.info(f"Cache misses: {self.mcp_usage['cache_misses']}")
+        self.mcp_logger.info(f"Throttled calls: {self.mcp_usage['throttled_calls']}")
+        
+        if self.mcp_usage['total_calls'] > 0:
+            success_rate = (self.mcp_usage['successful_calls'] / self.mcp_usage['total_calls']) * 100
+            self.mcp_logger.info(f"Success rate: {success_rate:.1f}%")
+            
+            if self.mcp_usage['cache_hits'] + self.mcp_usage['cache_misses'] > 0:
+                cache_rate = (self.mcp_usage['cache_hits'] / (self.mcp_usage['cache_hits'] + self.mcp_usage['cache_misses'])) * 100
+                self.mcp_logger.info(f"Cache efficiency: {cache_rate:.1f}%")
         
         if self.mcp_usage['tools_used']:
-            self.mcp_logger.info("Tools used:")
+            self.mcp_logger.info("Per-tool usage:")
             for tool_id, count in self.mcp_usage['tools_used'].items():
                 self.mcp_logger.info(f"  {tool_id}: {count} calls")
+        
+        self.mcp_logger.info("=== END MCP USAGE SUMMARY ===")
+    
+    def collect_mcp_metrics(self) -> Dict:
+        """
+        Collect MCP metrics for status reporting.
+        
+        Returns:
+            Dict: MCP usage metrics including tool-specific counts
+        """
+        # Get agent-level metrics
+        agent_metrics = self.mcp_usage.copy() if self.mcp_usage else {}
+        
+        # Get MCP manager metrics if available
+        manager_metrics = {}
+        if self.mcp_manager and self.mcp_manager.is_enabled():
+            try:
+                if hasattr(self.mcp_manager, 'get_metrics'):
+                    manager_metrics = self.mcp_manager.get_metrics()
+            except Exception as e:
+                if hasattr(self, 'logger'):
+                    self.logger.warning(f"Failed to get MCP manager metrics: {e}")
+        
+        # Combine metrics with server/tool details
+        combined_metrics = {
+            "agent_metrics": agent_metrics,
+            "manager_metrics": manager_metrics,
+            "agent_type": self.agent_type,
+            "agent_id": self.agent_id
+        }
+        
+        # Add server names and tool details
+        if self.mcp_manager and hasattr(self.mcp_manager, 'mcp_tools'):
+            server_calls = {}
+            try:
+                for tool_id, tool_info in self.mcp_manager.mcp_tools.items():
+                    # Get usage count from agent metrics first, then manager
+                    usage_count = agent_metrics.get("tools_used", {}).get(tool_id, 0)
+                    if usage_count == 0:
+                        usage_count = manager_metrics.get("tools_used", {}).get(tool_id, 0)
+                    
+                    server_name = tool_info.get("name", tool_id)
+                    server_calls[server_name] = server_calls.get(server_name, 0) + usage_count
+                
+                combined_metrics["server_calls"] = server_calls
+            except Exception as e:
+                if hasattr(self, 'logger'):
+                    self.logger.warning(f"Failed to get server call details: {e}")
+        
+        return combined_metrics
+    
+    def collect_llm_metrics(self) -> Dict:
+        """
+        Collect LLM metrics for status reporting.
+        
+        Returns:
+            Dict: LLM usage metrics including model and token counts
+        """
+        llm_metrics = {
+            "agent_type": self.agent_type,
+            "agent_id": self.agent_id,
+            "model": "unknown",
+            "provider": "unknown",
+            "total_calls": 0,
+            "total_input_tokens": 0,
+            "total_output_tokens": 0
+        }
+        
+        # Get model and provider info from LLM provider
+        if self.llm_provider:
+            try:
+                if hasattr(self.llm_provider, 'model'):
+                    llm_metrics["model"] = self.llm_provider.model
+                
+                if hasattr(self.llm_provider, '__class__'):
+                    provider_name = self.llm_provider.__class__.__name__.replace('Provider', '')
+                    llm_metrics["provider"] = provider_name
+                
+                # Try to get usage metrics if the provider supports it
+                if hasattr(self.llm_provider, 'get_usage_metrics'):
+                    usage = self.llm_provider.get_usage_metrics()
+                    llm_metrics.update(usage)
+                
+            except Exception as e:
+                self.logger.warning(f"Failed to get LLM provider metrics: {e}")
+        
+        return llm_metrics
+    
+    # Common Project File Operations
+    
+    def _read_project_files(self, project_dir: str) -> Dict:
+        """Read all files in the project directory with enhanced analysis."""
+        import os
+        
+        files = {}
+        total_files = 0
+        total_lines = 0
+        
+        try:
+            for root, dirs, filenames in os.walk(project_dir):
+                # Skip hidden directories and common ignore patterns
+                dirs[:] = [d for d in dirs if not d.startswith('.') and d not in ['__pycache__', 'node_modules', '.git']]
+                
+                for filename in filenames:
+                    if filename.startswith('.'):
+                        continue
+                        
+                    file_path = os.path.join(root, filename)
+                    relative_path = os.path.relpath(file_path, project_dir)
+                    
+                    try:
+                        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                            content = f.read()
+                            lines = content.count('\n') + 1
+                            
+                        files[relative_path] = {
+                            "content": content,
+                            "lines": lines,
+                            "size": len(content),
+                            "extension": os.path.splitext(filename)[1],
+                            "directory": os.path.dirname(relative_path)
+                        }
+                        
+                        total_files += 1
+                        total_lines += lines
+                        
+                    except Exception as e:
+                        self.logger.warning(f"Could not read file {relative_path}: {e}")
+                        continue
+            
+            # Perform structure analysis using the existing files
+            structure_analysis = self._analyze_project_structure_with_llm(files)
+            
+            self.logger.info(f"Read {total_files} files with {total_lines} total lines")
+            
+            return {
+                "files": files,
+                "total_files": total_files,
+                "total_lines": total_lines,
+                "structure_analysis": structure_analysis
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Error reading project files: {e}")
+            return {
+                "files": {},
+                "total_files": 0,
+                "total_lines": 0,
+                "structure_analysis": {"status": "error", "issues": [f"Failed to read project: {e}"]}
+            }
+    
+    def _analyze_project_structure_with_llm(self, existing_files: Dict) -> Dict:
+        """Analyze project structure using LLM to identify issues and recommendations."""
+        if not existing_files:
+            return {
+                "status": "empty",
+                "issues": ["No files found in project"],
+                "recommendations": ["Create initial project structure"]
+            }
+        
+        # Prepare file structure summary for analysis
+        file_structure = ""
+        for file_path, file_info in existing_files.items():
+            file_structure += f"- {file_path} ({file_info.get('lines', 0)} lines, {file_info.get('extension', 'no ext')})\n"
+        
+        prompt = f"""
+        Analyze this project structure and identify any issues or improvements needed:
+        
+        PROJECT FILES:
+        {file_structure}
+        
+        Please analyze for:
+        1. Duplicate folder structures (e.g., python/python/, src/src/)
+        2. Files in wrong locations for their type
+        3. Missing important structure files (like __init__.py for Python)
+        4. Inconsistent organization patterns
+        5. Potential improvements to project organization
+        
+        Respond in this format:
+        STATUS: [good/needs_improvement/poor]
+        
+        ISSUES:
+        - [list any structural issues found]
+        
+        RECOMMENDATIONS:
+        - [list specific recommendations]
+        
+        DUPLICATE_PATHS:
+        - [list any duplicate folder structures]
+        """
+        
+        try:
+            if self.llm_provider:
+                response = self.llm_provider.generate(prompt, max_tokens=1000)
+                return self._parse_structure_analysis(response)
+            else:
+                return {
+                    "status": "unknown",
+                    "issues": ["No LLM provider available for analysis"],
+                    "recommendations": ["Manual review recommended"]
+                }
+        except Exception as e:
+            self.logger.error(f"Error analyzing project structure: {e}")
+            return {
+                "status": "unknown",
+                "issues": [f"Analysis failed: {e}"],
+                "recommendations": ["Manual review recommended"]
+            }
+    
+    def _parse_structure_analysis(self, analysis_response: str) -> Dict:
+        """Parse the structure analysis response from LLM."""
+        result = {
+            "status": "unknown",
+            "issues": [],
+            "recommendations": [],
+            "duplicate_paths": []
+        }
+        
+        try:
+            lines = analysis_response.strip().split('\n')
+            current_section = None
+            
+            for line in lines:
+                line = line.strip()
+                if not line:
+                    continue
+                    
+                if line.startswith('STATUS:'):
+                    result["status"] = line.split(':', 1)[1].strip().lower()
+                elif line.startswith('ISSUES:'):
+                    current_section = "issues"
+                elif line.startswith('RECOMMENDATIONS:'):
+                    current_section = "recommendations"
+                elif line.startswith('DUPLICATE_PATHS:'):
+                    current_section = "duplicate_paths"
+                elif line.startswith('- ') and current_section:
+                    item = line[2:].strip()
+                    if item:
+                        result[current_section].append(item)
+            
+        except Exception as e:
+            self.logger.error(f"Error parsing structure analysis: {e}")
+        
+        return result
+    
+    def _detect_target_technology(self) -> str:
+        """Detect the target technology based on goal and context."""
+        # This can be overridden by specific agents or enhanced with more logic
+        goal_text = getattr(self, '_current_goal', '').lower()
+        
+        # Technology detection patterns
+        if any(keyword in goal_text for keyword in ['python', 'django', 'flask', 'fastapi', 'pandas']):
+            return "python"
+        elif any(keyword in goal_text for keyword in ['javascript', 'js', 'node', 'react', 'vue', 'angular']):
+            return "javascript"
+        elif any(keyword in goal_text for keyword in ['web', 'html', 'css', 'website', 'frontend']):
+            return "web"
+        elif any(keyword in goal_text for keyword in ['java', 'spring', 'maven']):
+            return "java"
+        elif any(keyword in goal_text for keyword in ['c++', 'cpp', 'cmake']):
+            return "cpp"
+        else:
+            return "python"  # Default to Python
+    
+    def _get_file_extension_for_technology(self, technology: str) -> str:
+        """Get the appropriate file extension for a technology."""
+        extensions = {
+            "python": ".py",
+            "javascript": ".js",
+            "web": ".html",
+            "java": ".java",
+            "cpp": ".cpp",
+            "typescript": ".ts",
+            "go": ".go",
+            "rust": ".rs"
+        }
+        return extensions.get(technology, ".py")
+    
+    def _format_files_for_analysis(self, project_files: Dict) -> str:
+        """Format project files for LLM analysis."""
+        if not project_files:
+            return "No files found in project."
+        
+        formatted = "PROJECT FILES:\n"
+        for file_path, file_info in project_files.items():
+            lines = file_info.get('lines', 0)
+            size = file_info.get('size', 0)
+            ext = file_info.get('extension', '')
+            formatted += f"- {file_path} ({lines} lines, {size} bytes, {ext})\n"
+        
+        return formatted
+
+    @classmethod
+    def log_execution_cache_summary(cls):
+        """Log summary of execution-wide cache usage."""
+        cache = cls._execution_cache
+        logger = logging.getLogger("swarmdev.mcp")
+        
+        logger.info("=== EXECUTION CACHE SUMMARY ===")
+        logger.info(f"Documentation cache entries: {len(cache['documentation'])}")
+        logger.info(f"Sequential thinking cache entries: {len(cache['sequential_thinking'])}")
+        
+        logger.info("Call counts by tool:")
+        for tool_id, count in cache['call_counts'].items():
+            logger.info(f"  {tool_id}: {count} calls")
+        
+        if cache['documentation']:
+            logger.info("Cached documentation:")
+            for key in cache['documentation'].keys():
+                logger.info(f"  {key}")
+        
+        if cache['sequential_thinking']:
+            logger.info("Cached thinking problems:")
+            for key in cache['sequential_thinking'].keys():
+                logger.info(f"  {key}")
+        
+        logger.info("=== END CACHE SUMMARY ===")
+    
+    @classmethod
+    def clear_execution_cache(cls):
+        """Clear the execution cache (for new builds)."""
+        cls._execution_cache = {
+            'documentation': {},
+            'sequential_thinking': {},
+            'execution_id': None,
+            'call_counts': {}
+        }

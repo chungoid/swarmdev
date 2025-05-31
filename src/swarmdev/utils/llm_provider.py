@@ -15,6 +15,15 @@ class LLMProviderInterface(ABC):
     must implement to be compatible with the SwarmDev platform.
     """
     
+    def __init__(self):
+        """Initialize the LLM provider with usage tracking."""
+        self.usage_metrics = {
+            "total_calls": 0,
+            "total_input_tokens": 0,
+            "total_output_tokens": 0,
+            "total_cost": 0.0
+        }
+    
     @abstractmethod
     def generate_text(self, prompt: str, **kwargs) -> str:
         """
@@ -66,6 +75,29 @@ class LLMProviderInterface(ABC):
             Dict[str, bool]: Dictionary of capability names and availability
         """
         pass
+    
+    def get_usage_metrics(self) -> Dict:
+        """
+        Get usage metrics for this LLM provider.
+        
+        Returns:
+            Dict: Usage metrics including token counts and costs
+        """
+        return self.usage_metrics.copy()
+    
+    def _update_usage_metrics(self, input_tokens: int, output_tokens: int, cost: float = 0.0):
+        """
+        Update usage metrics after an API call.
+        
+        Args:
+            input_tokens: Number of input tokens used
+            output_tokens: Number of output tokens generated
+            cost: Cost of the API call
+        """
+        self.usage_metrics["total_calls"] += 1
+        self.usage_metrics["total_input_tokens"] += input_tokens
+        self.usage_metrics["total_output_tokens"] += output_tokens
+        self.usage_metrics["total_cost"] += cost
 
 
 class OpenAIProvider(LLMProviderInterface):
@@ -84,6 +116,8 @@ class OpenAIProvider(LLMProviderInterface):
             model: Model name
             **kwargs: Additional configuration parameters
         """
+        super().__init__()  # Initialize usage tracking
+        
         try:
             from openai import OpenAI
         except ImportError:
@@ -120,6 +154,13 @@ class OpenAIProvider(LLMProviderInterface):
             **params
         )
         
+        # Track token usage
+        if hasattr(response, 'usage'):
+            self._update_usage_metrics(
+                input_tokens=response.usage.prompt_tokens,
+                output_tokens=response.usage.completion_tokens
+            )
+        
         return response.choices[0].message.content
     
     def generate_chat(self, messages: List[Dict[str, str]], **kwargs) -> str:
@@ -155,6 +196,13 @@ class OpenAIProvider(LLMProviderInterface):
             messages=openai_messages,
             **params
         )
+        
+        # Track token usage
+        if hasattr(response, 'usage'):
+            self._update_usage_metrics(
+                input_tokens=response.usage.prompt_tokens,
+                output_tokens=response.usage.completion_tokens
+            )
         
         return response.choices[0].message.content
     
@@ -226,13 +274,15 @@ class AnthropicProvider(LLMProviderInterface):
             model: Model name
             **kwargs: Additional configuration parameters
         """
+        super().__init__()  # Initialize usage tracking
+        
         try:
-            from anthropic import Anthropic
+            import anthropic
         except ImportError:
             raise ImportError("Anthropic package not installed. Install with 'pip install anthropic'.")
         
         self.model = model
-        self.client = Anthropic(api_key=api_key)
+        self.client = anthropic.Anthropic(api_key=api_key)
         self.config = kwargs
     
     def generate_text(self, prompt: str, **kwargs) -> str:
@@ -372,20 +422,19 @@ class GoogleProvider(LLMProviderInterface):
             model: Model name
             **kwargs: Additional configuration parameters
         """
+        super().__init__()  # Initialize usage tracking
+        
         try:
-            import google.genai as genai
+            import google.generativeai as genai
         except ImportError:
-            raise ImportError("Google GenAI package not installed. Install with 'pip install google-genai'.")
+            raise ImportError("Google GenerativeAI package not installed. Install with 'pip install google-generativeai'.")
         
         self.model = model
-        import os
-        self.api_key = api_key or os.environ.get("GOOGLE_API_KEY")
-        if not self.api_key:
-            raise ValueError("Google API key required. Set GOOGLE_API_KEY environment variable.")
+        if api_key:
+            genai.configure(api_key=api_key)
         
-        # Configure the client
-        genai.configure(api_key=self.api_key)
-        self.client = genai.GenerativeModel(model_name=model)
+        # Initialize the model
+        self.client = genai.GenerativeModel(self.model)
         self.config = kwargs
     
     def generate_text(self, prompt: str, **kwargs) -> str:
@@ -473,7 +522,7 @@ class GoogleProvider(LLMProviderInterface):
             List[List[float]]: List of embedding vectors
         """
         try:
-            import google.genai as genai
+            import google.generativeai as genai
             
             embeddings = []
             for text in texts:

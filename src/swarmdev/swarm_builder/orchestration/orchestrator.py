@@ -174,6 +174,10 @@ class Orchestrator:
         else:
             overall_status = "in_progress"
         
+        # Collect MCP and LLM metrics from agents
+        mcp_metrics = self._collect_mcp_metrics()
+        llm_metrics = self._collect_llm_metrics()
+        
         # Prepare status report
         status = {
             "execution_id": execution_id,
@@ -182,7 +186,9 @@ class Orchestrator:
             "completed_tasks": completed_tasks,
             "failed_tasks": failed_tasks,
             "in_progress_tasks": in_progress_tasks,
-            "tasks": {task_id: task.get("status") for task_id, task in execution_tasks.items()}
+            "tasks": {task_id: task.get("status") for task_id, task in execution_tasks.items()},
+            "mcp_metrics": mcp_metrics,
+            "llm_metrics": llm_metrics
         }
         
         return status
@@ -910,8 +916,17 @@ class Orchestrator:
             # Also check for goal files on disk (check both goals directory and project root for backward compatibility)
             try:
                 import os
+                
+                # Get project_dir from any task in this execution family
+                project_dir = "."
+                for task_id, task in self.tasks.items():
+                    task_exec_id = task.get("execution_id", "")
+                    if (task_exec_id == base_execution or task_exec_id.startswith(f"{base_execution}_cycle_")):
+                        project_dir = task.get("project_dir", ".")
+                        break
+                
                 # First check .swarmdev/goals directory (new location)
-                goals_dir_path = os.path.join(".swarmdev", "goals", f"goal_iteration_{iteration_count}.txt")
+                goals_dir_path = os.path.join(project_dir, ".swarmdev", "goals", f"goal_iteration_{iteration_count}.txt")
                 if os.path.exists(goals_dir_path):
                     with open(goals_dir_path, 'r') as f:
                         evolved_goal = f.read().strip()
@@ -983,3 +998,19 @@ class Orchestrator:
         except Exception as e:
             self.logger.error(f"Error getting previous analysis improvements: {e}")
             return []
+
+    def _collect_mcp_metrics(self) -> Dict:
+        """Collect metrics from all agents related to MCP (Machine Learning and AI) usage."""
+        metrics = {}
+        for agent_id, agent in self.agents.items():
+            if hasattr(agent, 'collect_mcp_metrics'):
+                metrics[agent_id] = agent.collect_mcp_metrics()
+        return metrics
+
+    def _collect_llm_metrics(self) -> Dict:
+        """Collect metrics from all agents related to LLM (Large Language Model) usage."""
+        metrics = {}
+        for agent_id, agent in self.agents.items():
+            if hasattr(agent, 'collect_llm_metrics'):
+                metrics[agent_id] = agent.collect_llm_metrics()
+        return metrics

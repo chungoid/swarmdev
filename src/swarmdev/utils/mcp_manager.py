@@ -22,13 +22,15 @@ class MCPManager:
     with external MCP servers through JSON-RPC protocol.
     """
     
-    def __init__(self, config: Dict):
+    def __init__(self, config: Dict, project_dir: str = "."):
         """
         Initialize the MCP Manager.
         
         Args:
             config: MCP configuration dictionary
+            project_dir: Project directory for logging and config files
         """
+        self.project_dir = project_dir
         self.config = config
         self.mcp_tools = {}
         self.active_connections = {}
@@ -69,8 +71,9 @@ class MCPManager:
     
     def _setup_mcp_logging(self):
         """Set up dedicated MCP logging to mcp.log file."""
-        # Create .swarmdev/logs directory if it doesn't exist
-        os.makedirs(".swarmdev/logs", exist_ok=True)
+        # Create .swarmdev/logs directory in the PROJECT directory
+        logs_dir = os.path.join(self.project_dir, ".swarmdev", "logs")
+        os.makedirs(logs_dir, exist_ok=True)
         
         # Create MCP-specific logger
         self.mcp_logger = logging.getLogger("swarmdev.mcp")
@@ -80,8 +83,9 @@ class MCPManager:
         for handler in self.mcp_logger.handlers[:]:
             self.mcp_logger.removeHandler(handler)
         
-        # Create file handler for mcp.log
-        mcp_file_handler = logging.FileHandler(".swarmdev/logs/mcp.log")
+        # Create file handler for mcp.log in the PROJECT directory
+        mcp_log_file = os.path.join(logs_dir, "mcp.log")
+        mcp_file_handler = logging.FileHandler(mcp_log_file)
         mcp_file_handler.setLevel(logging.DEBUG)
         
         # Create console handler for immediate feedback
