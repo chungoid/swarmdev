@@ -125,8 +125,9 @@ class ResearchAgent(BaseAgent):
                 tech_response = self.llm_provider.generate_text(tech_extraction_prompt, temperature=0.1)
                 technologies = [tech.strip() for tech in tech_response.split('\n') if tech.strip() and tech.strip().lower() != 'none']
                 
-                # Look up documentation for found technologies
-                for tech in technologies[:3]:  # Limit to prevent spam
+                # Look up documentation for found technologies (limit to prevent excessive MCP calls)
+                max_tech_lookups = min(len(technologies), 5 if len(technologies) > 10 else 3)
+                for tech in technologies[:max_tech_lookups]:
                     if tech:
                         docs = self._lookup_technology_docs(tech)
                         if docs:
@@ -163,7 +164,7 @@ class ResearchAgent(BaseAgent):
                 rec_prompt = f"""
                 Based on this analysis: {analysis}
                 
-                Extract 3-5 specific, actionable recommendations.
+                Extract the most important, specific, and actionable recommendations.
                 Return as a simple list (one per line).
                 """
                 
@@ -411,7 +412,9 @@ class PlanningAgent(BaseAgent):
                         "estimated_effort": "TBD"
                     })
             
-            return tasks[:10]  # Limit to 10 tasks
+            # Intelligent task limiting - allow more tasks for complex goals, fewer for simple ones
+            max_tasks = min(len(tasks), 15 if len(goal) > 200 else 8)
+            return tasks[:max_tasks]
             
         except Exception as e:
             self.logger.error(f"Task breakdown failed: {e}")
@@ -575,7 +578,9 @@ class DevelopmentAgent(BaseAgent):
                         files.append(line)
             
             
-            return {"approach": plan, "files": files[:10]}  # Limit files
+            # Intelligent file limiting - allow more files for complex projects
+            max_files = min(len(files), 15 if len(goal) > 300 else 10)
+            return {"approach": plan, "files": files[:max_files]}
             
         except Exception as e:
             self.logger.error(f"Implementation planning failed: {e}")
@@ -596,7 +601,8 @@ class DevelopmentAgent(BaseAgent):
         planned_files = implementation_plan.get("files", [])
         approach = implementation_plan.get("approach", "")
         
-        for file_path in planned_files[:8]:  # Increase limit for package files
+        # Process all planned files (already filtered by intelligent limit above)
+        for file_path in planned_files:
             try:
                 # Handle special cases for certain file types
                 if file_path == '__init__.py' or file_path.endswith('/__init__.py'):
