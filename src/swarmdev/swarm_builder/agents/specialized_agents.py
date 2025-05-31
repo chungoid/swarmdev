@@ -13,6 +13,7 @@ import time
 
 from swarmdev.utils.llm_provider import LLMProviderInterface
 from swarmdev.utils.agent_logger import AgentLogger
+from swarmdev.utils.mcp_manager import MCPManager
 from .base_agent import BaseAgent
 
 
@@ -24,17 +25,22 @@ class ResearchAgent(BaseAgent):
     and synthesizing findings to support project development.
     """
     
-    def __init__(self, agent_id: str, llm_provider: LLMProviderInterface, config: Optional[Dict] = None):
+    def __init__(self, agent_id: str, agent_type: str, llm_provider=None, mcp_manager=None, config: Optional[Dict] = None):
         """
         Initialize the Research Agent.
         
         Args:
             agent_id: Unique identifier for this agent
+            agent_type: Type of agent (should be "research")
             llm_provider: LLM provider instance
+            mcp_manager: MCP manager instance
             config: Optional configuration dictionary
         """
-        super().__init__(agent_id, "research", config)
-        self.llm_provider = llm_provider
+        super().__init__(agent_id, agent_type, llm_provider, mcp_manager, config)
+        
+        # Initialize comprehensive logger
+        self.logger = AgentLogger.get_logger("ResearchAgent", agent_id)
+        self.logger.info(f"ResearchAgent initialized with ID: {agent_id}")
         self.search_tools = []  # Would be initialized with actual search tools
     
     def process_task(self, task: Dict) -> Dict:
@@ -56,6 +62,33 @@ class ResearchAgent(BaseAgent):
             depth = task.get("depth", "medium")
             focus_areas = task.get("focus_areas", [])
             
+            # Log task start
+            AgentLogger.log_task_start(self.logger, task)
+            start_time = time.time()
+            
+            # Check if we should use MCP tools for this complex research task
+            if self.should_use_mcp_for_task(task):
+                if self.mcp_logger:
+                    self.mcp_logger.info("Using MCP tools for enhanced research capabilities")
+                
+                # Use sequential thinking for research planning
+                research_plan = self.think_sequentially(
+                    f"Plan comprehensive research for: {goal}. Focus areas: {focus_areas}. "
+                    f"Depth required: {depth}. What are the key research questions and approaches?"
+                )
+                
+                # Dynamically look up documentation for technologies mentioned in the goal
+                tech_documentation = self.lookup_documentation_for_technologies(goal)
+                if tech_documentation:
+                    for tech, docs in tech_documentation.items():
+                        if self.mcp_logger:
+                            self.mcp_logger.info(f"Retrieved documentation for {tech}")
+                        focus_areas.append(f"{tech} documentation insights")
+                        # Store the documentation for use in research
+                        if not hasattr(self, '_tech_docs'):
+                            self._tech_docs = {}
+                        self._tech_docs[tech] = docs
+            
             # Conduct research based on the actual goal
             sources = self._conduct_research(goal, topic, depth, focus_areas)
             
@@ -73,6 +106,10 @@ class ResearchAgent(BaseAgent):
                 "sources": [source["url"] for source in sources],
                 "summary": self._generate_summary(findings)
             }
+            
+            # Log task completion
+            duration = time.time() - start_time
+            AgentLogger.log_task_complete(self.logger, task, result, duration)
             
             self.status = "ready"
             return result
@@ -203,17 +240,22 @@ class PlanningAgent(BaseAgent):
     and creating detailed implementation plans.
     """
     
-    def __init__(self, agent_id: str, llm_provider: LLMProviderInterface, config: Optional[Dict] = None):
+    def __init__(self, agent_id: str, agent_type: str, llm_provider=None, mcp_manager=None, config: Optional[Dict] = None):
         """
         Initialize the Planning Agent.
         
         Args:
             agent_id: Unique identifier for this agent
+            agent_type: Type of agent (should be "planning")
             llm_provider: LLM provider instance
+            mcp_manager: MCP manager instance
             config: Optional configuration dictionary
         """
-        super().__init__(agent_id, "planning", config)
-        self.llm_provider = llm_provider
+        super().__init__(agent_id, agent_type, llm_provider, mcp_manager, config)
+        
+        # Initialize comprehensive logger
+        self.logger = AgentLogger.get_logger("PlanningAgent", agent_id)
+        self.logger.info(f"PlanningAgent initialized with ID: {agent_id}")
     
     def process_task(self, task: Dict) -> Dict:
         """
@@ -234,6 +276,35 @@ class PlanningAgent(BaseAgent):
             research_findings = task.get("research_findings", {})
             constraints = task.get("constraints", [])
             
+            # Log task start
+            AgentLogger.log_task_start(self.logger, task)
+            start_time = time.time()
+            
+            # Check if we should use MCP tools for complex planning
+            if self.should_use_mcp_for_task(task):
+                if self.mcp_logger:
+                    self.mcp_logger.info("Using MCP tools for enhanced planning capabilities")
+                
+                # Use sequential thinking for architecture planning
+                architecture_plan = self.think_sequentially(
+                    f"Design system architecture for: {goal}. Consider these requirements: {requirements}. "
+                    f"Research insights: {research_findings}. What are the key architectural decisions and components?"
+                )
+                if self.mcp_logger:
+                    self.mcp_logger.info("Completed sequential thinking for architecture planning")
+                
+                # Dynamically look up best practices for technologies mentioned in goal
+                tech_documentation = self.lookup_documentation_for_technologies(goal)
+                if tech_documentation:
+                    for tech, docs in tech_documentation.items():
+                        if self.mcp_logger:
+                            self.mcp_logger.info(f"Retrieved best practices for {tech}")
+                        constraints.append(f"Follow {tech} best practices")
+                        # Store the documentation for use in planning
+                        if not hasattr(self, '_tech_docs'):
+                            self._tech_docs = {}
+                        self._tech_docs[tech] = docs
+            
             # Create blueprint based on the actual goal
             blueprint = self._create_blueprint(goal, requirements, research_findings, constraints)
             
@@ -251,6 +322,10 @@ class PlanningAgent(BaseAgent):
                 "components": components,
                 "implementation_plan": implementation_plan
             }
+            
+            # Log task completion
+            duration = time.time() - start_time
+            AgentLogger.log_task_complete(self.logger, task, result, duration)
             
             self.status = "ready"
             return result
@@ -452,17 +527,18 @@ class DevelopmentAgent(BaseAgent):
     and integrating components using MCP tools.
     """
     
-    def __init__(self, agent_id: str, llm_provider: LLMProviderInterface, config: Optional[Dict] = None):
+    def __init__(self, agent_id: str, agent_type: str, llm_provider=None, mcp_manager=None, config: Optional[Dict] = None):
         """
         Initialize the Development Agent.
         
         Args:
             agent_id: Unique identifier for this agent
+            agent_type: Type of agent (should be "development")
             llm_provider: LLM provider instance
+            mcp_manager: MCP manager instance
             config: Optional configuration dictionary
         """
-        super().__init__(agent_id, "development", config)
-        self.llm_provider = llm_provider
+        super().__init__(agent_id, agent_type, llm_provider, mcp_manager, config)
         
         # Initialize comprehensive logger
         self.logger = AgentLogger.get_logger("DevelopmentAgent", agent_id)
@@ -1729,17 +1805,22 @@ class DocumentationAgent(BaseAgent):
     and other documentation artifacts.
     """
     
-    def __init__(self, agent_id: str, llm_provider: LLMProviderInterface, config: Optional[Dict] = None):
+    def __init__(self, agent_id: str, agent_type: str, llm_provider=None, mcp_manager=None, config: Optional[Dict] = None):
         """
         Initialize the Documentation Agent.
         
         Args:
             agent_id: Unique identifier for this agent
+            agent_type: Type of agent (should be "documentation")
             llm_provider: LLM provider instance
+            mcp_manager: MCP manager instance
             config: Optional configuration dictionary
         """
-        super().__init__(agent_id, "documentation", config)
-        self.llm_provider = llm_provider
+        super().__init__(agent_id, agent_type, llm_provider, mcp_manager, config)
+        
+        # Initialize comprehensive logger
+        self.logger = AgentLogger.get_logger("DocumentationAgent", agent_id)
+        self.logger.info(f"DocumentationAgent initialized with ID: {agent_id}")
     
     def process_task(self, task: Dict) -> Dict:
         """
@@ -1917,17 +1998,18 @@ class AnalysisAgent(BaseAgent):
     against goals, and suggesting specific improvements or new features.
     """
     
-    def __init__(self, agent_id: str, llm_provider: LLMProviderInterface, config: Optional[Dict] = None):
+    def __init__(self, agent_id: str, agent_type: str, llm_provider=None, mcp_manager=None, config: Optional[Dict] = None):
         """
         Initialize the Analysis Agent.
         
         Args:
             agent_id: Unique identifier for this agent
+            agent_type: Type of agent (should be "analysis")
             llm_provider: LLM provider instance
+            mcp_manager: MCP manager instance
             config: Optional configuration dictionary
         """
-        super().__init__(agent_id, "analysis", config)
-        self.llm_provider = llm_provider
+        super().__init__(agent_id, agent_type, llm_provider, mcp_manager, config)
         
         # Initialize comprehensive logger
         self.logger = AgentLogger.get_logger("AnalysisAgent", agent_id)

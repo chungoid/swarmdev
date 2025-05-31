@@ -1,0 +1,78 @@
+{
+  "llm": {
+    "provider": "openai",
+    "model": "gpt-4o",
+    "temperature": 0.7,
+    "max_tokens": 4000,
+    "timeout": 60
+  },
+  "project": {
+    "project_dir": "./projects",
+    "goal_dir": "./goals",
+    "max_runtime": 7200
+  },
+  "agents": {
+    "research": {
+      "count": 1,
+      "model": "gpt-4o",
+      "temperature": 0.5,
+      "memory_enabled": true
+    },
+    "planning": {
+      "count": 1,
+      "model": "gpt-4o",
+      "temperature": 0.3,
+      "memory_enabled": true
+    },
+    "development": {
+      "count": 2,
+      "model": "gpt-4o",
+      "temperature": 0.2,
+      "memory_enabled": true
+    },
+    "documentation": {
+      "count": 1,
+      "model": "gpt-4o",
+      "temperature": 0.7,
+      "memory_enabled": true
+    }
+  },
+  "memory": {
+    "enabled": true,
+    "vector_store": "chroma",
+    "vector_store_path": "./vector_store",
+    "embedding_model": "text-embedding-3-small",
+    "cache_enabled": true,
+    "working_memory_limit": 100
+  },
+  "workflow": {
+    "parallelism": 4,
+    "timeout": 3600,
+    "retry_attempts": 3,
+    "checkpoint_interval": 300
+  },
+  "mcp_tools": {
+    "enabled": true,
+    "config_file": "./examples/mcp_config.json",
+    "docker_enabled": true,
+    "docker_network": "swarmdev",
+    "tools": [
+      {
+        "id": "sequentialthinking",
+        "enabled": true,
+        "capabilities": ["reasoning", "planning", "analysis"]
+      },
+      {
+        "id": "context7",
+        "enabled": true,
+        "capabilities": ["context_management", "reasoning", "documentation"]
+      }
+    ]
+  },
+  "optimization": {
+    "enabled": true,
+    "objective": "balanced",
+    "monitor_interval": 60,
+    "adaptation_interval": 3600
+  }
+} 

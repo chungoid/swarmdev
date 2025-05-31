@@ -1,0 +1,31 @@
+{
+  "mcpServers": {
+    "sequentialthinking": {
+      "command": "docker",
+      "args": [
+        "run", "--rm", "-i", "mcp/sequentialthinking"
+      ],
+      "transportType": "stdio",
+      "timeout": 30,
+      "capabilities": ["reasoning", "sequential_thinking", "problem_solving"],
+      "autoApprove": []
+    },
+    "context7": {
+      "command": "docker",
+      "args": [
+        "run", "-i", "--rm", "context7-mcp"
+      ],
+      "transportType": "stdio",
+      "timeout": 60,
+      "capabilities": ["documentation", "context_management", "library_lookup"],
+      "autoApprove": []
+    }
+  },
+  "mcpSettings": {
+    "globalTimeout": 120,
+    "dockerNetwork": null,
+    "enableLogging": true,
+    "logLevel": "DEBUG",
+    "persistentConnections": true
+  }
+} 

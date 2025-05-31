@@ -104,6 +104,9 @@ class SwarmBuilder:
                 self._update_project_status("failed", error="No LLM provider available")
                 return
             
+            # Initialize MCP manager
+            self._setup_mcp_manager()
+            
             # Initialize orchestrator
             self.orchestrator = Orchestrator(self.config)
             
@@ -163,15 +166,42 @@ class SwarmBuilder:
             self.logger.error(f"Failed to initialize LLM provider: {e}")
             self.llm_provider = None
     
+    def _setup_mcp_manager(self):
+        """Set up the MCP manager for the build process."""
+        try:
+            from ..utils.mcp_manager import MCPManager
+            
+            # Get MCP configuration from config
+            mcp_config = self.config.get('mcp', {
+                'enabled': True,
+                'config_file': './mcp_config.json',
+                'docker_enabled': True,
+                'docker_network': None  # Don't use a specific network by default
+            })
+            
+            # Initialize MCP manager
+            self.mcp_manager = MCPManager(mcp_config)
+            
+            # Initialize tools if enabled
+            if self.mcp_manager.is_enabled():
+                self.mcp_manager.initialize_tools()
+                self.logger.info("MCP manager initialized successfully")
+            else:
+                self.logger.info("MCP tools are disabled")
+                
+        except Exception as e:
+            self.logger.warning(f"Failed to initialize MCP manager: {e}")
+            self.mcp_manager = None
+    
     def _register_agents(self):
         """Register specialized agents with the orchestrator."""
         try:
-            # Create specialized agents with LLM provider
-            research_agent = ResearchAgent("research_agent_1", self.llm_provider, self.config)
-            planning_agent = PlanningAgent("planning_agent_1", self.llm_provider, self.config)
-            development_agent = DevelopmentAgent("development_agent_1", self.llm_provider, self.config)
-            documentation_agent = DocumentationAgent("documentation_agent_1", self.llm_provider, self.config)
-            analysis_agent = AnalysisAgent("analysis_agent_1", self.llm_provider, self.config)
+            # Create specialized agents with LLM provider and MCP manager
+            research_agent = ResearchAgent("research_agent_1", "research", self.llm_provider, self.mcp_manager, self.config)
+            planning_agent = PlanningAgent("planning_agent_1", "planning", self.llm_provider, self.mcp_manager, self.config)
+            development_agent = DevelopmentAgent("development_agent_1", "development", self.llm_provider, self.mcp_manager, self.config)
+            documentation_agent = DocumentationAgent("documentation_agent_1", "documentation", self.llm_provider, self.mcp_manager, self.config)
+            analysis_agent = AnalysisAgent("analysis_agent_1", "analysis", self.llm_provider, self.mcp_manager, self.config)
             
             # Register agents with orchestrator
             self.orchestrator.register_agent(research_agent)
