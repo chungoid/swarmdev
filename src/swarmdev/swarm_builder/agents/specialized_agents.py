@@ -1081,9 +1081,14 @@ class DevelopmentAgent(BaseAgent):
         current_improvement = None
         
         for line in response.split('\n'):
-            if line.startswith('=== ACTION:') and line.endswith('==='):
-                current_action = line.replace('=== ACTION:', '').replace('===', '').strip()
-            elif line.startswith('=== FILENAME:') and line.endswith('==='):
+            # Handle both formats: === format and #### format
+            if (line.startswith('=== ACTION:') and line.endswith('===')) or line.startswith('#### ACTION:'):
+                if line.startswith('==='):
+                    current_action = line.replace('=== ACTION:', '').replace('===', '').strip()
+                else:
+                    current_action = line.replace('#### ACTION:', '').strip()
+                    
+            elif (line.startswith('=== FILENAME:') and line.endswith('===')) or line.startswith('#### FILENAME:'):
                 # Save previous file
                 if current_file and current_content and current_action:
                     self._save_implementation_file(
@@ -1092,15 +1097,26 @@ class DevelopmentAgent(BaseAgent):
                     )
                 
                 # Start new file
-                current_file = line.replace('=== FILENAME:', '').replace('===', '').strip()
+                if line.startswith('==='):
+                    current_file = line.replace('=== FILENAME:', '').replace('===', '').strip()
+                else:
+                    current_file = line.replace('#### FILENAME:', '').strip()
                 current_content = []
                 current_improvement = None
                 
-            elif line.startswith('=== IMPROVEMENT:') and line.endswith('==='):
-                current_improvement = line.replace('=== IMPROVEMENT:', '').replace('===', '').strip()
-            elif line.strip() == '=== END FILE ===':
+            elif (line.startswith('=== IMPROVEMENT:') and line.endswith('===')) or line.startswith('#### IMPROVEMENT:'):
+                if line.startswith('==='):
+                    current_improvement = line.replace('=== IMPROVEMENT:', '').replace('===', '').strip()
+                else:
+                    current_improvement = line.replace('#### IMPROVEMENT:', '').strip()
+                    
+            elif line.strip() == '=== END FILE ===' or line.startswith('#### END FILE'):
                 continue
+                
             elif current_file:
+                # Skip markdown code block markers if present
+                if line.strip() in ['```python', '```', '```bash', '```javascript', '```html']:
+                    continue
                 current_content.append(line)
         
         # Save last file
