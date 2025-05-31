@@ -51,23 +51,11 @@
     "retry_attempts": 3,
     "checkpoint_interval": 300
   },
-  "mcp_tools": {
+  "mcp": {
     "enabled": true,
-    "config_file": "./examples/mcp_config.json",
+    "config_file": "./mcp_config.json",
     "docker_enabled": true,
-    "docker_network": "swarmdev",
-    "tools": [
-      {
-        "id": "sequentialthinking",
-        "enabled": true,
-        "capabilities": ["reasoning", "planning", "analysis"]
-      },
-      {
-        "id": "context7",
-        "enabled": true,
-        "capabilities": ["context_management", "reasoning", "documentation"]
-      }
-    ]
+    "docker_network": null
   },
   "optimization": {
     "enabled": true,

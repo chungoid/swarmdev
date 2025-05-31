@@ -1,3161 +1,1052 @@
 """
-Specialized agent implementations for the SwarmDev platform.
-This module provides specialized agent classes for different tasks.
+Specialized Agent implementations for the SwarmDev platform.
+Clean, focused implementations using BaseAgent infrastructure.
 """
 
+import json
 import os
-import re
 from typing import Dict, List, Optional, Any
 from datetime import datetime
-import logging
-import json
-import time
 
-from swarmdev.utils.llm_provider import LLMProviderInterface
-from swarmdev.utils.agent_logger import AgentLogger
-from swarmdev.utils.mcp_manager import MCPManager
-from swarmdev.utils.blueprint_manager import BlueprintManager
 from .base_agent import BaseAgent
 
 
 class ResearchAgent(BaseAgent):
     """
-    Research Agent for gathering information and conducting research.
-    
-    This agent specializes in searching for information, analyzing sources,
-    and synthesizing findings to support project development.
+    Research agent for gathering information and analyzing requirements.
+    Uses MCP tools for documentation lookup and sequential thinking.
     """
     
     def __init__(self, agent_id: str, agent_type: str, llm_provider=None, mcp_manager=None, config: Optional[Dict] = None):
-        """
-        Initialize the Research Agent.
-        
-        Args:
-            agent_id: Unique identifier for this agent
-            agent_type: Type of agent (should be "research")
-            llm_provider: LLM provider instance
-            mcp_manager: MCP manager instance
-            config: Optional configuration dictionary
-        """
         super().__init__(agent_id, agent_type, llm_provider, mcp_manager, config)
-        
-        # Initialize comprehensive logger
-        self.logger = AgentLogger.get_logger("ResearchAgent", agent_id)
-        self.logger.info(f"ResearchAgent initialized with ID: {agent_id}")
-        self.search_tools = []  # Would be initialized with actual search tools
     
     def process_task(self, task: Dict) -> Dict:
-        """
-        Process a research task.
-        
-        Args:
-            task: Task dictionary with details about the research task
-            
-        Returns:
-            Dict: Research findings and results
-        """
-        self.status = "processing"
-        
+        """Process research tasks using LLM and MCP tools."""
         try:
-            # Extract task details and goal
+            self.status = "processing"
             goal = task.get("goal", "")
-            topic = task.get("topic", goal)  # Use goal if topic not specified
-            depth = task.get("depth", "medium")
-            focus_areas = task.get("focus_areas", [])
+            context = task.get("context", {})
             
-            # Log task start
-            AgentLogger.log_task_start(self.logger, task)
-            start_time = time.time()
+            self.logger.info(f"RESEARCH: Starting investigation of goal: {goal[:100]}...")
             
-            # Check if we should use MCP tools for this complex research task
-            if self.should_use_mcp_for_task(task):
-                if self.mcp_logger:
-                    self.mcp_logger.info("Using MCP tools for enhanced research capabilities")
-                
-                # Use sequential thinking for research planning
-                research_plan = self.think_sequentially(
-                    f"Plan comprehensive research for: {goal}. Focus areas: {focus_areas}. "
-                    f"Depth required: {depth}. What are the key research questions and approaches?"
-                )
-                
-                # Dynamically look up documentation for technologies mentioned in the goal
-                tech_documentation = self.lookup_documentation_for_technologies(goal)
-                if tech_documentation:
-                    for tech, docs in tech_documentation.items():
-                        if self.mcp_logger:
-                            self.mcp_logger.info(f"Retrieved documentation for {tech}")
-                        focus_areas.append(f"{tech} documentation insights")
-                        # Store the documentation for use in research
-                        if not hasattr(self, '_tech_docs'):
-                            self._tech_docs = {}
-                        self._tech_docs[tech] = docs
+            # Use MCP sequential thinking for complex research planning
+            research_plan = self._plan_research_approach(goal, context)
             
-            # Conduct research based on the actual goal
-            sources = self._conduct_research(goal, topic, depth, focus_areas)
-            
-            # Analyze sources
-            analyzed_sources = self._analyze_sources(sources)
+            # Conduct the research using the plan
+            research_results = self._conduct_research(research_plan, goal, context)
             
             # Synthesize findings
-            findings = self._synthesize_findings(analyzed_sources)
+            synthesis = self._synthesize_research_findings(research_results, goal)
             
-            # Prepare result
-            result = {
-                "task_id": task.get("task_id"),
-                "status": "completed",
-                "findings": findings,
-                "sources": [source["url"] for source in sources],
-                "summary": self._generate_summary(findings)
+            self.status = "completed"
+            return {
+                "status": "success",
+                "agent_type": self.agent_type,
+                "research_plan": research_plan,
+                "findings": research_results,
+                "synthesis": synthesis,
+                "timestamp": datetime.now().isoformat()
             }
-            
-            # Log task completion
-            duration = time.time() - start_time
-            AgentLogger.log_task_complete(self.logger, task, result, duration)
-            
-            self.status = "ready"
-            return result
             
         except Exception as e:
+            self.logger.error(f"RESEARCH: Failed to process task: {e}")
             return self.handle_error(e, task)
-    
-    def _conduct_research(self, goal: str, topic: str, depth: str, focus_areas: List[str]) -> List[Dict]:
-        """
-        Conduct research on a topic based on a specific goal.
         
-        Args:
-            goal: The specific project goal to research
-            topic: Research topic
-            depth: Research depth (shallow, medium, deep)
-            focus_areas: Specific areas to focus on
-            
-        Returns:
-            List[Dict]: List of sources with their content
-        """
-        # Use LLM to conduct research based on the actual goal
-        research_prompt = f"""
-        Conduct research for the following project goal:
+    def _plan_research_approach(self, goal: str, context: Dict) -> Dict:
+        """Use dynamic MCP reasoning tools to plan research approach."""
+        planning_problem = f"""
+        Plan a comprehensive research approach for this goal:
         
         GOAL: {goal}
+        CONTEXT: {context}
         
-        Focus Areas: {', '.join(focus_areas)}
-        Research Depth: {depth}
+        Consider:
+        1. What information needs to be gathered
+        2. What technologies/libraries should be researched
+        3. What documentation sources would be valuable
+        4. How to structure the research for maximum effectiveness
         
-        Based on this goal, identify key technologies, best practices, and approaches needed.
-        Provide detailed research findings that would help in implementing this specific project.
+        Develop a systematic research plan.
         """
         
-        research_findings = self.llm_provider.generate_text(research_prompt, temperature=0.3)
+        # Try to use any available reasoning tool dynamically
+        reasoning_result = self.discover_and_use_capability(
+            "reasoning", 
+            planning_problem,
+            {"goal": goal, "context": context}
+        )
         
-        # Structure the research as sources
-        sources = [
-            {
-                "url": "research://generated",
-                "title": f"Research Analysis for: {goal[:50]}...",
-                "content": research_findings,
-                "relevance": 1.0
-            }
-        ]
+        if not reasoning_result.get("error"):
+            return {"plan": reasoning_result, "method": "mcp_reasoning"}
         
-        return sources
+        # Fallback to LLM planning
+        if self.llm_provider:
+            planning_prompt = f"""
+            Plan a research approach for: {goal}
+            
+            Context: {context}
+            
+            Create a structured research plan including:
+            1. Information gathering priorities
+            2. Technology research needs
+            3. Documentation sources to investigate
+            4. Research methodology
+            
+            Return as structured plan.
+            """
+            
+            plan_text = self.llm_provider.generate_text(planning_prompt, temperature=0.3)
+            return {"plan": plan_text, "method": "llm_fallback"}
+        
+        return {"plan": "Basic research plan: investigate goal and gather relevant information", "method": "basic"}
     
-    def _analyze_sources(self, sources: List[Dict]) -> List[Dict]:
-        """
-        Analyze research sources.
-        
-        Args:
-            sources: List of sources to analyze
-            
-        Returns:
-            List[Dict]: Analyzed sources with extracted information
-        """
-        # This is a placeholder implementation
-        # In a real implementation, this would use the LLM to analyze sources
-        
-        analyzed_sources = []
-        
-        for source in sources:
-            # Use LLM to analyze the source
-            prompt = f"Analyze the following content and extract key information:\n\n{source['content']}"
-            analysis = self.llm_provider.generate_text(prompt, temperature=0.3)
-            
-            analyzed_source = source.copy()
-            analyzed_source["analysis"] = analysis
-            analyzed_sources.append(analyzed_source)
-        
-        return analyzed_sources
-    
-    def _synthesize_findings(self, analyzed_sources: List[Dict]) -> Dict:
-        """
-        Synthesize findings from analyzed sources.
-        
-        Args:
-            analyzed_sources: List of analyzed sources
-            
-        Returns:
-            Dict: Synthesized findings
-        """
-        # This is a placeholder implementation
-        # In a real implementation, this would use the LLM to synthesize findings
-        
-        # Combine all analyses
-        combined_analysis = "\n\n".join([source["analysis"] for source in analyzed_sources])
-        
-        # Use LLM to synthesize findings
-        prompt = f"Synthesize the following analyses into a coherent set of findings:\n\n{combined_analysis}"
-        synthesis = self.llm_provider.generate_text(prompt, temperature=0.5)
-        
-        # Structure the findings
-        findings = {
-            "main_points": synthesis.split("\n"),
-            "sources": [source["url"] for source in analyzed_sources],
-            "confidence": 0.8
+    def _conduct_research(self, research_plan: Dict, goal: str, context: Dict) -> Dict:
+        """Conduct research using MCP documentation tools and LLM analysis."""
+        results = {
+            "documentation": {},
+            "analysis": "",
+            "technologies_found": [],
+            "recommendations": []
         }
         
-        return findings
-    
-    def _generate_summary(self, findings: Dict) -> str:
-        """
-        Generate a summary of the findings.
-        
-        Args:
-            findings: Synthesized findings
+        # Extract technologies from goal for documentation lookup
+        if self.mcp_manager and self.llm_provider:
+            tech_extraction_prompt = f"""
+            Analyze this goal and extract specific technologies, libraries, or frameworks that need documentation:
             
-        Returns:
-            str: Summary of findings
+            GOAL: {goal}
+            
+            Return a simple list of technology names (one per line) that would benefit from documentation lookup.
+            Only include specific, well-known technologies, libraries, or frameworks.
+            If none are mentioned, return "none".
+            """
+            
+            try:
+                tech_response = self.llm_provider.generate_text(tech_extraction_prompt, temperature=0.1)
+                technologies = [tech.strip() for tech in tech_response.split('\n') if tech.strip() and tech.strip().lower() != 'none']
+                
+                # Look up documentation for found technologies
+                for tech in technologies[:3]:  # Limit to prevent spam
+                    if tech:
+                        docs = self._lookup_technology_docs(tech)
+                        if docs:
+                            results["documentation"][tech] = docs
+                            results["technologies_found"].append(tech)
+                            
+            except Exception as e:
+                self.logger.warning(f"Technology extraction failed: {e}")
+        
+        # Analyze findings with LLM
+        if self.llm_provider:
+            analysis_prompt = f"""
+            Analyze the research findings for this goal:
+            
+            GOAL: {goal}
+            CONTEXT: {context}
+            RESEARCH PLAN: {research_plan}
+            DOCUMENTATION FOUND: {list(results["documentation"].keys())}
+            
+            Provide:
+            1. Key insights from the research
+            2. Technical considerations
+            3. Potential challenges or opportunities
+            4. Actionable recommendations
+            
+            Focus on practical, actionable insights.
+            """
+            
+            try:
+                analysis = self.llm_provider.generate_text(analysis_prompt, temperature=0.3)
+                results["analysis"] = analysis
+                
+                # Extract recommendations
+                rec_prompt = f"""
+                Based on this analysis: {analysis}
+                
+                Extract 3-5 specific, actionable recommendations.
+                Return as a simple list (one per line).
+                """
+                
+                rec_response = self.llm_provider.generate_text(rec_prompt, temperature=0.2)
+                results["recommendations"] = [rec.strip() for rec in rec_response.split('\n') if rec.strip()]
+                
+            except Exception as e:
+                self.logger.warning(f"Analysis generation failed: {e}")
+        
+        return results
+    
+    def _lookup_technology_docs(self, tech_name: str) -> Optional[str]:
+        """Look up documentation for a specific technology using dynamic MCP discovery."""
+        doc_task = f"Look up comprehensive documentation for the technology/library: {tech_name}"
+        
+        result = self.discover_and_use_capability(
+            "documentation", 
+            doc_task,
+            {"library_name": tech_name, "tech_name": tech_name}
+        )
+        
+        if not result.get("error"):
+            # Try to extract text content from various possible response formats
+            if isinstance(result, dict):
+                # Try common response patterns for MCP tool results
+                content = result.get("result", {}).get("content", [{}])
+                if content and isinstance(content, list):
+                    return content[0].get("text", "")
+                elif isinstance(result.get("content"), str):
+                    return result["content"]
+                elif isinstance(result.get("text"), str):
+                    return result["text"]
+                elif isinstance(result.get("documentation"), str):
+                    return result["documentation"]
+                # Try to extract from nested result structures
+                elif result.get("result") and isinstance(result["result"], str):
+                    return result["result"]
+            elif isinstance(result, str):
+                return result
+            
+        return None
+    
+    def _synthesize_research_findings(self, results: Dict, goal: str) -> str:
+        """Synthesize research findings into actionable insights."""
+        if not self.llm_provider:
+            return "Research completed - manual synthesis required"
+        
+        synthesis_prompt = f"""
+        Synthesize these research findings into a clear, actionable summary:
+        
+        ORIGINAL GOAL: {goal}
+        
+        RESEARCH RESULTS:
+        - Technologies Found: {results.get("technologies_found", [])}
+        - Documentation Available: {list(results.get("documentation", {}).keys())}
+        - Analysis: {results.get("analysis", "")[:500]}...
+        - Recommendations: {results.get("recommendations", [])}
+        
+        Create a concise synthesis that:
+        1. Summarizes key findings
+        2. Highlights critical insights
+        3. Provides clear next steps
+        4. Identifies any gaps or concerns
+        
+        Focus on actionable outcomes.
         """
-        # This is a placeholder implementation
-        # In a real implementation, this would use the LLM to generate a summary
         
-        # Use LLM to generate a summary
-        prompt = f"Generate a concise summary of the following findings:\n\n{findings}"
-        summary = self.llm_provider.generate_text(prompt, temperature=0.5)
-        
-        return summary
+        try:
+            return self.llm_provider.generate_text(synthesis_prompt, temperature=0.3)
+        except Exception as e:
+            self.logger.error(f"Synthesis generation failed: {e}")
+            return f"Research completed with findings: {len(results.get('technologies_found', []))} technologies researched, {len(results.get('recommendations', []))} recommendations generated"
 
 
 class PlanningAgent(BaseAgent):
     """
-    Planning Agent for creating project blueprints and implementation plans.
-    
-    This agent specializes in analyzing requirements, designing system architecture,
-    and creating detailed implementation plans.
+    Planning agent for creating project plans and breaking down goals.
+    Uses sequential thinking for complex planning tasks.
     """
     
     def __init__(self, agent_id: str, agent_type: str, llm_provider=None, mcp_manager=None, config: Optional[Dict] = None):
-        """
-        Initialize the Planning Agent.
-        
-        Args:
-            agent_id: Unique identifier for this agent
-            agent_type: Type of agent (should be "planning")
-            llm_provider: LLM provider instance
-            mcp_manager: MCP manager instance
-            config: Optional configuration dictionary
-        """
         super().__init__(agent_id, agent_type, llm_provider, mcp_manager, config)
-        
-        # Initialize comprehensive logger
-        self.logger = AgentLogger.get_logger("PlanningAgent", agent_id)
-        self.logger.info(f"PlanningAgent initialized with ID: {agent_id}")
     
     def process_task(self, task: Dict) -> Dict:
-        """
-        Process a planning task.
-        
-        Args:
-            task: Task dictionary with details about the planning task
-            
-        Returns:
-            Dict: Planning results including blueprint and implementation plan
-        """
-        self.status = "processing"
-        
+        """Process planning tasks using sequential thinking and project analysis."""
         try:
-            # Extract task details and goal
+            self.status = "processing"
             goal = task.get("goal", "")
-            requirements = task.get("requirements", [])
-            research_findings = task.get("research_findings", {})
-            constraints = task.get("constraints", [])
+            context = task.get("context", {})
+            project_dir = context.get("project_dir")
             
-            # Log task start
-            AgentLogger.log_task_start(self.logger, task)
-            start_time = time.time()
+            self.logger.info(f"PLANNING: Creating plan for goal: {goal[:100]}...")
             
-            # Check if we should use MCP tools for complex planning
-            if self.should_use_mcp_for_task(task):
-                if self.mcp_logger:
-                    self.mcp_logger.info("Using MCP tools for enhanced planning capabilities")
-                
-                # Use sequential thinking for architecture planning
-                architecture_plan = self.think_sequentially(
-                    f"Design system architecture for: {goal}. Consider these requirements: {requirements}. "
-                    f"Research insights: {research_findings}. What are the key architectural decisions and components?"
-                )
-                if self.mcp_logger:
-                    self.mcp_logger.info("Completed sequential thinking for architecture planning")
-                
-                # Dynamically look up best practices for technologies mentioned in goal
-                tech_documentation = self.lookup_documentation_for_technologies(goal)
-                if tech_documentation:
-                    for tech, docs in tech_documentation.items():
-                        if self.mcp_logger:
-                            self.mcp_logger.info(f"Retrieved best practices for {tech}")
-                        constraints.append(f"Follow {tech} best practices")
-                        # Store the documentation for use in planning
-                        if not hasattr(self, '_tech_docs'):
-                            self._tech_docs = {}
-                        self._tech_docs[tech] = docs
+            # Investigate project if directory provided
+            project_context = self._investigate_project_context(project_dir) if project_dir else {}
             
-            # Create blueprint based on the actual goal
-            blueprint = self._create_blueprint(goal, requirements, research_findings, constraints)
+            # Use sequential thinking for complex planning
+            detailed_plan = self._create_detailed_plan(goal, context, project_context)
             
-            # Define components
-            components = self._define_components(blueprint)
+            # Break down into actionable tasks
+            task_breakdown = self._break_down_tasks(detailed_plan, goal)
             
-            # Create implementation plan
-            implementation_plan = self._create_implementation_plan(components)
+            # Identify dependencies and timeline
+            execution_strategy = self._plan_execution_strategy(task_breakdown)
             
-            # Prepare result
-            result = {
-                "task_id": task.get("task_id"),
-                "status": "completed",
-                "blueprint": blueprint,
-                "components": components,
-                "implementation_plan": implementation_plan
+            self.status = "completed"
+            return {
+                "status": "success",
+                "agent_type": self.agent_type,
+                "detailed_plan": detailed_plan,
+                "task_breakdown": task_breakdown,
+                "execution_strategy": execution_strategy,
+                "project_context": project_context,
+                "timestamp": datetime.now().isoformat()
             }
-            
-            # Log task completion
-            duration = time.time() - start_time
-            AgentLogger.log_task_complete(self.logger, task, result, duration)
-            
-            self.status = "ready"
-            return result
             
         except Exception as e:
+            self.logger.error(f"PLANNING: Failed to process task: {e}")
             return self.handle_error(e, task)
     
-    def _create_blueprint(self, goal: str, requirements: List[str], research_findings: Dict, constraints: List[str]) -> Dict:
-        """
-        Create a project blueprint based on goal, requirements and research findings.
-        
-        Args:
-            goal: The specific project goal
-            requirements: List of project requirements
-            research_findings: Research findings
-            constraints: List of constraints
+    def _investigate_project_context(self, project_dir: str) -> Dict:
+        """Investigate project context using base agent method."""
+        try:
+            project_path = self.investigate_project(project_dir)
             
-        Returns:
-            Dict: Project blueprint
-        """
-        # Use LLM to create detailed blueprint for the specific goal
-        blueprint_prompt = f"""
-        Create a detailed project blueprint for the following goal:
+            if self.llm_provider:
+                investigation_prompt = f"""
+                Investigate this project directory to understand the current state and structure:
+                
+                PROJECT DIRECTORY: {project_path}
+                
+                Analyze:
+                1. Existing project structure and organization
+                2. Technologies and frameworks in use
+                3. Current development state
+                4. Potential integration points
+                5. Constraints or considerations for new development
+                
+                                Provide a structured analysis of the project context.
+                """
+                
+                context_analysis = self.llm_provider.generate_text(investigation_prompt, temperature=0.2)
+                return {"analysis": context_analysis, "project_dir": project_path}
+                
+        except Exception as e:
+            self.logger.warning(f"Project investigation failed: {e}")
+            
+        return {"analysis": "No project context available", "project_dir": project_dir}
+    
+    def _create_detailed_plan(self, goal: str, context: Dict, project_context: Dict) -> Dict:
+        """Create detailed plan using dynamic MCP reasoning tools."""
+        planning_problem = f"""
+        Create a comprehensive plan for this development goal:
         
         GOAL: {goal}
+        CONTEXT: {context}
+        PROJECT CONTEXT: {project_context.get('analysis', 'None')}
         
-        Requirements: {requirements}
-        Research Findings: {research_findings}
-        Constraints: {constraints}
+        Think through:
+        1. Understanding the requirements and scope
+        2. Analyzing the current project state
+        3. Identifying necessary components and architecture
+        4. Planning the implementation approach
+        5. Considering integration and testing strategies
         
-        Provide a comprehensive blueprint including:
-        1. Project overview and objectives
-        2. System architecture and components
-        3. Key features to implement
-        4. Technology stack recommendations
-        5. Development approach
-        
-        Focus on the specific requirements mentioned in the goal.
+        Develop a detailed, actionable plan.
         """
         
-        blueprint_text = self.llm_provider.generate_text(blueprint_prompt, temperature=0.3)
+        # Use dynamic reasoning capability discovery
+        reasoning_result = self.discover_and_use_capability(
+            "reasoning",
+            planning_problem,
+            {"goal": goal, "context": context, "project_context": project_context}
+        )
         
-        # Extract structured information using LLM
-        extraction_prompt = f"""
-        From the following blueprint, extract structured information:
+        if not reasoning_result.get("error"):
+            return {"plan": reasoning_result, "method": "mcp_reasoning"}
         
-        {blueprint_text}
-        
-        Extract:
-        - Overview (1-2 sentences)
-        - Architecture (brief description)
-        - Key Features (list of 4-6 specific features)
-        - Technologies (list of 3-5 technologies)
-        
-        Format as a clear, structured response.
-        """
-        
-        structured_text = self.llm_provider.generate_text(extraction_prompt, temperature=0.2)
-        
-        # Parse the structured response (simplified parsing)
-        lines = structured_text.split('\n')
-        overview = ""
-        architecture = ""
-        key_features = []
-        technologies = []
-        
-        current_section = ""
-        for line in lines:
-            line = line.strip()
-            if 'overview' in line.lower():
-                current_section = "overview"
-            elif 'architecture' in line.lower():
-                current_section = "architecture"  
-            elif 'features' in line.lower():
-                current_section = "features"
-            elif 'technologies' in line.lower():
-                current_section = "technologies"
-            elif line.startswith('-') or line.startswith('•'):
-                item = line.lstrip('-•').strip()
-                if current_section == "features":
-                    key_features.append(item)
-                elif current_section == "technologies":
-                    technologies.append(item)
-            elif line and not line.startswith('#'):
-                if current_section == "overview":
-                    overview += line + " "
-                elif current_section == "architecture":
-                    architecture += line + " "
-        
-        blueprint = {
-            "overview": overview.strip() or "Project blueprint for task management application",
-            "architecture": architecture.strip() or "Frontend web application architecture", 
-            "key_features": key_features or ["Task creation and editing", "Task categorization", "Due date tracking", "Task filtering"],
-            "technologies": technologies or ["HTML5", "CSS3", "JavaScript", "LocalStorage"],
-            "constraints": constraints,
-            "full_description": blueprint_text
-        }
-        
-        return blueprint
-    
-    def _define_components(self, blueprint: Dict) -> List[Dict]:
-        """
-        Define system components based on the blueprint.
-        
-        Args:
-            blueprint: Project blueprint
+        # Fallback to LLM planning
+        if self.llm_provider:
+            planning_prompt = f"""
+            Create a detailed implementation plan:
             
-        Returns:
-            List[Dict]: List of component definitions
-        """
-        # This is a placeholder implementation
-        # In a real implementation, this would use the LLM to define components
-        
-        # Use LLM to define components
-        prompt = f"Define the components needed for the following blueprint:\n\n{blueprint}"
-        components_text = self.llm_provider.generate_text(prompt, temperature=0.5)
-        
-        # Structure the components
-        components = [
-            {
-                "id": "component_1",
-                "name": "Component 1",
-                "description": "Description of Component 1",
-                "dependencies": []
-            },
-            {
-                "id": "component_2",
-                "name": "Component 2",
-                "description": "Description of Component 2",
-                "dependencies": ["component_1"]
-            },
-            {
-                "id": "component_3",
-                "name": "Component 3",
-                "description": "Description of Component 3",
-                "dependencies": ["component_1", "component_2"]
-            }
-        ]
-        
-        return components
-    
-    def _create_implementation_plan(self, components: List[Dict]) -> Dict:
-        """
-        Create an implementation plan based on components.
-        
-        Args:
-            components: List of component definitions
+            GOAL: {goal}
+            CONTEXT: {context}
+            PROJECT CONTEXT: {project_context.get('analysis', 'None')}
             
-        Returns:
-            Dict: Implementation plan
+            Include:
+            1. Architecture and design considerations
+            2. Implementation phases
+            3. Component requirements
+            4. Integration approach
+            5. Testing and validation strategy
+            
+            Provide a structured, actionable plan.
+            """
+            
+            plan_text = self.llm_provider.generate_text(planning_prompt, temperature=0.3)
+            return {"plan": plan_text, "method": "llm_fallback"}
+        
+        return {"plan": "Basic implementation plan required", "method": "basic"}
+    
+    def _break_down_tasks(self, detailed_plan: Dict, goal: str) -> List[Dict]:
+        """Break down the plan into specific, actionable tasks."""
+        if not self.llm_provider:
+            return [{"task": "Implement solution", "type": "development", "priority": "high"}]
+        
+        breakdown_prompt = f"""
+        Break down this plan into specific, actionable tasks:
+        
+        GOAL: {goal}
+        DETAILED PLAN: {detailed_plan.get('plan', '')}
+        
+        Create tasks that are:
+        1. Specific and actionable
+        2. Appropriately scoped (not too large or small)
+        3. Clearly defined with success criteria
+        4. Categorized by type (research, planning, development, testing, etc.)
+        5. Prioritized (high, medium, low)
+        
+        Return as a JSON array of task objects with fields: task, description, type, priority, estimated_effort.
         """
-        # This is a placeholder implementation
-        # In a real implementation, this would use the LLM to create an implementation plan
         
-        # Use LLM to create implementation plan
-        prompt = f"Create an implementation plan for the following components:\n\n{components}"
-        plan_text = self.llm_provider.generate_text(prompt, temperature=0.5)
+        try:
+            response = self.llm_provider.generate_text(breakdown_prompt, temperature=0.2)
+            
+            # Try to parse JSON response
+            try:
+                tasks = json.loads(response.strip())
+                if isinstance(tasks, list):
+                    return tasks
+            except:
+                pass
+            
+            # Fallback: parse text response
+            lines = response.strip().split('\n')
+            tasks = []
+            for i, line in enumerate(lines):
+                if line.strip():
+                    tasks.append({
+                        "task": line.strip(),
+                        "description": f"Task {i+1} from plan breakdown",
+                        "type": "development",
+                        "priority": "medium",
+                        "estimated_effort": "TBD"
+                    })
+            
+            return tasks[:10]  # Limit to 10 tasks
+            
+        except Exception as e:
+            self.logger.error(f"Task breakdown failed: {e}")
+            return [{"task": "Implement solution according to plan", "type": "development", "priority": "high"}]
+    
+    def _plan_execution_strategy(self, task_breakdown: List[Dict]) -> Dict:
+        """Plan execution strategy including dependencies and timeline."""
+        if not self.llm_provider:
+            return {"strategy": "Execute tasks in order", "dependencies": [], "timeline": "TBD"}
         
-        # Structure the implementation plan
-        implementation_plan = {
-            "phases": [
-                {
-                    "id": "phase_1",
-                    "name": "Phase 1",
-                    "description": "Description of Phase 1",
-                    "components": ["component_1"],
-                    "estimated_duration": "2 days"
-                },
-                {
-                    "id": "phase_2",
-                    "name": "Phase 2",
-                    "description": "Description of Phase 2",
-                    "components": ["component_2"],
-                    "estimated_duration": "3 days"
-                },
-                {
-                    "id": "phase_3",
-                    "name": "Phase 3",
-                    "description": "Description of Phase 3",
-                    "components": ["component_3"],
-                    "estimated_duration": "4 days"
-                }
-            ],
-            "total_estimated_duration": "9 days",
-            "dependencies": [
-                {"from": "phase_1", "to": "phase_2"},
-                {"from": "phase_2", "to": "phase_3"}
-            ]
-        }
+        strategy_prompt = f"""
+        Plan an execution strategy for these tasks:
         
-        return implementation_plan
+        TASKS: {json.dumps(task_breakdown, indent=2)}
+        
+        Consider:
+        1. Task dependencies and sequencing
+        2. Parallel execution opportunities
+        3. Risk mitigation
+        4. Resource requirements
+        5. Timeline estimation
+        
+        Provide a structured execution strategy.
+        """
+        
+        try:
+            strategy = self.llm_provider.generate_text(strategy_prompt, temperature=0.3)
+            return {"strategy": strategy, "total_tasks": len(task_breakdown)}
+        except Exception as e:
+            self.logger.error(f"Execution strategy planning failed: {e}")
+            return {"strategy": "Execute tasks sequentially", "total_tasks": len(task_breakdown)}
 
 
 class DevelopmentAgent(BaseAgent):
     """
-    Development Agent for implementing project components.
-    
-    This agent specializes in writing code, testing implementations,
-    and integrating components using MCP tools.
+    Development agent for implementing code and creating files.
+    Uses project investigation and LLM-driven development.
     """
     
     def __init__(self, agent_id: str, agent_type: str, llm_provider=None, mcp_manager=None, config: Optional[Dict] = None):
-        """
-        Initialize the Development Agent.
-        
-        Args:
-            agent_id: Unique identifier for this agent
-            agent_type: Type of agent (should be "development")
-            llm_provider: LLM provider instance
-            mcp_manager: MCP manager instance
-            config: Optional configuration dictionary
-        """
         super().__init__(agent_id, agent_type, llm_provider, mcp_manager, config)
-        
-        # Initialize comprehensive logger
-        self.logger = AgentLogger.get_logger("DevelopmentAgent", agent_id)
-        self.logger.info(f"DevelopmentAgent initialized with ID: {agent_id}")
-        self.logger.debug(f"Configuration: {json.dumps(config or {}, indent=2)}")
     
     def process_task(self, task: Dict) -> Dict:
-        """
-        Process a development task.
-        
-        Args:
-            task: Task dictionary with details about the development task
-            
-        Returns:
-            Dict: Development results including code and tests
-        """
-        start_time = time.time()
-        self.status = "processing"
-        
-        # Log task start with comprehensive details
-        AgentLogger.log_task_start(self.logger, task)
-        
+        """Process development tasks using project investigation and intelligent implementation."""
         try:
-            # Extract task details and goal
+            self.status = "processing"
             goal = task.get("goal", "")
-            project_dir = task.get("project_dir", ".")
+            context = task.get("context", {})
+            project_dir = context.get("project_dir")
             
-            # Store project_dir for use in helper methods
-            self._current_project_dir = project_dir
+            self.logger.info(f"DEVELOPMENT: Implementing goal: {goal[:100]}...")
             
-            self.logger.info(f"Processing development task")
-            self.logger.info(f"Goal (first 200 chars): {goal[:200]}...")
-            self.logger.info(f"Project directory: {project_dir}")
+            # Investigate project before implementation
+            project_analysis = self._investigate_project_for_development(project_dir) if project_dir else {}
             
-            # Check if this is an incremental improvement task
-            implementation_style = task.get("implementation_style", "")
-            focus_on_improvements = task.get("focus_on_improvements", False)
+            # Plan implementation approach
+            implementation_plan = self._plan_implementation(goal, context, project_analysis)
             
-            # Set incremental task flag if needed
-            self._is_incremental_task = (implementation_style == "incremental" or focus_on_improvements)
+            # Generate code and files
+            implementation_results = self._implement_solution(implementation_plan, project_dir)
             
-            AgentLogger.log_decision(
-                self.logger,
-                f"Task type determined: {'Incremental' if self._is_incremental_task else 'New Project'}",
-                f"Based on implementation_style='{implementation_style}' and focus_on_improvements={focus_on_improvements}",
-                {"implementation_style": implementation_style, "focus_on_improvements": focus_on_improvements}
-            )
-            
-            # Get improvement suggestions from various sources
-            self.logger.info("Gathering improvement suggestions from multiple sources...")
-            self._improvement_suggestions = self._get_improvement_suggestions(task)
-            
-            self.logger.info(f"Found {len(self._improvement_suggestions)} improvement suggestions")
-            for i, suggestion in enumerate(self._improvement_suggestions):
-                self.logger.debug(f"Suggestion {i+1}: {suggestion.get('what', 'Unknown')[:100]}...")
-            
-            # Create implementation directly using MCP tools
-            self.logger.info("Starting implementation creation...")
-            implementation = self._create_implementation_with_tools(goal, project_dir)
-            
-            self.logger.info("Implementation completed successfully")
-            AgentLogger.log_analysis_metrics(self.logger, {
-                "files_created": len(implementation.get("files_created", [])),
-                "files_modified": len(implementation.get("files_modified", [])),
-                "total_lines_created": implementation.get("total_lines_created", 0),
-                "improvement_suggestions_used": len(self._improvement_suggestions)
-            })
-            
-            # Prepare result
-            result = {
-                "task_id": task.get("task_id"),
-                "status": "completed",
-                "implementation": implementation,
-                "files_created": implementation.get("files_created", []),
-                "files_modified": implementation.get("files_modified", []),
-                "improvement_type": implementation.get("improvement_type", "new_project"),
-                "improvements_implemented": len(self._improvement_suggestions)
+            self.status = "completed"
+            return {
+                "status": "success",
+                "agent_type": self.agent_type,
+                "project_analysis": project_analysis,
+                "implementation_plan": implementation_plan,
+                "implementation_results": implementation_results,
+                "timestamp": datetime.now().isoformat()
             }
             
-            # Save iteration progress for future reference
-            iteration_count = task.get("iteration_count", 0)
-            if hasattr(self, '_improvement_suggestions'):
-                self.logger.info(f"Saving iteration progress for iteration {iteration_count}")
-                self._save_iteration_progress(
-                    iteration_count,
-                    implementation.get("files_created", []),
-                    implementation.get("files_modified", []),
-                    self._improvement_suggestions
-                )
-            
-            self.status = "ready"
-            duration = time.time() - start_time
-            AgentLogger.log_task_complete(self.logger, task, result, duration)
-            
-            return result
-            
         except Exception as e:
-            duration = time.time() - start_time
-            self.logger.error(f"Task failed after {duration:.2f} seconds")
-            AgentLogger.log_error_with_context(self.logger, e, {
-                "task_id": task.get("task_id"),
-                "goal": goal[:100] if 'goal' in locals() else "unknown",
-                "project_dir": project_dir if 'project_dir' in locals() else "unknown",
-                "duration": duration
-            })
+            self.logger.error(f"DEVELOPMENT: Failed to process task: {e}")
             return self.handle_error(e, task)
     
-    def _get_improvement_suggestions(self, task: Dict) -> List[Dict]:
-        """
-        Get improvement suggestions from multiple sources.
-        
-        Args:
-            task: Current task information
-            
-        Returns:
-            List[Dict]: List of improvement suggestions
-        """
-        self.logger.info("Starting improvement suggestion gathering process")
-        improvements = []
-        
-        # 1. Direct improvement suggestions in task context
-        context = task.get("context", {})
-        if "improvement_suggestions" in context:
-            context_improvements = context["improvement_suggestions"]
-            improvements.extend(context_improvements)
-            self.logger.info(f"Found {len(context_improvements)} improvements in task context")
-            for i, imp in enumerate(context_improvements[:3]):  # Log first 3
-                self.logger.debug(f"Context improvement {i+1}: {imp.get('what', 'Unknown')[:80]}...")
-        else:
-            self.logger.info("No improvement suggestions found in task context")
-        
-        # 2. Look for recent analysis results in the same execution
-        execution_id = task.get("execution_id", "")
-        if execution_id and hasattr(self, 'orchestrator'):
-            self.logger.info(f"Checking for recent analysis results with execution_id: {execution_id}")
-            recent_improvements = self._get_recent_analysis_results(execution_id)
-            improvements.extend(recent_improvements)
-            self.logger.info(f"Found {len(recent_improvements)} improvements from recent analysis")
-        else:
-            self.logger.info("No execution_id or orchestrator available for recent analysis lookup")
-        
-        # 3. Check if improvements are stored in a shared location
+    def _investigate_project_for_development(self, project_dir: str) -> Dict:
+        """Investigate project specifically for development context."""
         try:
-            agent_work_dir = os.path.join(task.get("project_dir", "."), ".swarmdev", "agent_work")
-            self.logger.debug(f"Checking for improvements in: {agent_work_dir}")
-            if os.path.exists(agent_work_dir):
-                improvements_from_files = self._load_improvements_from_artifacts(agent_work_dir)
-                improvements.extend(improvements_from_files)
-                self.logger.info(f"Found {len(improvements_from_files)} improvements from artifacts")
-                
-                # Log which files were processed
-                if improvements_from_files:
-                    analysis_files = [f for f in os.listdir(agent_work_dir) 
-                                    if f.startswith("analysis_iteration_")]
-                    self.logger.debug(f"Processed analysis files: {analysis_files}")
-            else:
-                self.logger.info(f"Agent work directory does not exist: {agent_work_dir}")
-        except Exception as e:
-            self.logger.error(f"Failed to load improvements from artifacts: {e}")
-        
-        # Remove duplicates and return
-        self.logger.info("Deduplicating improvement suggestions")
-        unique_improvements = []
-        seen_descriptions = set()
-        
-        for i, imp in enumerate(improvements):
-            desc = imp.get("what", imp.get("description", ""))
-            if desc and desc not in seen_descriptions:
-                unique_improvements.append(imp)
-                seen_descriptions.add(desc)
-                self.logger.debug(f"Unique improvement {len(unique_improvements)}: {desc[:80]}...")
-            else:
-                self.logger.debug(f"Skipped duplicate improvement: {desc[:50]}...")
-        
-        self.logger.info(f"Improvement gathering complete: {len(improvements)} total → {len(unique_improvements)} unique")
-        return unique_improvements
-    
-    def _load_improvements_from_artifacts(self, agent_work_dir: str) -> List[Dict]:
-        """Load improvement suggestions from analysis artifacts."""
-        improvements = []
-        
-        try:
-            import os
-            import json
-            import re
+            project_path = self.investigate_project(project_dir)
             
-            # Look for recent analysis files
-            analysis_files = [f for f in os.listdir(agent_work_dir) 
-                            if f.startswith("analysis_iteration_") and f.endswith(".md")]
-            
-            # Sort by modification time, get most recent
-            if analysis_files:
-                analysis_files.sort(key=lambda f: os.path.getmtime(os.path.join(agent_work_dir, f)), reverse=True)
-                latest_analysis = os.path.join(agent_work_dir, analysis_files[0])
+            if self.llm_provider:
+                dev_investigation_prompt = f"""
+                Investigate this project for development planning:
                 
-                with open(latest_analysis, 'r') as f:
-                    content = f.read()
+                PROJECT DIRECTORY: {project_path}
                 
-                # Try to extract improvements from the analysis
-                # Look for JSON-like structures or numbered lists
-                json_matches = re.findall(r'\[.*?\]', content, re.DOTALL)
-                for match in json_matches:
-                    try:
-                        parsed = json.loads(match)
-                        if isinstance(parsed, list):
-                            for item in parsed:
-                                if isinstance(item, dict) and "what" in item:
-                                    improvements.append(item)
-                    except:
-                        continue
+                Focus on:
+                1. Existing code structure and patterns
+                2. Technologies, frameworks, and dependencies
+                3. File organization and naming conventions
+                4. Integration points and architecture
+                5. Development environment and tooling
                 
-                # If no JSON found, parse text-based improvements
-                if not improvements:
-                    improvements = self._parse_text_improvements(content)
+                Provide insights relevant to implementing new functionality.
+                """
+                
+                analysis = self.llm_provider.generate_text(dev_investigation_prompt, temperature=0.2)
+                return {"analysis": analysis, "project_dir": project_path}
                 
         except Exception as e:
-            self.logger.error(f"Failed to parse improvements from artifacts: {e}")
-        
-        return improvements
+            self.logger.warning(f"Development investigation failed: {e}")
+            
+        return {"analysis": "No project analysis available", "project_dir": project_dir}
     
-    def _parse_text_improvements(self, text: str) -> List[Dict]:
-        """Parse improvements from text-based analysis."""
-        improvements = []
-        lines = text.split('\n')
+    def _plan_implementation(self, goal: str, context: Dict, project_analysis: Dict) -> Dict:
+        """Plan implementation approach using LLM analysis."""
+        if not self.llm_provider:
+            return {"approach": "Basic implementation required", "files": []}
         
-        current_improvement = {}
-        for line in lines:
-            line = line.strip()
-            
-            # Look for numbered or bulleted improvements
-            if re.match(r'^[1-9]\.\s', line) or line.startswith('*') or line.startswith('-'):
-                if current_improvement and "what" in current_improvement:
-                    improvements.append(current_improvement)
-                
-                current_improvement = {
-                    "what": re.sub(r'^[1-9*-]\.\s*', '', line),
-                    "priority": "medium",
-                    "effort": "medium",
-                    "impact": "medium"
-                }
-            
-            # Extract additional details
-            elif current_improvement:
-                if "priority" in line.lower():
-                    if "high" in line.lower():
-                        current_improvement["priority"] = "high"
-                    elif "critical" in line.lower():
-                        current_improvement["priority"] = "critical"
-                    elif "low" in line.lower():
-                        current_improvement["priority"] = "low"
-                
-                elif "why:" in line.lower():
-                    current_improvement["why"] = line.split(":", 1)[1].strip()
-                
-                elif "how:" in line.lower():
-                    current_improvement["how"] = line.split(":", 1)[1].strip()
-        
-        if current_improvement and "what" in current_improvement:
-            improvements.append(current_improvement)
-        
-        return improvements
-    
-    def _get_recent_analysis_results(self, execution_id: str) -> List[Dict]:
-        """
-        Get improvement suggestions from recent analysis tasks in the same execution.
-        
-        Args:
-            execution_id: Current execution ID
-            
-        Returns:
-            List[Dict]: List of improvement suggestions
-        """
-        # This would ideally access the orchestrator's task results
-        # For now, return empty list as fallback
-        # In a real implementation, this would query recent analysis results
-        return []
-    
-    def _create_implementation_with_tools(self, goal: str, project_dir: str) -> Dict:
-        """
-        Create implementation files using LLM to determine everything.
-        
-        Args:
-            goal: The specific project goal
-            project_dir: Project directory path
-            
-        Returns:
-            Dict: Implementation details
-        """
-        files_created = []
-        files_modified = []
-        
-        try:
-            # Check if this is an incremental improvement task
-            if hasattr(self, '_is_incremental_task') and self._is_incremental_task:
-                return self._create_incremental_improvements(goal, project_dir)
-            
-            # Original implementation for new projects
-            prompt = f"""
-            Create a complete, production-ready project for this goal:
-            
-            {goal}
-            
-            Return your response with each file in this format:
-            
-            === FILENAME: path/filename.ext ===
-            [complete file content]
-            === END FILE ===
-            
-            Create all necessary files with proper structure and complete functional code.
-            """
-            
-            response = self.llm_provider.generate_text(prompt, temperature=0.1)
-            
-            # Simple parsing
-            current_content = []
-            current_file = None
-            
-            for line in response.split('\n'):
-                if line.startswith('=== FILENAME:') and line.endswith('==='):
-                    # Save previous file
-                    if current_file and current_content:
-                        full_path = os.path.join(project_dir, current_file)
-                        os.makedirs(os.path.dirname(full_path), exist_ok=True)
-                        with open(full_path, 'w') as f:
-                            f.write('\n'.join(current_content))
-                        files_created.append(os.path.basename(current_file))
-                    
-                    # Start new file
-                    current_file = line.replace('=== FILENAME:', '').replace('===', '').strip()
-                    current_content = []
-                    
-                elif line.strip() == '=== END FILE ===':
-                    continue
-                    
-                elif current_file:
-                    current_content.append(line)
-            
-            # Save last file
-            if current_file and current_content:
-                full_path = os.path.join(project_dir, current_file)
-                os.makedirs(os.path.dirname(full_path), exist_ok=True)
-                with open(full_path, 'w') as f:
-                    f.write('\n'.join(current_content))
-                files_created.append(os.path.basename(current_file))
-            
-        except Exception as e:
-            self.logger.error(f"Error creating files: {e}")
-        
-        return {
-            "files_created": files_created,
-            "files_modified": files_modified,
-            "total_files": len(files_created) + len(files_modified)
-        }
-    
-    def _create_incremental_improvements(self, goal: str, project_dir: str) -> Dict:
-        """
-        Create incremental improvements to existing project files.
-        
-        Args:
-            goal: The specific project goal
-            project_dir: Project directory path
-            
-        Returns:
-            Dict: Implementation details for improvements
-        """
-        files_created = []
-        files_modified = []
-        
-        try:
-            self.logger.info("Starting incremental improvements implementation")
-            
-            # Get previous iteration progress to understand what's been built
-            previous_progress = self._get_previous_iteration_progress()
-            previously_created_files = previous_progress.get("all_files_created", [])
-            previously_modified_files = previous_progress.get("all_files_modified", [])
-            
-            self.logger.info(f"Previous iterations created {len(previously_created_files)} files, modified {len(previously_modified_files)}")
-            
-            # Read existing project files with better analysis
-            project_data = self._read_project_files(project_dir)
-            existing_files = project_data["files"]
-            structure_analysis = project_data["structure_analysis"]
-            
-            self.logger.info(f"Read {len(existing_files)} existing files for analysis")
-            self.logger.info(f"Project structure status: {structure_analysis.get('status', 'unknown')}")
-            
-            # Get improvement suggestions from task context
-            improvement_suggestions = getattr(self, '_improvement_suggestions', [])
-            self.logger.info(f"Found {len(improvement_suggestions)} improvement suggestions")
-            
-            # Save development work plan for visibility
-            work_plan = self._create_work_plan(goal, improvement_suggestions, project_data, previous_progress)
-            self._save_development_artifact(work_plan, "work_plan")
-            
-            if improvement_suggestions:
-                # Implement specific improvements with detailed analysis
-                implementation_result = self._implement_specific_improvements(
-                    goal, improvement_suggestions, project_data, project_dir
-                )
-            else:
-                # Fallback: comprehensive analysis and improvement
-                implementation_result = self._implement_comprehensive_improvements(
-                    goal, project_data, project_dir
-                )
-            
-            files_created = implementation_result.get("files_created", [])
-            files_modified = implementation_result.get("files_modified", [])
-            
-            # Save implementation summary
-            summary = self._create_implementation_summary(implementation_result, improvement_suggestions)
-            self._save_development_artifact(summary, "implementation_summary")
-            
-            self.logger.info(f"Completed improvements: {len(files_created)} created, {len(files_modified)} modified")
-            
-        except Exception as e:
-            self.logger.error(f"Error creating incremental improvements: {e}")
-        
-        return {
-            "files_created": files_created,
-            "files_modified": files_modified,
-            "total_files": len(files_created) + len(files_modified),
-            "improvement_type": "incremental"
-        }
-    
-    def _create_work_plan(self, goal: str, improvements: List[Dict], project_data: Dict, previous_progress: Dict) -> str:
-        """Create a detailed work plan showing what will be implemented."""
-        existing_files = project_data["files"]
-        structure_analysis = project_data.get("structure_analysis", {})
-        
-        plan = f"""# Development Agent Work Plan
-
-**Goal:** {goal}
-**Timestamp:** {datetime.now().isoformat()}
-**Agent:** {self.agent_id}
-
-## Current Project State
-- **Files:** {len(existing_files)} files
-- **Total Lines:** {sum(f.get('lines', 0) for f in existing_files.values())}
-- **File Types:** {set(f.get('extension', '') for f in existing_files.values())}
-- **Structure Status:** {structure_analysis.get('status', 'unknown')}
-
-## Structure Analysis
-"""
-        
-        if structure_analysis.get('issues'):
-            plan += "\n### Issues Found:\n"
-            for issue in structure_analysis['issues']:
-                plan += f"- {issue}\n"
-        
-        if structure_analysis.get('recommendations'):
-            plan += "\n### Recommendations:\n"
-            for rec in structure_analysis['recommendations']:
-                plan += f"- {rec}\n"
-        
-        if structure_analysis.get('duplicate_paths'):
-            plan += "\n### Duplicate Paths Detected:\n"
-            for dup in structure_analysis['duplicate_paths']:
-                plan += f"- {dup}\n"
-        
-        plan += f"""
-
-## Previous Iteration History
-- **Total Previous Iterations:** {len(previous_progress.get('iterations', []))}
-- **Files Created Across All Iterations:** {len(previous_progress.get('all_files_created', []))}
-- **Files Modified Across All Iterations:** {len(previous_progress.get('all_files_modified', []))}
-
-### Previously Created Files:
-"""
-        
-        for file in previous_progress.get('all_files_created', []):
-            plan += f"- {file}\n"
-        
-        plan += "\n### Previously Modified Files:\n"
-        for file in previous_progress.get('all_files_modified', []):
-            plan += f"- {file}\n"
-        
-        plan += "\n## Existing Files Analysis\n"
-        for file_path, file_info in list(existing_files.items())[:10]:
-            plan += f"- **{file_path}**: {file_info.get('lines', 0)} lines\n"
-        
-        plan += "\n## Improvement Suggestions to Implement\n"
-        
-        if improvements:
-            for i, imp in enumerate(improvements, 1):
-                plan += f"""
-### {i}. {imp.get('what', 'Unknown improvement')}
-- **Priority:** {imp.get('priority', 'medium')}
-- **Impact:** {imp.get('impact', 'medium')}
-- **Effort:** {imp.get('effort', 'medium')}
-- **Why:** {imp.get('why', 'No reason specified')}
-- **How:** {imp.get('how', 'No implementation details')}
-- **Files Affected:** {', '.join(imp.get('files_affected', ['unknown']))}
-"""
-        else:
-            plan += "No specific improvement suggestions found. Will perform comprehensive analysis.\n"
-        
-        plan += "\n## Implementation Strategy\n"
-        plan += "1. RESPECT existing project structure and avoid duplications\n"
-        plan += "2. ADDRESS any structure issues identified in analysis\n"
-        plan += "3. CREATE proper package structure files as needed\n"
-        plan += "4. EXTEND existing files where possible instead of recreating\n"
-        plan += "5. Create new files only for genuinely new capabilities\n"
-        plan += "6. Preserve existing functionality\n"
-        plan += "7. Build upon previous iterations' work\n"
-        plan += "8. Focus on substantial new functionality\n"
-        
-        return plan
-    
-    def _implement_specific_improvements(self, goal: str, improvements: List[Dict], 
-                                       project_data: Dict, project_dir: str) -> Dict:
-        """Implement specific improvements suggested by analysis."""
-        existing_files = project_data["files"]
-        structure_analysis = project_data.get("structure_analysis", {})
-        
-        self.logger.info(f"Implementing {len(improvements)} specific improvements")
-        
-        # Detect target technology for proper implementation
-        target_technology = self._detect_target_technology()
-        file_extension = self._get_file_extension_for_technology(target_technology)
-        
-        self.logger.info(f"Implementing for {target_technology} with {file_extension} files")
-        
-        # Include structure analysis in the prompt if there are issues to address
-        structure_context = ""
-        if structure_analysis.get('issues'):
-            structure_context = f"""
-            IMPORTANT: This project has structural issues that need to be addressed:
-            {chr(10).join(['- ' + issue for issue in structure_analysis['issues']])}
-            
-            While implementing new features, also address these structural problems.
-            """
-        
-        # Create detailed implementation prompt
-        improvements_text = '\n'.join([
-            f"**{i+1}. {imp.get('what', 'Unknown')}**\n"
-            f"- Why: {imp.get('why', 'No reason')}\n"
-            f"- How: {imp.get('how', 'No details')}\n"
-            f"- Priority: {imp.get('priority', 'medium')}\n"
-            f"- Files: {', '.join(imp.get('files_affected', ['unknown']))}\n"
-            for i, imp in enumerate(improvements)
-        ])
-        
-        prompt = f"""
-        BUILD NEW {target_technology.upper()} CAPABILITIES BASED ON CREATIVE EXPANSIONS:
-        
-        TARGET TECHNOLOGY: {target_technology}
-        FILE EXTENSION: {file_extension}
+        planning_prompt = f"""
+        Plan the implementation for this development goal:
         
         GOAL: {goal}
+        CONTEXT: {context}
+        PROJECT ANALYSIS: {project_analysis.get('analysis', 'None')}
         
-        {structure_context}
+        Plan:
+        1. Implementation approach and architecture
+        2. Files that need to be created or modified
+        3. Integration with existing code
+        4. Dependencies and requirements
+        5. Testing considerations
         
-        CREATIVE EXPANSIONS TO BUILD INTO NEW FEATURES:
-        {improvements_text}
-        
-        EXISTING PROJECT FILES TO BUILD UPON:
-        {self._format_files_for_implementation(existing_files)}
-        
-        Your task is to BUILD these creative expansions into substantial new {target_technology} capabilities:
-        
-        CRITICAL REQUIREMENT: DO NOT recreate or overwrite existing files. BUILD UPON what exists.
-        STRUCTURE REQUIREMENT: Respect existing project organization and avoid creating duplicate folder structures.
-        
-        TECHNOLOGY-SPECIFIC REQUIREMENTS FOR {target_technology.upper()}:
-        {self._get_technology_specific_requirements(target_technology)}
-        
-        BUILDING REQUIREMENTS:
-        - Create 3-5 entirely new {target_technology} files with {file_extension} extension
-        - Build substantial, functional {target_technology} code (not stubs or placeholders)
-        - Follow {target_technology} best practices and conventions
-        - Implement complete, working features using {target_technology} syntax
-        - Create supporting files and configurations appropriate for {target_technology}
-        - EXTEND existing files where appropriate instead of recreating them
-        - RESPECT the existing project structure and avoid duplications
-        
-        FORBIDDEN ACTIONS:
-        - Creating files with wrong extensions (avoid .py if not Python)
-        - Using syntax from other languages in {target_technology} files
-        - Making small modifications to existing files
-        - Creating incomplete stub functions
-        - Generic technical improvements (error handling, logging, documentation)
-        - Refactoring existing code without adding new functionality
-        - Creating duplicate folder structures (like python/python/)
-        
-        INTELLIGENT FILE HANDLING:
-        1. If a file already exists, EXTEND it with new functionality using ACTION: MODIFY
-        2. Only use ACTION: CREATE for genuinely new {target_technology} files
-        3. Check existing files and build complementary features
-        4. Create new directories/modules for major new capability areas
-        5. Use {file_extension} extension for new {target_technology} files
-        6. Follow existing project organization patterns
-        
-        SUBSTANTIAL BUILDING FOCUS:
-        1. Focus on the CREATIVE EXPANSIONS listed above, not technical improvements
-        2. Build entirely NEW {target_technology} capabilities that users can interact with
-        3. Create complete workflows and user experiences in {target_technology}
-        4. Add substantial new functionality that expands project scope
-        5. Implement features that transform what the project can do
-        6. Build reusable {target_technology} components that enable future expansion
-        
-        For each new capability you build, return:
-        
-        === ACTION: CREATE ===  (only for new files)
-        === FILENAME: path/filename{file_extension} ===
-        === IMPROVEMENT: Description of new capability/expansion implemented ===
-        [{target_technology} code with complete new functionality]
-        === END FILE ===
-        
-        OR for extending existing files:
-        
-        === ACTION: MODIFY ===  (for existing files)
-        === FILENAME: path/existing_filename{file_extension} ===
-        === IMPROVEMENT: Description of new functionality added to existing file ===
-        [{target_technology} code to add to the existing file]
-        === END FILE ===
-        
-        BUILD SUBSTANTIAL NEW {target_technology.upper()} FEATURES that implement the creative expansions!
+        Focus on practical, implementable solutions that integrate well with the existing project.
         """
         
-        self.logger.info("Sending implementation prompt to LLM...")
-        AgentLogger.log_llm_call(self.logger, "specific_improvements", len(prompt), 0, 0.2)
-        
-        response = self.llm_provider.generate_text(prompt, temperature=0.2)
-        
-        self.logger.info("Received LLM response for implementation")
-        AgentLogger.log_llm_call(self.logger, "specific_improvements", len(prompt), len(response), 0.2)
-        
-        # Save the LLM response for debugging
-        self.logger.debug("Saving LLM implementation response artifact")
-        self._save_development_artifact(response, "llm_implementation_response")
-        
-        self.logger.info("Parsing implementation response...")
-        return self._parse_implementation_response(response, project_dir)
-    
-    def _implement_comprehensive_improvements(self, goal: str, project_data: Dict, project_dir: str) -> Dict:
-        """Implement comprehensive improvements when no specific suggestions are available."""
-        existing_files = project_data["files"]
-        structure_analysis = project_data.get("structure_analysis", {})
-        
-        self.logger.info("Implementing comprehensive improvements")
-        
-        # Include structure analysis in the prompt if there are issues to address
-        structure_context = ""
-        if structure_analysis.get('issues'):
-            structure_context = f"""
-            IMPORTANT: This project has structural issues that need to be addressed:
-            {chr(10).join(['- ' + issue for issue in structure_analysis['issues']])}
-            
-            While implementing new features, also address these structural problems.
-            """
-        
-        prompt = f"""
-        SUBSTANTIAL FEATURE BUILDING TASK:
-        
-        GOAL: {goal}
-        
-        {structure_context}
-        
-        EXISTING PROJECT FILES:
-        {self._format_files_for_implementation(existing_files)}
-        
-        Your role is to BUILD substantial new features that expand the project's capabilities.
-        
-        BUILDING REQUIREMENTS:
-        - Create 500+ lines of new, working code this iteration
-        - Build 3-5 entirely new modules/packages/components
-        - Implement complete, functional features (not stubs or placeholders)
-        - Create supporting infrastructure (configs, examples, utilities)
-        - Focus on additive development that expands project scope
-        - RESPECT existing project structure and avoid duplications
-        
-        FORBIDDEN ACTIONS:
-        - Making small modifications to existing files
-        - Creating incomplete stub functions
-        - Generic improvements to existing code (error handling, logging, documentation)
-        - Refactoring existing functionality
-        - Adding just comments or documentation
-        - Creating duplicate folder structures
-        
-        SUBSTANTIAL CREATION FOCUS:
-        - Build complete, working systems that users can immediately benefit from
-        - Create new directories/modules for major new capabilities
-        - Implement full user workflows from start to finish
-        - Add comprehensive functionality, not minimal examples
-        - Build features that significantly expand what the project can do
-        
-        ARCHITECTURE THINKING:
-        - Design new modules with clear interfaces and responsibilities
-        - Create extensible systems that can grow over time
-        - Build reusable components that other features can leverage
-        - Implement proper separation of concerns for new capabilities
-        - Focus on creating value-adding functionality
-        - Follow existing project organization patterns
-        
-        BUILD NEW MAJOR CAPABILITIES:
-        - Create entirely new functional modules
-        - Add substantial user-facing features
-        - Implement comprehensive workflows
-        - Build supporting utilities and helpers
-        - Create examples and usage scenarios
-        
-        For each file you create (focus on CREATE, not MODIFY), return:
-        
-        === ACTION: CREATE ===
-        === FILENAME: path/filename.ext ===
-        === IMPROVEMENT: Description of major new capability built ===
-        [complete file content with substantial new functionality]
-        === END FILE ===
-        
-        BUILD SUBSTANTIAL, WORKING NEW FEATURES that transform this project's capabilities!
-        """
-        
-        response = self.llm_provider.generate_text(prompt, temperature=0.3)
-        
-        # Save the LLM response for debugging
-        self._save_development_artifact(response, "llm_comprehensive_response")
-        
-        return self._parse_implementation_response(response, project_dir)
-    
-    def _parse_implementation_response(self, response: str, project_dir: str) -> Dict:
-        """Parse the LLM implementation response and create/modify files."""
-        files_created = []
-        files_modified = []
-        
-        current_content = []
-        current_file = None
-        current_action = None
-        current_improvement = None
-        
-        for line in response.split('\n'):
-            # Handle both formats: === format and #### format
-            if (line.startswith('=== ACTION:') and line.endswith('===')) or line.startswith('#### ACTION:'):
-                if line.startswith('==='):
-                    current_action = line.replace('=== ACTION:', '').replace('===', '').strip()
-                else:
-                    current_action = line.replace('#### ACTION:', '').strip()
-                    
-            elif (line.startswith('=== FILENAME:') and line.endswith('===')) or line.startswith('#### FILENAME:'):
-                # Save previous file
-                if current_file and current_content and current_action:
-                    self._save_implementation_file(
-                        current_file, current_content, current_action, current_improvement,
-                        project_dir, files_created, files_modified
-                    )
-                
-                # Start new file
-                if line.startswith('==='):
-                    current_file = line.replace('=== FILENAME:', '').replace('===', '').strip()
-                else:
-                    current_file = line.replace('#### FILENAME:', '').strip()
-                current_content = []
-                current_improvement = None
-                
-            elif (line.startswith('=== IMPROVEMENT:') and line.endswith('===')) or line.startswith('#### IMPROVEMENT:'):
-                if line.startswith('==='):
-                    current_improvement = line.replace('=== IMPROVEMENT:', '').replace('===', '').strip()
-                else:
-                    current_improvement = line.replace('#### IMPROVEMENT:', '').strip()
-                    
-            elif line.strip() == '=== END FILE ===' or line.startswith('#### END FILE'):
-                continue
-                
-            elif current_file:
-                # Skip markdown code block markers if present
-                if line.strip() in ['```python', '```', '```bash', '```javascript', '```html']:
-                    continue
-                current_content.append(line)
-        
-        # Save last file
-        if current_file and current_content and current_action:
-            self._save_implementation_file(
-                current_file, current_content, current_action, current_improvement,
-                project_dir, files_created, files_modified
-            )
-        
-        # Validate minimum code generation requirements
-        total_lines_created = 0
-        for file_path in files_created:
-            try:
-                full_path = os.path.join(project_dir, file_path)
-                if os.path.exists(full_path):
-                    with open(full_path, 'r') as f:
-                        total_lines_created += len(f.readlines())
-            except:
-                pass
-        
-        self.logger.info(f"Generated {total_lines_created} lines of new code across {len(files_created)} new files")
-        
-        # Log warning if below minimum threshold
-        if total_lines_created < 300:
-            self.logger.warning(f"Generated only {total_lines_created} lines - below recommended minimum of 300+ lines per iteration")
-        
-        return {
-            "files_created": files_created,
-            "files_modified": files_modified,
-            "total_lines_created": total_lines_created,
-            "meets_minimum_threshold": total_lines_created >= 300
-        }
-    
-    def _save_implementation_file(self, file_path: str, content_lines: List[str], 
-                                action: str, improvement: str, project_dir: str,
-                                files_created: List[str], files_modified: List[str]):
-        """Save an implementation file and log the action."""
         try:
-            self.logger.debug(f"Processing file save: {file_path} (action: {action})")
+            plan = self.llm_provider.generate_text(planning_prompt, temperature=0.3)
             
-            # Organize files by technology into folders  
-            organized_path = self._organize_file_path(file_path)
-            full_path = os.path.join(project_dir, organized_path)
+            # Extract file list from plan
+            file_extraction_prompt = f"""
+            From this implementation plan, extract the specific files that need to be created or modified:
             
-            if organized_path != file_path:
-                self.logger.info(f"File organized: {file_path} → {organized_path}")
+            PLAN: {plan}
             
-            os.makedirs(os.path.dirname(full_path), exist_ok=True)
-            content = '\n'.join(content_lines)
+            Return a simple list of file paths (one per line), relative to project root.
+            Include:
+            1. Main implementation files (.py, .js, etc.)
+            2. Configuration files (.json, .yaml, .env, etc.)
+            3. Documentation files (README.md, requirements.txt, etc.)
+            4. Package structure files (__init__.py for Python packages)
+            5. Test files if mentioned
             
-            self.logger.debug(f"Content length: {len(content)} characters, {len(content_lines)} lines")
-            
-            # Check if file already exists
-            file_exists = os.path.exists(full_path)
-            
-            if file_exists:
-                self.logger.info(f"File exists: {organized_path}")
-                
-                # File exists - determine if we should extend or replace
-                if action == "CREATE":
-                    # Change action to MODIFY since file already exists
-                    action = "MODIFY"
-                    AgentLogger.log_decision(
-                        self.logger,
-                        f"Changed action from CREATE to MODIFY for existing file",
-                        f"File {organized_path} already exists",
-                        {"original_action": "CREATE", "new_action": "MODIFY", "file": organized_path}
-                    )
-                
-                if action == "MODIFY":
-                    # Read existing content to avoid overwriting
-                    try:
-                        with open(full_path, 'r') as f:
-                            existing_content = f.read()
-                        
-                        existing_lines = len(existing_content.split('\n'))
-                        self.logger.debug(f"Existing file has {existing_lines} lines, {len(existing_content)} characters")
-                        
-                        # Check if this is just a duplicate of existing content
-                        if content.strip() in existing_content or existing_content.strip() in content:
-                            self.logger.warning(f"SKIPPED: {organized_path} - content already exists or is duplicate")
-                            return
-                        
-                        # Append new content instead of overwriting
-                        self.logger.info(f"Merging content for: {organized_path}")
-                        enhanced_content = self._merge_file_content(existing_content, content, file_path)
-                        
-                        with open(full_path, 'w') as f:
-                            f.write(enhanced_content)
-                        
-                        new_lines = len(enhanced_content.split('\n'))
-                        files_modified.append(organized_path)
-                        
-                        AgentLogger.log_file_operation(
-                            self.logger, 
-                            "MODIFIED", 
-                            organized_path, 
-                            f"{improvement} | {existing_lines} → {new_lines} lines"
-                        )
-                        
-                    except Exception as e:
-                        self.logger.error(f"Failed to modify existing file {organized_path}: {e}")
-                        # Fallback to creating with timestamp
-                        ext = os.path.splitext(file_path)[1]
-                        timestamp_path = file_path.replace(ext, f'_{datetime.now().strftime("%H%M%S")}{ext}')
-                        organized_timestamp_path = self._organize_file_path(timestamp_path)
-                        full_timestamp_path = os.path.join(project_dir, organized_timestamp_path)
-                        os.makedirs(os.path.dirname(full_timestamp_path), exist_ok=True)
-                        with open(full_timestamp_path, 'w') as f:
-                            f.write(content)
-                        files_created.append(organized_timestamp_path)
-                        
-                        AgentLogger.log_file_operation(
-                            self.logger,
-                            "CREATED",
-                            organized_timestamp_path,
-                            f"{improvement} (timestamped due to merge conflict) | {len(content_lines)} lines"
-                        )
-                
-            else:
-                # File doesn't exist - create it
-                self.logger.info(f"Creating new file: {organized_path}")
-                with open(full_path, 'w') as f:
-                    f.write(content)
-                
-                files_created.append(organized_path)
-                
-                AgentLogger.log_file_operation(
-                    self.logger,
-                    "CREATED", 
-                    organized_path,
-                    f"{improvement} | {len(content_lines)} lines"
-                )
-            
-            # After saving the file, ensure proper package structure
-            package_files = self._ensure_package_structure(organized_path, project_dir)
-            for package_file in package_files:
-                if package_file not in files_created:
-                    files_created.append(package_file)
-            
-        except Exception as e:
-            self.logger.error(f"Failed to save {file_path}: {e}")
-            AgentLogger.log_error_with_context(self.logger, e, {
-                "file_path": file_path,
-                "action": action,
-                "improvement": improvement,
-                "content_lines": len(content_lines) if content_lines else 0
-            })
-    
-    def _ensure_package_structure(self, file_path: str, project_dir: str) -> List[str]:
-        """
-        Ensure proper package structure for the target technology using LLM guidance.
-        
-        Args:
-            file_path: The file that was just created/modified
-            project_dir: Project directory path
-            
-        Returns:
-            List[str]: List of package files that were created
-        """
-        try:
-            # Get target technology for context
-            target_technology = self._detect_target_technology()
-            
-            # Use LLM to determine what package structure files are needed
-            package_prompt = f"""
-            For a {target_technology} project, what package/module structure files should be created for this file path?
-            
-            File path: {file_path}
-            Target technology: {target_technology}
-            
-            Consider:
-            - Does {target_technology} require specific package/module files (like __init__.py for Python)?
-            - What directories in this path should have package files?
-            - What should the content of these package files be?
-            
-            If no package files are needed, respond with: NONE
-            
-            If package files are needed, respond in this format:
-            PACKAGE_FILE: relative/path/to/package_file.ext
-            CONTENT: [content for the package file]
-            
-            PACKAGE_FILE: another/path/package_file.ext  
-            CONTENT: [content for another package file]
-            
-            Only suggest files that are standard for {target_technology} projects and would be in directories created by this file path.
+            For Python projects, include __init__.py files for any new packages/directories.
+            Use proper file extensions and follow language conventions.
             """
             
-            package_response = self.llm_provider.generate_text(package_prompt, temperature=0.1)
-            
-            # Parse the response and create package files
-            package_files_created = []
-            
-            if "NONE" in package_response.upper():
-                self.logger.debug(f"No package files needed for {file_path} in {target_technology}")
-                return package_files_created
-            
-            # Parse package file instructions
-            lines = package_response.split('\n')
-            current_package_file = None
-            current_content_lines = []
-            
-            for line in lines:
+            files_response = self.llm_provider.generate_text(file_extraction_prompt, temperature=0.1)
+            files = []
+            for line in files_response.split('\n'):
                 line = line.strip()
-                if line.startswith('PACKAGE_FILE:'):
-                    # Save previous package file if exists
-                    if current_package_file and current_content_lines:
-                        success = self._create_package_file(
-                            current_package_file, 
-                            '\n'.join(current_content_lines), 
-                            project_dir
-                        )
-                        if success:
-                            package_files_created.append(current_package_file)
+                # Skip empty lines, comments, and markdown delimiters
+                if line and not line.startswith('#') and not line.startswith('```') and line != '```':
+                    # Remove any remaining markdown artifacts
+                    if line.startswith('- '):
+                        line = line[2:]  # Remove bullet points
                     
-                    # Start new package file
-                    current_package_file = line.replace('PACKAGE_FILE:', '').strip()
-                    current_content_lines = []
-                    
-                elif line.startswith('CONTENT:'):
-                    content_start = line.replace('CONTENT:', '').strip()
-                    if content_start:
-                        current_content_lines.append(content_start)
-                        
-                elif current_package_file and line:
-                    current_content_lines.append(line)
+                    # Accept various file types
+                    valid_extensions = ['.py', '.json', '.txt', '.md', '.yaml', '.yml', '.env', '.js', '.ts', '.html', '.css']
+                    if any(line.endswith(ext) for ext in valid_extensions) or line == '__init__.py':
+                        files.append(line)
             
-            # Save final package file
-            if current_package_file and current_content_lines:
-                success = self._create_package_file(
-                    current_package_file, 
-                    '\n'.join(current_content_lines), 
-                    project_dir
-                )
-                if success:
-                    package_files_created.append(current_package_file)
             
-            if package_files_created:
-                self.logger.info(f"Created {len(package_files_created)} package files for {target_technology}: {package_files_created}")
-            
-            return package_files_created
+            return {"approach": plan, "files": files[:10]}  # Limit files
             
         except Exception as e:
-            self.logger.error(f"Failed to ensure package structure for {file_path}: {e}")
-            return []
+            self.logger.error(f"Implementation planning failed: {e}")
+            return {"approach": "Direct implementation", "files": ["main.py"]}
     
-    def _create_package_file(self, package_file_path: str, content: str, project_dir: str) -> bool:
-        """
-        Create a package file if it doesn't already exist.
+    def _implement_solution(self, implementation_plan: Dict, project_dir: str) -> Dict:
+        """Implement the solution by generating code for planned files."""
+        if not self.llm_provider:
+            return {"status": "error", "message": "No LLM provider for implementation"}
         
-        Args:
-            package_file_path: Relative path to the package file
-            content: Content for the package file
-            project_dir: Project directory path
-            
-        Returns:
-            bool: True if file was created, False otherwise
-        """
-        try:
-            full_path = os.path.join(project_dir, package_file_path)
-            
-            # Don't overwrite existing package files
-            if os.path.exists(full_path):
-                self.logger.debug(f"Package file already exists: {package_file_path}")
-                return False
-            
-            # Create directory if needed
-            os.makedirs(os.path.dirname(full_path), exist_ok=True)
-            
-            # Create the package file
-            with open(full_path, 'w') as f:
-                f.write(content)
-            
-            self.logger.info(f"Created package file: {package_file_path}")
-            return True
-            
-        except Exception as e:
-            self.logger.error(f"Failed to create package file {package_file_path}: {e}")
-            return False
-    
-    def _organize_file_path(self, file_path: str) -> str:
-        """Organize file path using LLM to determine proper structure for the target technology."""
-        try:
-            # Check if file path is already properly organized
-            if self._is_path_already_organized(file_path):
-                return file_path
-            
-            # Get target technology for context
-            target_technology = self._detect_target_technology()
-            
-            # Use LLM to determine proper file organization
-            organization_prompt = f"""
-            For a {target_technology} project, what is the proper file path organization for this file?
-            
-            Current file path: {file_path}
-            Target technology: {target_technology}
-            
-            Consider:
-            - Standard {target_technology} project structure conventions
-            - Whether the path is already properly organized
-            - Best practices for {target_technology} file organization
-            
-            Return ONLY the properly organized file path. If the current path is already good, return it unchanged.
-            Do NOT add unnecessary nested folders if they already exist in the path.
-            
-            Examples:
-            - If path is "calculator/main.py" for Python, it might become "src/calculator/main.py" or stay "calculator/main.py"
-            - If path is "python/calculator/main.py" for Python, it should stay "python/calculator/main.py"
-            - If path is "main.py" for Python, it might become "src/main.py" or "calculator/main.py"
-            
-            Organized path:
-            """
-            
-            organized_path = self.llm_provider.generate_text(organization_prompt, temperature=0.1).strip()
-            
-            # Clean up the response (remove any extra text)
-            lines = organized_path.split('\n')
-            clean_path = lines[0].strip() if lines else file_path
-            
-            # Validate the path makes sense
-            if self._validate_organized_path(clean_path, file_path):
-                self.logger.info(f"Organized file path: {file_path} → {clean_path}")
-                return clean_path
-            else:
-                self.logger.warning(f"LLM suggested invalid path, keeping original: {file_path}")
-                return file_path
+        results = {
+            "files_created": [],
+            "files_modified": [],
+            "code_generated": {},
+            "errors": []
+        }
+        
+        planned_files = implementation_plan.get("files", [])
+        approach = implementation_plan.get("approach", "")
+        
+        for file_path in planned_files[:8]:  # Increase limit for package files
+            try:
+                # Handle special cases for certain file types
+                if file_path == '__init__.py' or file_path.endswith('/__init__.py'):
+                    # Generate simple __init__.py content
+                    init_content = self._generate_init_file_content(file_path, approach)
+                    results["code_generated"][file_path] = init_content
+                    self._write_file_to_disk(file_path, init_content, project_dir, results)
+                    continue
                 
-        except Exception as e:
-            self.logger.error(f"Failed to organize file path {file_path}: {e}")
-            return file_path  # Fallback to original path
+                # Determine file purpose and generate appropriate code
+                code_generation_prompt = f"""
+                Generate code for this file based on the implementation plan:
+                
+                FILE PATH: {file_path}
+                IMPLEMENTATION APPROACH: {approach}
+                PROJECT DIRECTORY: {project_dir}
+                
+                Generate complete, functional code that:
+                1. Implements the planned functionality
+                2. Follows best practices for the detected technology
+                3. Integrates well with the existing project structure
+                4. Includes appropriate imports, error handling, and documentation
+                5. Is production-ready and well-structured
+                
+                IMPORTANT: Return ONLY the raw code content without any markdown formatting, explanations, or code block delimiters. No ```python or ``` tags.
+                """
+                
+                generated_code = self.llm_provider.generate_text(code_generation_prompt, temperature=0.2)
+                
+                # Clean up any remaining markdown artifacts
+                cleaned_code = self._clean_generated_code(generated_code)
+                
+                # Store the cleaned code
+                results["code_generated"][file_path] = cleaned_code
+                
+                # Write file to disk
+                self._write_file_to_disk(file_path, cleaned_code, project_dir, results)
+                    
+            except Exception as e:
+                error_msg = f"Failed to generate code for {file_path}: {e}"
+                self.logger.error(error_msg)
+                results["errors"].append(error_msg)
+        
+        results["status"] = "success" if results["code_generated"] else "partial"
+        return results
     
-    def _is_path_already_organized(self, file_path: str) -> bool:
-        """Check if a file path is already properly organized."""
-        # Simple heuristic: if the path has multiple directory levels and doesn't duplicate technology names
+    def _clean_generated_code(self, code: str) -> str:
+        """Clean generated code of markdown artifacts and formatting issues."""
+        lines = code.split('\n')
+        cleaned_lines = []
+        
+        for line in lines:
+            stripped = line.strip()
+            # Skip markdown code block delimiters
+            if stripped in ['```', '```python', '```json', '```markdown', '```plaintext']:
+                continue
+            # Skip language tags at start of code blocks
+            if stripped.startswith('```') and len(stripped) < 20:
+                continue
+            cleaned_lines.append(line)
+        
+        # Remove leading/trailing empty lines
+        while cleaned_lines and not cleaned_lines[0].strip():
+            cleaned_lines.pop(0)
+        while cleaned_lines and not cleaned_lines[-1].strip():
+            cleaned_lines.pop()
+        
+        return '\n'.join(cleaned_lines)
+    
+    def _generate_init_file_content(self, file_path: str, approach: str) -> str:
+        """Generate appropriate __init__.py content."""
+        if file_path == '__init__.py':
+            # Root package __init__.py
+            return '"""Main package initialization."""\n\n__version__ = "0.1.0"\n'
+        
+        # Sub-package __init__.py - extract package name from path
         parts = file_path.split('/')
+        if len(parts) > 1:
+            package_name = parts[-2]  # Get directory name
+            return f'"""Package: {package_name}"""\n'
         
-        # Check for obvious duplications (like python/python/)
-        for i in range(len(parts) - 1):
-            if parts[i] == parts[i + 1]:
-                return False
-        
-        # If the path has a reasonable structure (at least one directory), consider it organized
-        return len(parts) > 1
+        return '"""Package initialization."""\n'
     
-    def _validate_organized_path(self, organized_path: str, original_path: str) -> bool:
-        """Validate that the organized path makes sense."""
-        # Basic validation checks
-        if not organized_path or organized_path == original_path:
-            return True
+    def _write_file_to_disk(self, file_path: str, content: str, project_dir: str, results: Dict):
+        """Write file content to disk and track the operation."""
+        if not project_dir:
+            self.logger.warning(f"No project directory specified, cannot write file: {file_path}")
+            return
+            
+        full_file_path = os.path.join(project_dir, file_path)
         
-        # Check that we didn't create obvious duplications
-        parts = organized_path.split('/')
-        for i in range(len(parts) - 1):
-            if parts[i] == parts[i + 1]:
-                return False
+        # Check if file exists to determine created vs modified
+        file_exists = os.path.exists(full_file_path)
         
-        # Check that the file extension is preserved
-        if '.' in original_path and '.' in organized_path:
-            orig_ext = original_path.split('.')[-1]
-            org_ext = organized_path.split('.')[-1]
-            if orig_ext != org_ext:
-                return False
+        # Create directory structure if needed
+        dir_path = os.path.dirname(full_file_path)
+        if dir_path:  # Only create if there's actually a directory
+            os.makedirs(dir_path, exist_ok=True)
         
-        return True
-    
-    def _merge_file_content(self, existing_content: str, new_content: str, file_path: str) -> str:
-        """
-        Intelligently merge new content with existing file content.
+        # Write the content to the file
+        with open(full_file_path, 'w', encoding='utf-8') as f:
+            f.write(content)
         
-        Args:
-            existing_content: Current file content
-            new_content: New content to add
-            file_path: File path for context
-            
-        Returns:
-            str: Merged content
-        """
-        # For Python files, try to merge intelligently
-        if file_path.endswith('.py'):
-            return self._merge_python_content(existing_content, new_content)
-        
-        # For other files, append with separator
-        return f"{existing_content}\n\n# === ADDED CONTENT ===\n{new_content}"
-    
-    def _merge_python_content(self, existing_content: str, new_content: str) -> str:
-        """
-        Merge Python file content intelligently by combining imports, classes, and functions.
-        
-        Args:
-            existing_content: Existing Python code
-            new_content: New Python code to merge
-            
-        Returns:
-            str: Merged Python content
-        """
-        try:
-            import ast
-            import re
-            
-            # Parse existing and new content
-            existing_lines = existing_content.split('\n')
-            new_lines = new_content.split('\n')
-            
-            # Extract imports from both
-            existing_imports = []
-            existing_code = []
-            new_imports = []
-            new_code = []
-            
-            # Simple parsing for imports and code
-            for line in existing_lines:
-                if line.strip().startswith(('import ', 'from ')):
-                    existing_imports.append(line)
-                elif line.strip():
-                    existing_code.append(line)
-            
-            for line in new_lines:
-                if line.strip().startswith(('import ', 'from ')):
-                    if line not in existing_imports:  # Avoid duplicate imports
-                        new_imports.append(line)
-                elif line.strip():
-                    new_code.append(line)
-            
-            # Combine imports (existing first, then new unique ones)
-            all_imports = existing_imports + new_imports
-            
-            # Check for function/class conflicts
-            existing_definitions = self._extract_definitions(existing_content)
-            new_definitions = self._extract_definitions(new_content)
-            
-            # If there are conflicting definitions, create versioned functions
-            merged_code = existing_code.copy()
-            
-            for definition in new_definitions:
-                if definition['name'] in [d['name'] for d in existing_definitions]:
-                    # Rename conflicting definition
-                    timestamp = datetime.now().strftime("%H%M")
-                    new_name = f"{definition['name']}_v{timestamp}"
-                    
-                    # Replace the definition name in new_code
-                    pattern = rf"\b{re.escape(definition['name'])}\b"
-                    new_code_str = '\n'.join(new_code)
-                    new_code_str = re.sub(pattern, new_name, new_code_str, count=1)
-                    new_code = new_code_str.split('\n')
-                    
-                    self.logger.info(f"Renamed conflicting {definition['type']} '{definition['name']}' to '{new_name}'")
-            
-            # Combine all content
-            result_lines = []
-            
-            # Add imports
-            if all_imports:
-                result_lines.extend(all_imports)
-                result_lines.append('')  # Blank line after imports
-            
-            # Add existing code
-            if existing_code:
-                result_lines.extend(existing_code)
-                result_lines.append('')  # Blank line
-            
-            # Add separator comment
-            result_lines.append('# === ADDED FUNCTIONALITY ===')
-            result_lines.append('')
-            
-            # Add new code
-            if new_code:
-                result_lines.extend(new_code)
-            
-            return '\n'.join(result_lines)
-            
-        except Exception as e:
-            self.logger.error(f"Failed to merge Python content intelligently: {e}")
-            # Fallback to simple append
-            return f"{existing_content}\n\n# === ADDED CONTENT ===\n{new_content}"
-    
-    def _extract_definitions(self, content: str) -> List[Dict]:
-        """Extract function and class definitions from Python content."""
-        definitions = []
-        
-        try:
-            import re
-            
-            # Find class definitions
-            class_matches = re.finditer(r'^class\s+(\w+)', content, re.MULTILINE)
-            for match in class_matches:
-                definitions.append({
-                    'type': 'class',
-                    'name': match.group(1),
-                    'line': content[:match.start()].count('\n') + 1
-                })
-            
-            # Find function definitions
-            func_matches = re.finditer(r'^def\s+(\w+)', content, re.MULTILINE)
-            for match in func_matches:
-                definitions.append({
-                    'type': 'function',
-                    'name': match.group(1),
-                    'line': content[:match.start()].count('\n') + 1
-                })
-                
-        except Exception as e:
-            self.logger.error(f"Failed to extract definitions: {e}")
-        
-        return definitions
-    
-    def _format_files_for_implementation(self, existing_files: Dict) -> str:
-        """Format existing files for implementation analysis."""
-        formatted = ""
-        for file_path, file_info in list(existing_files.items())[:10]:  # Limit to first 10 files
-            content = file_info["content"]
-            if len(content) > 2000:  # Show more content for better analysis
-                content = content[:2000] + f"... [truncated, total {file_info['lines']} lines]"
-            formatted += f"\n--- {file_path} ({file_info['lines']} lines) ---\n{content}\n"
-        return formatted
-    
-    def _create_implementation_summary(self, implementation_result: Dict, improvements: List[Dict]) -> str:
-        """Create a summary of what was implemented."""
-        summary = f"""# Development Agent Implementation Summary
-
-**Timestamp:** {datetime.now().isoformat()}
-**Agent:** {self.agent_id}
-
-## Implementation Results
-- **Files Created:** {len(implementation_result.get('files_created', []))}
-- **Files Modified:** {len(implementation_result.get('files_modified', []))}
-
-### Files Created:
-"""
-        
-        for file in implementation_result.get('files_created', []):
-            summary += f"- {file}\n"
-        
-        summary += "\n### Files Modified:\n"
-        for file in implementation_result.get('files_modified', []):
-            summary += f"- {file}\n"
-        
-        summary += "\n## Improvements Implemented:\n"
-        for i, imp in enumerate(improvements, 1):
-            summary += f"{i}. {imp.get('what', 'Unknown improvement')}\n"
-        
-        return summary
-    
-    def _save_development_artifact(self, content: str, artifact_type: str):
-        """Save development work artifacts for visibility."""
-        try:
-            # Create agent work directory in .swarmdev  
-            project_dir = getattr(self, '_current_project_dir', '.')
-            agent_work_dir = os.path.join(project_dir, ".swarmdev", "agent_work")
-            os.makedirs(agent_work_dir, exist_ok=True)
-            
-            # Save artifact with timestamp
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            artifact_file = os.path.join(agent_work_dir, f"development_{artifact_type}_{timestamp}.md")
-            
-            with open(artifact_file, 'w') as f:
-                f.write(content)
-            
-            self.logger.info(f"Saved development artifact: {artifact_file}")
-            
-        except Exception as e:
-            self.logger.error(f"Failed to save development artifact: {e}")
-    
-    def _save_iteration_progress(self, iteration_count: int, files_created: List[str], files_modified: List[str], improvements_implemented: List[Dict]):
-        """Save iteration progress to prevent losing track of what's been built."""
-        try:
-            project_dir = getattr(self, '_current_project_dir', '.')
-            agent_work_dir = os.path.join(project_dir, ".swarmdev", "agent_work")
-            os.makedirs(agent_work_dir, exist_ok=True)
-            
-            progress_file = os.path.join(agent_work_dir, "iteration_progress.json")
-            
-            # Load existing progress
-            if os.path.exists(progress_file):
-                with open(progress_file, 'r') as f:
-                    progress = json.loads(f.read())
-            else:
-                progress = {"iterations": [], "all_files_created": [], "all_files_modified": []}
-            
-            # Add current iteration
-            current_iteration = {
-                "iteration": iteration_count,
-                "timestamp": datetime.now().isoformat(),
-                "files_created": files_created,
-                "files_modified": files_modified,
-                "improvements": [imp.get('what', 'Unknown') for imp in improvements_implemented],
-                "agent_id": self.agent_id
-            }
-            
-            progress["iterations"].append(current_iteration)
-            
-            # Update cumulative lists
-            for file in files_created:
-                if file not in progress["all_files_created"]:
-                    progress["all_files_created"].append(file)
-            
-            for file in files_modified:
-                if file not in progress["all_files_modified"]:
-                    progress["all_files_modified"].append(file)
-            
-            # Save updated progress
-            with open(progress_file, 'w') as f:
-                f.write(json.dumps(progress, indent=2))
-            
-            self.logger.info(f"Saved iteration progress: iteration {iteration_count}")
-            
-        except Exception as e:
-            self.logger.error(f"Failed to save iteration progress: {e}")
-    
-    def _get_previous_iteration_progress(self) -> Dict:
-        """Get previous iteration progress to understand what's been built."""
-        try:
-            project_dir = getattr(self, '_current_project_dir', '.')
-            progress_file = os.path.join(project_dir, ".swarmdev", "agent_work", "iteration_progress.json")
-            if os.path.exists(progress_file):
-                with open(progress_file, 'r') as f:
-                    return json.loads(f.read())
-        except Exception as e:
-            self.logger.error(f"Failed to load iteration progress: {e}")
-        
-        return {"iterations": [], "all_files_created": [], "all_files_modified": []}
-    
-
-    
-class DocumentationAgent(BaseAgent):
-    """
-    Documentation Agent for creating project documentation.
-    
-    This agent specializes in creating user guides, API documentation,
-    and other documentation artifacts.
-    """
-    
-    def __init__(self, agent_id: str, agent_type: str, llm_provider=None, mcp_manager=None, config: Optional[Dict] = None):
-        """
-        Initialize the Documentation Agent.
-        
-        Args:
-            agent_id: Unique identifier for this agent
-            agent_type: Type of agent (should be "documentation")
-            llm_provider: LLM provider instance
-            mcp_manager: MCP manager instance
-            config: Optional configuration dictionary
-        """
-        super().__init__(agent_id, agent_type, llm_provider, mcp_manager, config)
-        
-        # Initialize comprehensive logger
-        self.logger = AgentLogger.get_logger("DocumentationAgent", agent_id)
-        self.logger.info(f"DocumentationAgent initialized with ID: {agent_id}")
-    
-    def process_task(self, task: Dict) -> Dict:
-        """
-        Process a documentation task.
-        
-        Args:
-            task: Task dictionary with details about the documentation task
-            
-        Returns:
-            Dict: Documentation results including user guides and API docs
-        """
-        self.status = "processing"
-        
-        try:
-            # Extract task details
-            components = task.get("components", [])
-            implementations = task.get("implementations", [])
-            blueprint = task.get("blueprint", {})
-            
-            # Create component documentation
-            component_docs = self._create_component_documentation(components, implementations)
-            
-            # Create API documentation
-            api_docs = self._create_api_documentation(implementations)
-            
-            # Create user guide
-            user_guide = self._create_user_guide(blueprint, components)
-            
-            # Prepare result
-            result = {
-                "task_id": task.get("task_id"),
-                "status": "completed",
-                "component_docs": component_docs,
-                "api_docs": api_docs,
-                "user_guide": user_guide
-            }
-            
-            self.status = "ready"
-            return result
-            
-        except Exception as e:
-            return self.handle_error(e, task)
-    
-    def _create_component_documentation(self, components: List[Dict], implementations: List[Dict]) -> List[Dict]:
-        """
-        Create documentation for components.
-        
-        Args:
-            components: List of component definitions
-            implementations: List of component implementations
-            
-        Returns:
-            List[Dict]: Component documentation
-        """
-        # This is a placeholder implementation
-        # In a real implementation, this would use the LLM to create documentation
-        
-        component_docs = []
-        
-        for component in components:
-            # Find the corresponding implementation
-            implementation = next((impl for impl in implementations if impl["component_id"] == component["id"]), None)
-            
-            if implementation:
-                # Use LLM to create documentation
-                prompt = f"Create documentation for the following component and its implementation:\n\nComponent:\n{component}\n\nImplementation:\n{implementation}"
-                doc_text = self.llm_provider.generate_text(prompt, temperature=0.5)
-                
-                component_docs.append({
-                    "component_id": component["id"],
-                    "title": f"Documentation for {component['name']}",
-                    "content": doc_text,
-                    "format": "markdown"
-                })
-        
-        return component_docs
-    
-    def _create_api_documentation(self, implementations: List[Dict]) -> Dict:
-        """
-        Create API documentation.
-        
-        Args:
-            implementations: List of component implementations
-            
-        Returns:
-            Dict: API documentation
-        """
-        # This is a placeholder implementation
-        # In a real implementation, this would use the LLM to create API documentation
-        
-        # Use LLM to create API documentation
-        prompt = f"Create API documentation for the following implementations:\n\n{implementations}"
-        api_doc_text = self.llm_provider.generate_text(prompt, temperature=0.5)
-        
-        # Structure the API documentation
-        api_docs = {
-            "title": "API Documentation",
-            "content": api_doc_text,
-            "format": "markdown",
-            "endpoints": [
-                {
-                    "path": "/api/endpoint1",
-                    "method": "GET",
-                    "description": "Description of endpoint 1",
-                    "parameters": [],
-                    "responses": []
-                },
-                {
-                    "path": "/api/endpoint2",
-                    "method": "POST",
-                    "description": "Description of endpoint 2",
-                    "parameters": [],
-                    "responses": []
-                }
-            ]
-        }
-        
-        return api_docs
-    
-    def _create_user_guide(self, blueprint: Dict, components: List[Dict]) -> Dict:
-        """
-        Create a user guide.
-        
-        Args:
-            blueprint: Project blueprint
-            components: List of component definitions
-            
-        Returns:
-            Dict: User guide
-        """
-        # This is a placeholder implementation
-        # In a real implementation, this would use the LLM to create a user guide
-        
-        # Use LLM to create user guide
-        prompt = f"Create a user guide for the following project:\n\nBlueprint:\n{blueprint}\n\nComponents:\n{components}"
-        user_guide_text = self.llm_provider.generate_text(prompt, temperature=0.5)
-        
-        # Structure the user guide
-        user_guide = {
-            "title": "User Guide",
-            "content": user_guide_text,
-            "format": "markdown",
-            "sections": [
-                {
-                    "title": "Introduction",
-                    "content": "Introduction to the project"
-                },
-                {
-                    "title": "Installation",
-                    "content": "Installation instructions"
-                },
-                {
-                    "title": "Usage",
-                    "content": "Usage instructions"
-                },
-                {
-                    "title": "Features",
-                    "content": "Description of features"
-                },
-                {
-                    "title": "Troubleshooting",
-                    "content": "Troubleshooting guide"
-                }
-            ]
-        }
-        
-        return user_guide
+        # Track what we did
+        if file_exists:
+            results["files_modified"].append(file_path)
+            self.logger.info(f"Modified file: {file_path}")
+        else:
+            results["files_created"].append(file_path)
+            self.logger.info(f"Created file: {file_path}")
 
 
 class AnalysisAgent(BaseAgent):
     """
-    Analysis Agent for analyzing project state and suggesting improvements.
-    
-    This agent specializes in examining existing project files, comparing
-    against goals, and suggesting specific improvements or new features.
+    Analysis agent for analyzing project state and suggesting improvements.
     """
     
     def __init__(self, agent_id: str, agent_type: str, llm_provider=None, mcp_manager=None, config: Optional[Dict] = None):
-        """
-        Initialize the Analysis Agent.
-        
-        Args:
-            agent_id: Unique identifier for this agent
-            agent_type: Type of agent (should be "analysis")
-            llm_provider: LLM provider instance
-            mcp_manager: MCP manager instance
-            config: Optional configuration dictionary
-        """
         super().__init__(agent_id, agent_type, llm_provider, mcp_manager, config)
-        
-        # Initialize comprehensive logger
-        self.logger = AgentLogger.get_logger("AnalysisAgent", agent_id)
-        self.logger.info(f"AnalysisAgent initialized with ID: {agent_id}")
-        self.logger.debug(f"Configuration: {json.dumps(config or {}, indent=2)}")
-        
-        # Initialize blueprint manager
-        self.blueprint_manager = None  # Will be initialized when needed with project_dir
     
     def process_task(self, task: Dict) -> Dict:
-        """
-        Process an analysis task.
-        
-        Args:
-            task: Task dictionary with details about the analysis task
-            
-        Returns:
-            Dict: Analysis results including improvement suggestions and evolved goal
-        """
-        start_time = time.time()
-        self.status = "processing"
-        
-        # Log task start with comprehensive details
-        AgentLogger.log_task_start(self.logger, task)
-        
+        """Process analysis tasks including project state analysis and improvement suggestions."""
         try:
-            # Extract task details
+            self.status = "processing"
             goal = task.get("goal", "")
-            project_dir = task.get("project_dir", ".")
+            context = task.get("context", {})
+            project_dir = context.get("project_dir")
             iteration_count = task.get("iteration_count", 0)
             max_iterations = task.get("max_iterations", None)
             workflow_type = task.get("workflow_type", "indefinite")
             
-            # Store project_dir for use in helper methods
-            self._current_project_dir = project_dir
-            
-            self.logger.info(f"Processing analysis task for iteration {iteration_count}")
-            self.logger.info(f"Goal (first 200 chars): {goal[:200]}...")
-            self.logger.info(f"Project directory: {project_dir}")
-            self.logger.info(f"Workflow type: {workflow_type}, Max iterations: {max_iterations}")
+            self.logger.info(f"ANALYSIS: Analyzing project for goal: {goal[:100]}...")
             
             # Analyze current project state
-            self.logger.info("Starting project state analysis...")
-            project_state = self._analyze_project_state(project_dir)
+            project_state = self._analyze_project_state(project_dir) if project_dir else {}
             
-            AgentLogger.log_analysis_metrics(self.logger, {
-                "files_analyzed": project_state.get('file_count', 0),
-                "total_lines": project_state.get('total_lines', 0),
-                "target_technology": project_state.get('target_technology', 'unknown'),
-                "project_structure": project_state.get('structure', 'unknown')
-            })
+            # Analyze improvements needed
+            improvement_analysis = self._analyze_improvements(goal, context, project_state)
             
-            # Initialize blueprint manager for this project
-            if not self.blueprint_manager:
-                self.blueprint_manager = BlueprintManager(project_dir, self.logger)
-            
-            # Blueprint-driven improvement analysis
-            self.logger.info("Starting blueprint-driven improvement analysis...")
-            improvement_analysis = self._analyze_improvements_with_blueprint(goal, project_state, iteration_count)
-            
-            improvement_count = improvement_analysis.get('improvement_count', 0)
-            self.logger.info(f"Improvement analysis complete: {improvement_count} suggestions generated")
-            
-            # Create evolved goal for next iteration (if not the final iteration)
+            # Create evolved goal for next iteration if needed
             evolved_goal = None
             if iteration_count > 0 and iteration_count < (max_iterations or 10):
-                self.logger.info(f"Creating evolved goal for next iteration ({iteration_count + 1})")
                 evolved_goal = self._create_evolved_goal(goal, project_state, improvement_analysis, iteration_count)
-                self.logger.info("Evolved goal created successfully")
-            else:
-                self.logger.info(f"Skipping evolved goal creation (iteration {iteration_count}, max {max_iterations})")
             
             # Determine if another iteration is needed
             should_continue = self._should_continue_iteration(
                 improvement_analysis, iteration_count, max_iterations, workflow_type
             )
             
-            AgentLogger.log_decision(
-                self.logger,
-                f"Continue iterations: {should_continue}",
-                f"Based on workflow_type={workflow_type}, iteration={iteration_count}, max={max_iterations}, improvements={improvement_count}",
-                {
-                    "workflow_type": workflow_type,
-                    "current_iteration": iteration_count,
-                    "max_iterations": max_iterations,
-                    "improvement_count": improvement_count
-                }
-            )
-            
-            # Prepare result
-            result = {
-                "task_id": task.get("task_id"),
-                "status": "completed",
+            self.status = "completed"
+            return {
+                "status": "success",
+                "agent_type": self.agent_type,
                 "project_state": project_state,
                 "improvement_analysis": improvement_analysis,
                 "should_continue": should_continue,
                 "iteration_count": iteration_count + 1,
                 "improvements_suggested": improvement_analysis.get("improvements", []),
-                "evolved_goal": evolved_goal  # New: evolved goal for next iteration
+                "evolved_goal": evolved_goal,
+                "timestamp": datetime.now().isoformat()
             }
             
-            self.status = "ready"
-            duration = time.time() - start_time
-            AgentLogger.log_task_complete(self.logger, task, result, duration)
-            
-            return result
-            
         except Exception as e:
-            duration = time.time() - start_time
-            self.logger.error(f"Analysis task failed after {duration:.2f} seconds")
-            AgentLogger.log_error_with_context(self.logger, e, {
-                "task_id": task.get("task_id"),
-                "goal": goal[:100] if 'goal' in locals() else "unknown",
-                "iteration_count": iteration_count if 'iteration_count' in locals() else "unknown",
-                "duration": duration
-            })
+            self.logger.error(f"ANALYSIS: Failed to process task: {e}")
             return self.handle_error(e, task)
     
     def _analyze_project_state(self, project_dir: str) -> Dict:
-        """
-        Analyze the current state of the project.
-        
-        Args:
-            project_dir: Project directory path
-            
-        Returns:
-            Dict: Project state analysis
-        """
+        """Analyze current project state using LLM investigation."""
         try:
-            project_files = {}
-            file_count = 0
+            project_path = self.investigate_project(project_dir)
             
-            # Read all files in the project directory
-            for root, dirs, files in os.walk(project_dir):
-                # Skip hidden directories, build/cache directories, and .swarmdev (which contains internal state)
-                dirs[:] = [d for d in dirs if not d.startswith('.') and d not in 
-                          ['__pycache__', 'node_modules', 'target', 'build', 'dist']]
+            if self.llm_provider:
+                state_prompt = f"""
+                Analyze the current state of this project:
                 
-                for file in files:
-                    if file.startswith('.') or file.endswith(('.pyc', '.log')):
-                        continue
-                    
-                    file_path = os.path.join(root, file)
-                    relative_path = os.path.relpath(file_path, project_dir)
-                    
-                    try:
-                        with open(file_path, 'r', encoding='utf-8') as f:
-                            content = f.read()
-                            project_files[relative_path] = {
-                                "content": content,
-                                "size": len(content),
-                                "lines": len(content.split('\n'))
-                            }
-                            file_count += 1
-                            
-                    except (UnicodeDecodeError, PermissionError):
-                        # Skip binary files or files we can't read
-                        continue
-            
-            # Read the goal to understand target technology BEFORE analyzing
-            target_technology = self._detect_target_technology()
-            
-            # Analyze file organization issues
-            organization_analysis = self._analyze_file_organization(project_files, target_technology)
-            
-            # Use LLM to analyze the project structure and functionality with technology context
-            analysis_prompt = f"""
-            Analyze this project structure and content for a {target_technology} project:
-            
-            TARGET TECHNOLOGY: {target_technology}
-            
-            Files found: {list(project_files.keys())}
-            
-            File contents:
-            {self._format_files_for_analysis(project_files)}
-            
-            FILE ORGANIZATION ANALYSIS:
-            {organization_analysis}
-            
-            Provide a comprehensive analysis including:
-            1. Project type and technology stack (focus on {target_technology})
-            2. Current functionality and features implemented in {target_technology}
-            3. Code quality and structure assessment for {target_technology}
-            4. File organization and structure recommendations
-            5. Potential issues or limitations
-            6. Architecture overview for {target_technology} projects
-            
-            Keep the analysis focused on {target_technology} development patterns and best practices.
-            """
-            
-            analysis_text = self.llm_provider.generate_text(analysis_prompt, temperature=0.3)
-            
-            return {
-                "files": list(project_files.keys()),
-                "file_count": len(project_files),
-                "total_lines": sum(f["lines"] for f in project_files.values()),
-                "analysis": analysis_text,
-                "target_technology": target_technology,
-                "structure": self._identify_project_structure(project_files, target_technology),
-                "organization_issues": organization_analysis
-            }
-            
-        except Exception as e:
-            return {
-                "files": [],
-                "file_count": 0,
-                "total_lines": 0,
-                "analysis": f"Error analyzing project: {e}",
-                "target_technology": "unknown",
-                "structure": "unknown"
-            }
-    
-    def _format_files_for_analysis(self, project_files: Dict) -> str:
-        """Format project files for LLM analysis."""
-        formatted = ""
-        for file_path, file_info in list(project_files.items())[:10]:  # Limit to first 10 files
-            content = file_info["content"]
-            if len(content) > 1000:  # Truncate long files
-                content = content[:1000] + "... [truncated]"
-            formatted += f"\n--- {file_path} ---\n{content}\n"
-        return formatted
-    
-    def _identify_project_structure(self, project_files: Dict, target_technology: str) -> str:
-        """Identify the project structure type using LLM."""
-        try:
-            files = list(project_files.keys())
-            
-            structure_prompt = f"""
-            Based on these files and the target technology '{target_technology}', what type of project structure is this?
-            
-            Files: {files}
-            Target Technology: {target_technology}
-            
-            Return a brief description of the project structure type (e.g., "web application", "library", "CLI tool", "trading indicators", etc.)
-            Be concise - just return the project type.
-            """
-            
-            structure_type = self.llm_provider.generate_text(structure_prompt, temperature=0.1).strip()
-            return structure_type
-            
-        except Exception as e:
-            self.logger.error(f"Failed to identify project structure: {e}")
-            return "unknown"
-    
-    def _analyze_file_organization(self, project_files: Dict, target_technology: str) -> str:
-        """Analyze file organization and suggest improvements."""
-        try:
-            files = list(project_files.keys())
-            
-            # Check if files are properly organized
-            misplaced_files = []
-            
-            for file_path in files:
-                _, ext = os.path.splitext(file_path)
+                PROJECT DIRECTORY: {project_path}
                 
-                # Check if file is in root but should be in a technology folder
-                if '/' not in file_path and ext in ['.pine', '.py', '.js', '.ts', '.go', '.rs', '.java', '.cpp', '.c', '.h']:
-                    expected_folder = self._get_expected_folder_for_extension(ext)
-                    if expected_folder:
-                        misplaced_files.append({
-                            "current": file_path,
-                            "suggested": f"{expected_folder}/{file_path}",
-                            "reason": f"{target_technology} files should be organized in {expected_folder}/ folder"
-                        })
-            
-            if misplaced_files:
-                organization_prompt = f"""
-                CRITICAL PROJECT ORGANIZATION ISSUES DETECTED:
+                Assess:
+                1. Current functionality and features
+                2. Code structure and organization
+                3. Technologies and frameworks in use
+                4. Completeness and gaps
+                5. Quality and maintainability
+                6. Integration points and architecture
+                7. Areas for improvement or expansion
                 
-                TARGET TECHNOLOGY: {target_technology}
-                CURRENT FILES: {files}
-                
-                MISPLACED FILES REQUIRING REORGANIZATION:
-                {chr(10).join([f"• {item['current']} → {item['suggested']} ({item['reason']})" for item in misplaced_files])}
-                
-                Provide specific reorganization recommendations to improve project structure for {target_technology} development.
-                Focus on creating a clean, professional folder structure that follows {target_technology} best practices.
+                Provide a comprehensive project state analysis.
                 """
                 
-                return self.llm_provider.generate_text(organization_prompt, temperature=0.2)
-            else:
-                return f"Project files are properly organized for {target_technology} development."
+                analysis = self.llm_provider.generate_text(state_prompt, temperature=0.2)
+                return {"analysis": analysis, "project_dir": project_path}
                 
         except Exception as e:
-            self.logger.error(f"Failed to analyze file organization: {e}")
-            return "Unable to analyze file organization"
-    
-    def _get_expected_folder_for_extension(self, ext: str) -> str:
-        """Get the expected folder for a file extension."""
-        folder_mapping = {
-            '.pine': 'indicators',
-            '.py': 'python', 
-            '.js': 'javascript',
-            '.ts': 'javascript',
-            '.go': 'golang',
-            '.rs': 'rust',
-            '.html': 'web',
-            '.css': 'web',
-            '.java': 'java',
-            '.cpp': 'cpp',
-            '.c': 'cpp',
-            '.h': 'cpp'
-        }
-        return folder_mapping.get(ext, '')
-    
-
-    
-    def _analyze_improvements(self, goal: str, project_state: Dict, iteration_count: int) -> Dict:
-        """
-        Analyze potential improvements for the project.
-        
-        Args:
-            goal: Original project goal
-            project_state: Current project state analysis
-            iteration_count: Current iteration number
+            self.logger.warning(f"Project state analysis failed: {e}")
             
-        Returns:
-            Dict: Improvement analysis and suggestions
-        """
-        self.logger.info(f"Starting deep improvement analysis for iteration {iteration_count}")
+        return {"analysis": "Project state analysis not available", "project_dir": project_dir}
+    
+    def _analyze_improvements(self, goal: str, context: Dict, project_state: Dict) -> Dict:
+        """Analyze what improvements are needed based on the goal and current state."""
+        if not self.llm_provider:
+            return {"improvements": ["Basic analysis not available"], "improvement_count": 1}
         
-        # Extract what's already been implemented to avoid repetitive suggestions
-        implemented_features = self._extract_implemented_features(project_state)
-        
-        # Get target technology for context
-        target_technology = project_state.get('target_technology', 'unknown')
-        
-        # Check for organization issues that should be addressed
-        organization_issues = project_state.get('organization_issues', '')
-        has_organization_issues = 'CRITICAL PROJECT ORGANIZATION ISSUES' in organization_issues
-        
-        # Create creative expansion prompt that forces innovative thinking
         improvement_prompt = f"""
-        CREATIVE {target_technology.upper()} PROJECT EXPANSION ANALYSIS (Iteration {iteration_count})
+        Analyze what improvements are needed for this project:
         
-        TARGET TECHNOLOGY: {target_technology}
-        ORIGINAL GOAL: {goal}
+        GOAL: {goal}
+        CONTEXT: {context}
+        PROJECT STATE: {project_state.get('analysis', 'None')}
         
-        CURRENT PROJECT STATE:
-        - Files: {project_state.get('file_count', 0)} files, {project_state.get('total_lines', 0)} lines
-        - Structure: {project_state.get('structure', 'unknown')}
-        - Current Analysis: {project_state.get('analysis', 'No analysis available')}
+        Identify:
+        1. Gaps between current state and desired goal
+        2. Missing functionality or features
+        3. Code improvements needed
+        4. Architectural enhancements
+        5. Integration requirements
+        6. Documentation needs
+        7. Testing requirements
         
-        {'URGENT: PROJECT ORGANIZATION ISSUES DETECTED:' if has_organization_issues else ''}
-        {organization_issues if has_organization_issues else ''}
-        
-        ALREADY IMPLEMENTED FEATURES (DO NOT SUGGEST THESE AGAIN):
-        {implemented_features}
-        
-        Your role is to identify opportunities for CREATIVE EXPANSION of this {target_technology} project with substantial new capabilities.
-        
-        CRITICAL: DO NOT suggest features that are already implemented (listed above).
-        
-        FORBIDDEN SUGGESTIONS (NEVER suggest these repetitive improvements):
-        - Error handling improvements
-        - Documentation enhancements  
-        - Logging improvements
-        - Code refactoring
-        - Performance optimizations
-        - Testing improvements
-        - Security enhancements
-        - Configuration management
-        - Code organization
-        
-        REQUIRED CREATIVE EXPANSION APPROACH FOR {target_technology.upper()}:
-        1. **Understand the Domain**: What problem space does this {target_technology} project operate in?
-        2. **Identify User Needs**: What do users in this domain typically struggle with?
-        3. **Think Adjacent**: What related problems could this project solve?
-        4. **Expand Scope**: What entirely NEW {target_technology} capabilities would be transformative?
-        5. **Consider Workflows**: What new user workflows are missing?
-        6. **Integration Opportunities**: What external systems or data sources could be leveraged?
-        7. **{target_technology} Specific**: What advanced {target_technology} features could be implemented?
-        
-        CREATIVITY REQUIREMENTS:
-        {f'- FIRST PRIORITY: Address file organization issues detected above' if has_organization_issues else ''}
-        - Suggest 5+ entirely NEW {target_technology} capabilities that don't exist yet
-        - Each suggestion must add substantial user value and expand project scope
-        - Focus on features that would differentiate this project from similar tools
-        - Think about what would make users say "I can't live without this feature"
-        - Propose capabilities that would make this project a "must-have" tool
-        
-        PROVIDE SPECIFIC, CREATIVE {target_technology.upper()} EXPANSIONS:
-        For each expansion, specify:
-        - WHAT new {target_technology} capability to build (be very specific)
-        - WHY users would find this transformative (real user value)
-        - HOW to implement it (new {target_technology} modules, functions, features needed)
-        - PRIORITY (critical/high/medium/low)
-        - EFFORT level (small/medium/large)
-        - IMPACT level (low/medium/high/transformative)
-        - USER_BENEFIT (how this changes users' workflows)
-        
-        Focus on INNOVATIVE {target_technology} expansions that would make this project significantly more valuable!
+        Provide specific, actionable improvement suggestions.
         """
         
-        self.logger.info("Sending analysis prompt to LLM...")
-        analysis_text = self.llm_provider.generate_text(improvement_prompt, temperature=0.4)
-        self.logger.info(f"Received analysis response: {len(analysis_text)} characters")
-        
-        # Save the full analysis as an artifact for visibility
-        self._save_analysis_artifact(analysis_text, iteration_count)
-        
-        # Parse specific improvements from the analysis
-        improvements = self._parse_specific_improvements(analysis_text)
-        
-        # Filter out any suggestions that match already implemented features
-        filtered_improvements = self._filter_duplicate_improvements(improvements, implemented_features)
-        
-        self.logger.info(f"Parsed {len(improvements)} improvements, filtered to {len(filtered_improvements)} unique ones")
-        for i, improvement in enumerate(filtered_improvements):
-            self.logger.info(f"Improvement {i+1}: {improvement.get('what', 'Unknown')[:100]}...")
-        
-        return {
-            "full_analysis": analysis_text,
-            "improvements": filtered_improvements,
-            "improvement_count": len(filtered_improvements),
-            "has_significant_improvements": len(filtered_improvements) > 0,
-            "analysis_depth": "comprehensive",
-            "iteration": iteration_count,
-            "implemented_features": implemented_features
-        }
-    
-    def _extract_implemented_features(self, project_state: Dict) -> str:
-        """Extract already implemented features from the project state."""
         try:
-            files = project_state.get('files', [])
-            analysis = project_state.get('analysis', '')
-            target_tech = project_state.get('target_technology', 'unknown')
+            analysis = self.llm_provider.generate_text(improvement_prompt, temperature=0.3)
             
-            # Use LLM to analyze what's been implemented
-            extraction_prompt = f"""
-            Based on this {target_tech} project analysis and file list, what features have been implemented?
+            # Extract specific improvements
+            improvements_prompt = f"""
+            From this analysis, extract specific improvement actions:
             
-            Files: {files}
-            Analysis: {analysis}
+            ANALYSIS: {analysis}
             
-            List the specific features/capabilities that are already working in this {target_tech} project.
-            Focus on functional features, not just file existence.
-            Format as a bulleted list.
+            Return a numbered list of specific, actionable improvements.
             """
             
-            implemented_features = self.llm_provider.generate_text(extraction_prompt, temperature=0.2)
-            
-            if not implemented_features.strip():
-                return f"No major {target_tech} features implemented yet - this is a new project."
-            
-            return implemented_features
-            
-        except Exception as e:
-            self.logger.error(f"Failed to extract implemented features: {e}")
-            return "Unable to determine implemented features"
-    
-    def _filter_duplicate_improvements(self, improvements: List[Dict], implemented_features: str) -> List[Dict]:
-        """Filter out improvements that match already implemented features."""
-        filtered = []
-        implemented_lower = implemented_features.lower()
-        
-        for improvement in improvements:
-            what = improvement.get('what', '').lower()
-            
-            # Use LLM to check if this improvement is already implemented
-            duplication_check = f"""
-            Is this improvement already implemented based on the existing features?
-            
-            Proposed Improvement: {what}
-            Existing Features: {implemented_features}
-            
-            Return only "YES" if already implemented, "NO" if it's a new feature.
-            """
-            
-            try:
-                result = self.llm_provider.generate_text(duplication_check, temperature=0.1).strip().upper()
-                if result == "NO":
-                    filtered.append(improvement)
-                else:
-                    self.logger.info(f"Filtered duplicate suggestion: {improvement.get('what', 'Unknown')[:50]}...")
-            except:
-                # If LLM call fails, include the improvement to be safe
-                filtered.append(improvement)
-        
-        return filtered
-    
-    def _save_analysis_artifact(self, analysis_text: str, iteration_count: int):
-        """Save analysis as an artifact for visibility into agent thinking."""
-        try:
-            import os
-            
-            # Create agent work directory in .swarmdev
-            project_dir = getattr(self, '_current_project_dir', '.')
-            agent_work_dir = os.path.join(project_dir, ".swarmdev", "agent_work")
-            os.makedirs(agent_work_dir, exist_ok=True)
-            
-            # Save detailed analysis
-            analysis_file = os.path.join(agent_work_dir, f"analysis_iteration_{iteration_count}.md")
-            with open(analysis_file, 'w') as f:
-                f.write(f"# Analysis Agent Work - Iteration {iteration_count}\n\n")
-                f.write(f"**Timestamp:** {datetime.now().isoformat()}\n\n")
-                f.write(f"**Agent:** {self.agent_id}\n\n")
-                f.write("## Detailed Analysis\n\n")
-                f.write(analysis_text)
-            
-            self.logger.info(f"Saved analysis artifact to: {analysis_file}")
-            
-        except Exception as e:
-            self.logger.error(f"Failed to save analysis artifact: {e}")
-    
-    def _analyze_improvements_with_blueprint(self, goal: str, project_state: Dict, iteration_count: int) -> Dict:
-        """
-        Blueprint-driven improvement analysis with cross-run persistence.
-        
-        Args:
-            goal: Original project goal
-            project_state: Current project state analysis
-            iteration_count: Current iteration number
-            
-        Returns:
-            Dict: Improvement analysis and suggestions based on blueprint
-        """
-        self.logger.info(f"Starting blueprint-driven analysis for iteration {iteration_count}")
-        
-        # Step 1: Load existing blueprint or create initial one
-        blueprint = self.blueprint_manager.load_existing_blueprint()
-        
-        if blueprint is None:
-            self.logger.info("BLUEPRINT: No existing blueprint found, creating initial blueprint")
-            blueprint = self.blueprint_manager.create_initial_blueprint(goal, project_state)
-            
-            # For initial blueprint, use traditional analysis approach
-            return self._analyze_improvements(goal, project_state, iteration_count)
-        else:
-            self.logger.info(f"BLUEPRINT: Found existing blueprint for '{blueprint.project_name}'")
-            
-            # Step 2: Load and integrate user feedback
-            feedback_list = self.blueprint_manager.load_user_feedback()
-            if feedback_list:
-                self.logger.info(f"FEEDBACK: Integrating {len(feedback_list)} feedback entries")
-                blueprint = self.blueprint_manager.apply_user_feedback(blueprint, feedback_list)
-            
-            # Step 3: Cross-run continuity - get incomplete items
-            incomplete_items = self.blueprint_manager.get_incomplete_items(blueprint)
-            self.logger.info(f"CROSS-RUN: Found {len(incomplete_items)} incomplete blueprint items")
-            
-            # Step 4: Verify completion status against actual project state
-            verified_items = self._verify_blueprint_completion(incomplete_items, project_state)
-            
-            # Step 5: Generate improvements based on blueprint priorities
-            improvements = self._generate_blueprint_driven_improvements(verified_items, project_state)
-            
-            # Step 6: Update blueprint run number and save
-            blueprint.run_number += 1
-            blueprint.last_updated = datetime.now().isoformat()
-            self.blueprint_manager.save_blueprint(blueprint)
-            
-            self.logger.info(f"BLUEPRINT: Generated {len(improvements)} improvements from blueprint")
+            improvements_response = self.llm_provider.generate_text(improvements_prompt, temperature=0.2)
+            improvements = [imp.strip() for imp in improvements_response.split('\n') if imp.strip()]
             
             return {
-                "full_analysis": f"Blueprint-driven analysis for {blueprint.project_name}",
+                "analysis": analysis,
                 "improvements": improvements,
-                "improvement_count": len(improvements),
-                "has_significant_improvements": len(improvements) > 0,
-                "analysis_depth": "blueprint_driven",
-                "iteration": iteration_count,
-                "blueprint_status": self.blueprint_manager.get_blueprint_status(blueprint),
-                "cross_run_continuation": True
+                "improvement_count": len(improvements)
             }
-    
-    def _verify_blueprint_completion(self, incomplete_items, project_state: Dict) -> list:
-        """
-        Verify blueprint item completion status against actual project state.
-        
-        Args:
-            incomplete_items: List of items marked as incomplete in blueprint
-            project_state: Current project state analysis
-            
-        Returns:
-            List: Verified incomplete items
-        """
-        self.logger.info("VERIFICATION: Cross-checking blueprint vs actual project state")
-        
-        verified_items = []
-        project_files = project_state.get('files', [])
-        project_analysis = project_state.get('analysis', '')
-        
-        for item in incomplete_items:
-            # Use LLM to check if item is actually implemented
-            verification_prompt = f"""
-            Check if this feature is implemented in the project:
-            
-            Feature to check: {item.description}
-            Project files: {project_files}
-            Project analysis: {project_analysis}
-            
-            Return "IMPLEMENTED" if the feature exists and works, "NOT_IMPLEMENTED" if it's missing or incomplete.
-            """
-            
-            try:
-                result = self.llm_provider.generate_text(verification_prompt, temperature=0.1).strip().upper()
-                
-                if result == "IMPLEMENTED":
-                    self.logger.info(f"VERIFICATION: Item completed - updating blueprint: {item.description[:50]}")
-                    # Update blueprint item status
-                    current_blueprint = self.blueprint_manager.load_existing_blueprint()
-                    if current_blueprint:
-                        self.blueprint_manager.update_item_status(
-                            current_blueprint,
-                            item.description,
-                            'complete',
-                            datetime.now().isoformat()
-                        )
-                        self.blueprint_manager.save_blueprint(current_blueprint)
-                else:
-                    verified_items.append(item)
-                    self.logger.debug(f"VERIFICATION: Item still incomplete: {item.description[:50]}")
-                    
-            except Exception as e:
-                self.logger.warning(f"VERIFICATION: Failed to verify item {item.description[:50]}: {e}")
-                # Include item if verification fails
-                verified_items.append(item)
-        
-        self.logger.info(f"VERIFICATION: {len(verified_items)}/{len(incomplete_items)} items still need work")
-        return verified_items
-    
-    def _generate_blueprint_driven_improvements(self, incomplete_items, project_state: Dict) -> List[Dict]:
-        """
-        Generate improvement suggestions based on incomplete blueprint items.
-        
-        Args:
-            incomplete_items: List of incomplete blueprint items
-            project_state: Current project state analysis
-            
-        Returns:
-            List[Dict]: Improvement suggestions based on blueprint
-        """
-        self.logger.info("PRIORITY: Generating improvements from blueprint priorities")
-        
-        if not incomplete_items:
-            self.logger.info("BLUEPRINT: All items complete, generating new expansion suggestions")
-            # If all blueprint items are complete, fall back to creative expansion
-            return self._generate_creative_expansions(project_state)
-        
-        improvements = []
-        target_technology = project_state.get('target_technology', 'unknown')
-        
-        # Prioritize items: high_priority first, then by priority level
-        sorted_items = sorted(incomplete_items, key=lambda x: (
-            x.status != 'high_priority',  # high_priority items first
-            {'high': 0, 'medium': 1, 'low': 2}.get(x.priority, 1)  # then by priority
-        ))
-        
-        for i, item in enumerate(sorted_items[:5]):  # Limit to top 5 priorities
-            # Generate detailed implementation plan for this blueprint item
-            implementation_prompt = f"""
-            Create detailed implementation plan for this blueprint item:
-            
-            Item: {item.description}
-            Priority: {item.priority}
-            Status: {item.status}
-            Technology: {target_technology}
-            Notes: {item.notes}
-            
-            Current project state:
-            {project_state.get('analysis', 'No analysis available')}
-            
-            Provide specific implementation details:
-            - WHAT exactly needs to be implemented
-            - WHY this is important for the project
-            - HOW to implement it (specific files, functions, modules)
-            - PRIORITY level (based on blueprint priority)
-            - EFFORT estimate
-            - IMPACT on users
-            """
-            
-            try:
-                implementation_details = self.llm_provider.generate_text(implementation_prompt, temperature=0.3)
-                
-                improvement = {
-                    'what': item.description,
-                    'why': f"Blueprint priority item - {item.notes}",
-                    'how': implementation_details,
-                    'priority': item.priority,
-                    'effort': item.estimated_effort,
-                    'impact': 'high' if item.status == 'high_priority' else 'medium',
-                    'files_affected': item.files_affected or ['TBD'],
-                    'blueprint_item_id': item.id,
-                    'implementation_notes': implementation_details
-                }
-                
-                improvements.append(improvement)
-                self.logger.debug(f"BLUEPRINT: Generated improvement for {item.description[:50]}")
-                
-            except Exception as e:
-                self.logger.error(f"BLUEPRINT: Failed to generate improvement for {item.description[:50]}: {e}")
-        
-        # Log priority order
-        priority_descriptions = [imp['what'][:50] for imp in improvements]
-        self.logger.info(f"PRIORITY: Blueprint-driven order: {priority_descriptions}")
-        
-        return improvements
-    
-    def _generate_creative_expansions(self, project_state: Dict) -> List[Dict]:
-        """
-        Generate creative expansion suggestions when blueprint is complete.
-        
-        Args:
-            project_state: Current project state analysis
-            
-        Returns:
-            List[Dict]: Creative expansion suggestions
-        """
-        self.logger.info("BLUEPRINT: All items complete, generating creative expansions")
-        
-        target_technology = project_state.get('target_technology', 'unknown')
-        
-        expansion_prompt = f"""
-        This {target_technology} project has completed its planned blueprint.
-        Generate 3-5 creative expansion ideas that would significantly enhance the project:
-        
-        Current project analysis:
-        {project_state.get('analysis', 'No analysis available')}
-        
-        Suggest innovative {target_technology} features that would:
-        - Add significant new value for users
-        - Expand the project's capabilities
-        - Make the project more competitive
-        - Introduce cutting-edge {target_technology} features
-        
-        For each suggestion, provide:
-        - WHAT new capability to add
-        - WHY users would value this
-        - HOW to implement it
-        - EFFORT estimate
-        - IMPACT level
-        """
-        
-        try:
-            expansion_text = self.llm_provider.generate_text(expansion_prompt, temperature=0.4)
-            improvements = self._parse_specific_improvements(expansion_text)
-            
-            self.logger.info(f"EXPANSION: Generated {len(improvements)} creative expansion ideas")
-            return improvements
-            
         except Exception as e:
-            self.logger.error(f"EXPANSION: Failed to generate creative expansions: {e}")
-            return []
-
-    def _parse_specific_improvements(self, analysis_text: str) -> List[Dict]:
-        """Parse specific, actionable improvements from analysis text."""
-        improvements = []
-        
-        # Use LLM to extract structured improvements
-        extraction_prompt = f"""
-        From this analysis, extract SPECIFIC, ACTIONABLE improvements:
-        
-        {analysis_text}
-        
-        Return a JSON array of improvements, each with:
-        {{
-            "what": "Specific description of what to improve",
-            "why": "Why this improvement is important",
-            "how": "Concrete implementation steps",
-            "priority": "critical|high|medium|low",
-            "effort": "small|medium|large", 
-            "impact": "low|medium|high|transformative",
-            "files_affected": ["list", "of", "files"],
-            "implementation_notes": "Specific technical details"
-        }}
-        
-        Focus on the most impactful improvements. Return valid JSON only.
-        """
-        
-        try:
-            improvements_json = self.llm_provider.generate_text(extraction_prompt, temperature=0.2)
-            
-            # Clean up the JSON response
-            import json
-            import re
-            
-            # Extract JSON from response
-            json_match = re.search(r'\[.*\]', improvements_json, re.DOTALL)
-            if json_match:
-                improvements_data = json.loads(json_match.group())
-                
-                for imp in improvements_data:
-                    if isinstance(imp, dict) and "what" in imp:
-                        improvements.append(imp)
-                        
-        except Exception as e:
-            self.logger.error(f"Failed to parse structured improvements: {e}")
-            
-            # Fallback: parse simple improvements from text
-            lines = analysis_text.split('\n')
-            current_improvement = {}
-            
-            for line in lines:
-                line = line.strip()
-                if line.startswith(('*', '-', '1.', '2.', '3.', '4.', '5.', '6.', '7.', '8.', '9.')):
-                    if current_improvement and "what" in current_improvement:
-                        improvements.append(current_improvement)
-                    
-                    current_improvement = {
-                        "what": re.sub(r'^[1-9*-]\.\s*', '', line),
-                        "priority": "medium",
-                        "effort": "medium",
-                        "impact": "medium"
-                    }
-                elif "priority" in line.lower() and current_improvement:
-                    if "critical" in line.lower():
-                        current_improvement["priority"] = "critical"
-                    elif "high" in line.lower():
-                        current_improvement["priority"] = "high"
-                    elif "low" in line.lower():
-                        current_improvement["priority"] = "low"
-            
-            if current_improvement and "what" in current_improvement:
-                improvements.append(current_improvement)
-        
-        # Ensure we have at least some improvements
-        if not improvements:
-            improvements = [{
-                "what": "Enhance project based on comprehensive analysis",
-                "why": "Project needs meaningful improvements to better fulfill its goals",
-                "how": "Implement improvements based on detailed analysis findings",
-                "priority": "high",
-                "effort": "medium",
-                "impact": "high",
-                "files_affected": ["multiple"],
-                "implementation_notes": "See full analysis for details"
-            }]
-        
-        return improvements[:8]  # Limit to top 8 improvements
-    
-    def _should_continue_iteration(self, improvement_analysis: Dict, iteration_count: int, 
-                                 max_iterations: Optional[int], workflow_type: str) -> bool:
-        """
-        Determine if another iteration should be run based on iteration limits.
-        
-        Args:
-            improvement_analysis: Analysis of potential improvements
-            iteration_count: Current iteration count
-            max_iterations: Maximum iterations allowed (None for indefinite)
-            workflow_type: Type of workflow (indefinite or iteration)
-            
-        Returns:
-            bool: True if another iteration should be run
-        """
-        # Simple logic - continue if we haven't hit the max iterations limit
-        if workflow_type == "iteration" and max_iterations is not None:
-            return iteration_count < max_iterations
-        
-        # For indefinite workflows, always continue (user will stop manually)
-        if workflow_type == "indefinite":
-            return True
-            
-        # Default to continuing for reasonable number of iterations
-        return iteration_count < 10
+            self.logger.error(f"Improvement analysis failed: {e}")
+            return {"improvements": ["Analysis failed - manual review needed"], "improvement_count": 1}
     
     def _create_evolved_goal(self, original_goal: str, project_state: Dict, improvement_analysis: Dict, iteration_count: int) -> str:
-        """
-        Create an evolved, more comprehensive goal for the next iteration.
-        
-        Args:
-            original_goal: The original goal text
-            project_state: Current project state analysis
-            improvement_analysis: Analysis of potential improvements
-            iteration_count: Current iteration number
-            
-        Returns:
-            str: Evolved goal text for next iteration
-        """
-        self.logger.info(f"Creating evolved goal for iteration {iteration_count + 1}")
-        
-        target_technology = project_state.get('target_technology', 'unknown')
-        
-        # Gather context about what's been built
-        current_features = self._analyze_implemented_features(project_state)
-        missing_features = improvement_analysis.get("improvements", [])
+        """Create an evolved goal for the next iteration based on current progress."""
+        if not self.llm_provider:
+            return original_goal
         
         evolution_prompt = f"""
-        COMPREHENSIVE {target_technology.upper()} TECHNICAL SPECIFICATION FOR ITERATION {iteration_count + 1}
+        Create an evolved goal for the next iteration based on current progress:
         
-        TARGET TECHNOLOGY: {target_technology}
-        ORIGINAL PROJECT GOAL: {original_goal}
+        ORIGINAL GOAL: {original_goal}
+        CURRENT ITERATION: {iteration_count}
+        PROJECT STATE: {project_state.get('analysis', '')[:500]}...
+        IMPROVEMENTS IDENTIFIED: {improvement_analysis.get('improvements', [])}
         
-        CURRENT PROJECT STATE (Iteration {iteration_count}):
-        - Files: {project_state.get('file_count', 0)} files
-        - Structure: {project_state.get('structure', 'unknown')}
-        - Implementation Status: {project_state.get('analysis', 'No analysis')}
+        Create a focused, evolved goal that:
+        1. Builds on what has been accomplished
+        2. Addresses the most important remaining gaps
+        3. Is achievable in one iteration
+        4. Maintains the overall project direction
         
-        FEATURES SUCCESSFULLY IMPLEMENTED:
-        {current_features}
-        
-        CREATIVE EXPANSION OPPORTUNITIES:
-        {self._format_improvements_for_goal(missing_features)}
-        
-        Create a COMPREHENSIVE {target_technology.upper()} TECHNICAL SPECIFICATION for iteration {iteration_count + 1} structured as follows:
-        
-        **ITERATION {iteration_count + 1} {target_technology.upper()} TECHNICAL SPECIFICATIONS:**
-        
-        **PROJECT VISION:**
-        [Brief description of what this {target_technology} project should become]
-        
-        **EXISTING {target_technology.upper()} CAPABILITIES (maintain and build upon):**
-        - [Complete inventory of all current {target_technology} features and modules]
-        - [List all working {target_technology} functionality from previous iterations]
-        
-        **NEW {target_technology.upper()} CAPABILITIES TO BUILD THIS ITERATION:**
-        
-        **Major {target_technology} Feature 1: [Feature Name]**
-        - Purpose: [What user need does this address in {target_technology}]
-        - Implementation: [Specific {target_technology} modules/files to create - be very detailed]
-        - Acceptance Criteria: [How to know it's complete and working]
-        - User Benefit: [Why users will find this transformative]
-        - Technical Requirements: [{target_technology} APIs, libraries, functions needed]
-        
-        **Major {target_technology} Feature 2: [Feature Name]**
-        - Purpose: [What problem does this solve in {target_technology}]
-        - Implementation: [Technical specifications - {target_technology} modules, functions]
-        - Integration: [How it connects to existing {target_technology} features]
-        - Success Metrics: [Measurable outcomes]
-        - Technical Requirements: [Specific {target_technology} implementation details]
-        
-        **TECHNICAL REQUIREMENTS FOR {target_technology.upper()}:**
-        - Minimum 300+ lines of new functional {target_technology} code
-        - 3-5 new {target_technology} modules or major components
-        - Complete user workflows implemented in {target_technology}
-        - Supporting {target_technology} utilities and configurations
-        - Integration with existing {target_technology} architecture
-        
-        **{target_technology.upper()} QUALITY STANDARDS:**
-        - [{target_technology} specific performance targets]
-        - [{target_technology} user experience requirements]
-        - [{target_technology} reliability and robustness standards]
-        
-        **EXPANSION PHILOSOPHY:**
-        This iteration should make the {target_technology} project significantly more capable and valuable to users while maintaining all existing functionality and adding substantial new value.
-        
-        EVOLVED {target_technology.upper()} TECHNICAL SPECIFICATION FOR ITERATION {iteration_count + 1}:
+        Return only the evolved goal text.
         """
         
         try:
-            evolved_goal_text = self.llm_provider.generate_text(evolution_prompt, temperature=0.3)
+            evolved_goal = self.llm_provider.generate_text(evolution_prompt, temperature=0.3)
+            return evolved_goal.strip()
+        except Exception as e:
+            self.logger.error(f"Goal evolution failed: {e}")
+            return original_goal
+    
+    def _should_continue_iteration(self, improvement_analysis: Dict, iteration_count: int, max_iterations: Optional[int], workflow_type: str) -> bool:
+        """Determine if another iteration should be performed."""
+        # Check max iterations limit
+        if max_iterations is not None and iteration_count >= max_iterations:
+            return False
+        
+        # For indefinite workflow, check if there are meaningful improvements
+        if workflow_type == "indefinite":
+            improvement_count = improvement_analysis.get("improvement_count", 0)
+            return improvement_count > 0
+        
+        # For iteration workflow, respect max_iterations
+        if workflow_type == "iteration":
+            return max_iterations is None or iteration_count < max_iterations
+        
+        # Default: continue if improvements are available
+        return improvement_analysis.get("improvement_count", 0) > 0
+
+
+class DocumentationAgent(BaseAgent):
+    """
+    Documentation agent for creating and maintaining project documentation.
+    """
+    
+    def __init__(self, agent_id: str, agent_type: str, llm_provider=None, mcp_manager=None, config: Optional[Dict] = None):
+        super().__init__(agent_id, agent_type, llm_provider, mcp_manager, config)
+    
+    def process_task(self, task: Dict) -> Dict:
+        """Process documentation tasks."""
+        try:
+            self.status = "processing"
+            goal = task.get("goal", "")
+            context = task.get("context", {})
+            project_dir = context.get("project_dir")
             
-            # Save the evolved goal as an artifact and file
-            self._save_evolved_goal(evolved_goal_text, iteration_count + 1)
+            self.logger.info(f"DOCUMENTATION: Creating docs for goal: {goal[:100]}...")
             
-            return evolved_goal_text
+            # Analyze project for documentation needs
+            project_analysis = self._analyze_documentation_needs(project_dir) if project_dir else {}
+            
+            # Generate documentation content
+            documentation_content = self._generate_documentation(goal, context, project_analysis)
+            
+            # Create documentation structure
+            doc_structure = self._plan_documentation_structure(documentation_content)
+            
+            self.status = "completed"
+            return {
+                "status": "success",
+                "agent_type": self.agent_type,
+                "project_analysis": project_analysis,
+                "documentation_content": documentation_content,
+                "documentation_structure": doc_structure,
+                "timestamp": datetime.now().isoformat()
+            }
             
         except Exception as e:
-            self.logger.error(f"Failed to create evolved goal: {e}")
-            return original_goal  # Fallback to original goal
+            self.logger.error(f"DOCUMENTATION: Failed to process task: {e}")
+            return self.handle_error(e, task)
     
-    def _analyze_implemented_features(self, project_state: Dict) -> str:
-        """Analyze what features have been successfully implemented."""
+    def _analyze_documentation_needs(self, project_dir: str) -> Dict:
+        """Analyze project to understand documentation requirements."""
         try:
-            target_tech = project_state.get('target_technology', 'unknown')
+            project_path = self.investigate_project(project_dir)
             
-            # Use LLM to analyze what's been implemented
-            analysis_prompt = f"""
-            Based on this {target_tech} project analysis, summarize what features have been successfully implemented:
+            if self.llm_provider:
+                doc_analysis_prompt = f"""
+                Analyze this project to understand documentation needs:
+                
+                PROJECT DIRECTORY: {project_path}
+                
+                Assess:
+                1. Existing documentation and gaps
+                2. Code complexity requiring documentation
+                3. API endpoints or interfaces needing docs
+                4. Setup and installation requirements
+                5. Usage examples and tutorials needed
+                6. Architecture and design documentation gaps
+                
+                Identify specific documentation requirements.
+                """
+                
+                analysis = self.llm_provider.generate_text(doc_analysis_prompt, temperature=0.2)
+                return {"analysis": analysis, "project_dir": project_path}
+                
+        except Exception as e:
+            self.logger.warning(f"Documentation analysis failed: {e}")
             
-            {project_state.get('analysis', 'No detailed analysis available')}
+        return {"analysis": "Documentation analysis not available", "project_dir": project_dir}
+    
+    def _generate_documentation(self, goal: str, context: Dict, project_analysis: Dict) -> Dict:
+        """Generate comprehensive documentation content."""
+        if not self.llm_provider:
+            return {"content": "Documentation generation requires LLM provider"}
+        
+        doc_generation_prompt = f"""
+        Generate comprehensive documentation for this project goal:
+        
+        GOAL: {goal}
+        CONTEXT: {context}
+        PROJECT ANALYSIS: {project_analysis.get('analysis', 'None')}
+        
+        Create documentation including:
+        1. Project overview and purpose
+        2. Installation and setup instructions
+        3. Usage examples and tutorials
+        4. API documentation (if applicable)
+        5. Architecture and design notes
+        6. Troubleshooting and FAQ
+        
+        Generate clear, comprehensive documentation.
+        """
+        
+        try:
+            content = self.llm_provider.generate_text(doc_generation_prompt, temperature=0.3)
             
-            Files: {project_state.get('files', [])}
+            # Generate specific README content
+            readme_prompt = f"""
+            Create a professional README.md file for this project:
             
-            Provide a concise summary of working {target_tech} features and capabilities.
+            GOAL: {goal}
+            FULL DOCUMENTATION: {content[:1000]}...
+            
+            Include:
+            - Clear project title and description
+            - Installation instructions
+            - Quick start guide
+            - Basic usage examples
+            - Contributing guidelines
+            - License information
+            
+            Format as proper Markdown.
             """
             
-            implemented_features = self.llm_provider.generate_text(analysis_prompt, temperature=0.2)
-            return implemented_features
+            readme_content = self.llm_provider.generate_text(readme_prompt, temperature=0.2)
+            
+            return {
+                "full_documentation": content,
+                "readme": readme_content,
+                "generation_method": "llm"
+            }
             
         except Exception as e:
-            self.logger.error(f"Failed to analyze implemented features: {e}")
-            return "Feature analysis unavailable"
+            self.logger.error(f"Documentation generation failed: {e}")
+            return {"content": f"Documentation for: {goal}", "generation_method": "basic"}
     
-    def _format_improvements_for_goal(self, improvements: List[Dict]) -> str:
-        """Format improvement suggestions for inclusion in evolved goal."""
-        if not improvements:
-            return "No specific improvements identified"
+    def _plan_documentation_structure(self, documentation_content: Dict) -> Dict:
+        """Plan the organization and structure of documentation files."""
+        if not self.llm_provider:
+            return {"structure": "docs/README.md"}
         
-        formatted = "Key opportunities for expansion:\n"
-        for i, imp in enumerate(improvements[:8], 1):  # Limit to top 8
-            what = imp.get("what", "Unknown improvement")
-            why = imp.get("why", "No reason specified")
-            formatted += f"{i}. {what} - {why}\n"
+        structure_prompt = f"""
+        Plan the file structure for this documentation:
         
-        return formatted
-    
-    def _save_evolved_goal(self, evolved_goal: str, iteration_number: int):
-        """Save the evolved goal as both an artifact and a goal file."""
+        DOCUMENTATION CONTENT: {str(documentation_content)[:500]}...
+        
+        Recommend:
+        1. Documentation file organization
+        2. Directory structure
+        3. File naming conventions
+        4. Cross-references and navigation
+        
+        Suggest a logical, maintainable documentation structure.
+        """
+        
         try:
-            import os
+            structure = self.llm_provider.generate_text(structure_prompt, temperature=0.2)
             
-            # Save as agent artifact in .swarmdev
-            project_dir = getattr(self, '_current_project_dir', '.')
-            agent_work_dir = os.path.join(project_dir, ".swarmdev", "agent_work")
-            os.makedirs(agent_work_dir, exist_ok=True)
+            # Extract file list
+            files = ["README.md", "docs/installation.md", "docs/usage.md", "docs/api.md"]
             
-            artifact_file = os.path.join(agent_work_dir, f"evolved_goal_iteration_{iteration_number}.md")
-            with open(artifact_file, 'w') as f:
-                f.write(f"# Evolved Goal - Iteration {iteration_number}\n\n")
-                f.write(f"**Created:** {datetime.now().isoformat()}\n\n")
-                f.write(f"**Agent:** {self.agent_id}\n\n")
-                f.write("## Evolved Goal Text\n\n")
-                f.write(evolved_goal)
-            
-            # Also save as a goal file that can be used by other agents (in .swarmdev/goals directory)
-            goals_dir = os.path.join(project_dir, ".swarmdev", "goals")
-            os.makedirs(goals_dir, exist_ok=True)
-            goal_file = os.path.join(goals_dir, f"goal_iteration_{iteration_number}.txt")
-            with open(goal_file, 'w') as f:
-                f.write(evolved_goal)
-            
-            self.logger.info(f"Saved evolved goal to: {artifact_file} and {goal_file}")
+            return {
+                "structure_plan": structure,
+                "recommended_files": files
+            }
             
         except Exception as e:
-            self.logger.error(f"Failed to save evolved goal: {e}")
-    
-
+            self.logger.error(f"Documentation structure planning failed: {e}")
+            return {"structure_plan": "Standard docs structure", "recommended_files": ["README.md"]} 

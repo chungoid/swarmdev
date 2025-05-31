@@ -172,8 +172,17 @@ class SwarmBuilder:
             from ..utils.mcp_manager import MCPManager
             
             # Get MCP configuration from config  
-            # Default to .swarmdev location, fallback to root for compatibility
-            default_mcp_config = './.swarmdev/mcp_config.json' if os.path.exists('./.swarmdev/mcp_config.json') else './mcp_config.json'
+            # Default to project .swarmdev location, fallback to root for compatibility
+            project_mcp_config = os.path.join(self.project_dir, '.swarmdev', 'mcp_config.json')
+            
+            # If project MCP config doesn't exist but root config does, copy it
+            if not os.path.exists(project_mcp_config) and os.path.exists('./mcp_config.json'):
+                import shutil
+                os.makedirs(os.path.dirname(project_mcp_config), exist_ok=True)
+                shutil.copy2('./mcp_config.json', project_mcp_config)
+                self.logger.info(f"Copied MCP config to project directory: {project_mcp_config}")
+            
+            default_mcp_config = project_mcp_config if os.path.exists(project_mcp_config) else './mcp_config.json'
             mcp_config = self.config.get('mcp', {
                 'enabled': True,
                 'config_file': default_mcp_config,

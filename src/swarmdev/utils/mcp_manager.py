@@ -125,9 +125,9 @@ class MCPManager:
             
             self.mcp_logger.debug(f"Loaded MCP config: {json.dumps(mcp_config, indent=2)}")
             
-            # Load server configurations
-            servers = mcp_config.get("mcpServers", {})
-            settings = mcp_config.get("mcpSettings", {})
+            # Load server configurations (support both old and new format)
+            servers = mcp_config.get("servers", mcp_config.get("mcpServers", {}))
+            settings = mcp_config.get("settings", mcp_config.get("mcpSettings", {}))
             
             self.mcp_logger.info(f"Found {len(servers)} MCP servers in config")
             
@@ -565,6 +565,38 @@ class MCPManager:
         
         available_tools = self.mcp_tools[tool_id].get("available_tools", [])
         return [tool.get("name", "") for tool in available_tools if tool.get("name")]
+    
+    def get_tools_by_capability(self, capability: str) -> List[str]:
+        """Get all MCP servers that have the specified capability."""
+        if not self.enabled:
+            return []
+        
+        matching_tools = []
+        for tool_id, tool_info in self.mcp_tools.items():
+            if tool_info.get("status") == "ready" and capability in tool_info.get("capabilities", []):
+                matching_tools.append(tool_id)
+        
+        return matching_tools
+    
+    def get_actual_tool_names(self, server_id: str) -> List[Dict[str, str]]:
+        """Get the actual tool names and schemas from an MCP server."""
+        if server_id not in self.mcp_tools:
+            return []
+        
+        # Get available tools from stored info
+        available_tools = self.mcp_tools[server_id].get("available_tools", [])
+        
+        # Return tool info with names and descriptions
+        tool_info = []
+        for tool in available_tools:
+            if tool.get("name"):
+                tool_info.append({
+                    "name": tool.get("name"),
+                    "description": tool.get("description", ""),
+                    "input_schema": tool.get("inputSchema", {})
+                })
+        
+        return tool_info
     
     def get_metrics(self) -> Dict:
         """Get usage metrics for MCP tools."""

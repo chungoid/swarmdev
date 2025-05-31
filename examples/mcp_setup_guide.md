@@ -52,23 +52,11 @@ The main configuration enables MCP tools and points to the MCP config file:
 
 ```json
 {
-  "mcp_tools": {
+  "mcp": {
     "enabled": true,
     "config_file": "./mcp_config.json",
     "docker_enabled": true,
-    "docker_network": "swarmdev",
-    "tools": [
-      {
-        "id": "sequentialthinking",
-        "enabled": true,
-        "capabilities": ["reasoning", "planning", "analysis"]
-      },
-      {
-        "id": "context7", 
-        "enabled": true,
-        "capabilities": ["context_management", "reasoning", "documentation"]
-      }
-    ]
+    "docker_network": null
   }
 }
 ```
@@ -79,18 +67,25 @@ This file defines how to connect to each MCP server:
 
 ```json
 {
-  "mcpServers": {
+  "enabled": true,
+  "docker_enabled": true,
+  "docker_network": null,
+  "global_timeout": 120,
+  "persistent_connections": true,
+  "servers": {
     "sequentialthinking": {
       "command": "docker",
       "args": ["run", "--rm", "-i", "mcp/sequentialthinking"],
-      "timeout": 30,
-      "capabilities": ["reasoning", "planning", "analysis", "problem_solving"]
+      "capabilities": ["reasoning"],
+      "timeout": 60,
+      "name": "sequentialthinking"
     },
     "context7": {
-      "command": "docker", 
+      "command": "docker",
       "args": ["run", "-i", "--rm", "context7-mcp"],
+      "capabilities": ["documentation"],
       "timeout": 60,
-      "capabilities": ["context_management", "reasoning", "documentation"]
+      "name": "context7"
     }
   }
 }
@@ -140,8 +135,13 @@ docker network create my-project-swarmdev
 
 # Update mcp_config.json
 {
-  "mcpSettings": {
-    "dockerNetwork": "my-project-swarmdev"
+  "enabled": true,
+  "docker_enabled": true,
+  "docker_network": "my-project-swarmdev",
+  "global_timeout": 120,
+  "persistent_connections": true,
+  "servers": {
+    // ... your servers here
   }
 }
 ```
@@ -152,33 +152,32 @@ Control Docker resource usage:
 
 ```json
 {
-  "mcpSettings": {
-    "dockerMemoryLimit": "1g",
-    "dockerCpuLimit": 0.5,
-    "globalTimeout": 180
+  "enabled": true,
+  "docker_enabled": true,
+  "docker_network": null,
+  "global_timeout": 180,
+  "persistent_connections": true,
+  "servers": {
+    // ... your servers with custom resource limits can be configured via Docker args
   }
 }
 ```
 
-### Selective Tool Usage
+### Disabling Specific Tools
 
-Enable tools only for specific workflows:
+You can disable specific tools by setting `"disabled": true` in the MCP config:
 
 ```json
 {
-  "mcp_tools": {
-    "tools": [
-      {
-        "id": "sequentialthinking",
-        "enabled": true,
-        "workflows": ["standard_project", "iteration"]
-      },
-      {
-        "id": "context7",
-        "enabled": true, 
-        "workflows": ["research_only", "standard_project"]
-      }
-    ]
+  "servers": {
+    "sequentialthinking": {
+      "command": "docker",
+      "args": ["run", "--rm", "-i", "mcp/sequentialthinking"],
+      "capabilities": ["reasoning"],
+      "timeout": 60,
+      "name": "sequentialthinking",
+      "disabled": true
+    }
   }
 }
 ```

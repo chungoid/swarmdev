@@ -1,32 +1,23 @@
 {
   "enabled": true,
-  "mcpServers": {
+  "docker_enabled": true,
+  "docker_network": null,
+  "global_timeout": 120,
+  "persistent_connections": true,
+  "servers": {
     "sequentialthinking": {
       "command": "docker",
-      "args": [
-        "run", "--rm", "-i", "mcp/sequentialthinking"
-      ],
-      "transportType": "stdio",
-      "timeout": 30,
-      "capabilities": ["reasoning", "sequential_thinking", "problem_solving"],
-      "autoApprove": []
+      "args": ["run", "--rm", "-i", "mcp/sequentialthinking"],
+      "capabilities": ["reasoning"],
+      "timeout": 60,
+      "name": "sequentialthinking"
     },
     "context7": {
       "command": "docker",
-      "args": [
-        "run", "-i", "--rm", "context7-mcp"
-      ],
-      "transportType": "stdio",
+      "args": ["run", "-i", "--rm", "context7-mcp"],
+      "capabilities": ["documentation"],
       "timeout": 60,
-      "capabilities": ["documentation", "context_management", "library_lookup"],
-      "autoApprove": []
+      "name": "context7"
     }
-  },
-  "mcpSettings": {
-    "globalTimeout": 120,
-    "dockerNetwork": null,
-    "enableLogging": true,
-    "logLevel": "DEBUG",
-    "persistentConnections": true
   }
 }

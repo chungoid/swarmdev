@@ -31,8 +31,7 @@ swarmdev assistant
 cp examples/swarmdev_config.json ./swarmdev.json
 cp examples/mcp_config.json ./mcp_config.json
 
-# Set up Docker network for MCP servers
-docker network create swarmdev
+# Docker network is optional (set to null in config for default)
 
 # Pull MCP server images
 docker pull mcp/sequentialthinking
@@ -52,7 +51,7 @@ This file contains optimal settings for most projects:
 - **Agent Configuration**: Multiple agents with specialized roles
 - **Memory System**: Enabled with vector storage for context retention  
 - **Workflow Settings**: Balanced parallelism and timeout settings
-- **MCP Tools**: Enabled with external reasoning and context management
+- **MCP Integration**: Enabled with external reasoning and context management servers
 
 ### MCP Configuration (`mcp_config.json`)
 
@@ -115,7 +114,7 @@ swarmdev build --goal research_goal.txt --workflow research_only --config exampl
 ### Disable MCP Tools
 ```json
 {
-  "mcp_tools": {
+  "mcp": {
     "enabled": false
   }
 }

@@ -8,6 +8,7 @@ import logging
 from abc import ABC, abstractmethod
 from typing import Dict, List, Optional, Any
 from datetime import datetime
+import os
 
 class BaseAgent(ABC):
     """
@@ -83,8 +84,7 @@ class BaseAgent(ABC):
                         status = tool_info.get("status", "unknown")
                         self.mcp_logger.debug(f"  {tool_id}: {capabilities} (status: {status})")
                 
-                # Test key tools for this agent type
-                self._test_agent_mcp_tools()
+                # MCP tools available
             else:
                 self.mcp_logger.warning(f"MCP tools disabled for {agent_type} agent")
         else:
@@ -164,40 +164,7 @@ class BaseAgent(ABC):
     
     # MCP Integration Methods
     
-    def _test_agent_mcp_tools(self):
-        """Test MCP tools relevant to this agent type."""
-        if not self.mcp_manager or not self.mcp_manager.is_enabled():
-            return
-        
-        self.mcp_logger.info(f"Testing MCP tools for {self.agent_type} agent...")
-        
-        # Test reasoning tools
-        reasoning_tool = self.get_reasoning_tool()
-        if reasoning_tool:
-            self.mcp_logger.info(f"Found reasoning tool: {reasoning_tool}")
-            # Quick test
-            test_result = self.mcp_manager.call_tool(reasoning_tool, "tools/list", {})
-            if test_result.get("error"):
-                self.mcp_logger.error(f"Reasoning tool test failed: {test_result['error']}")
-            else:
-                self.mcp_logger.info(f"Reasoning tool test passed")
-        else:
-            self.mcp_logger.warning(f"No reasoning tool available for {self.agent_type}")
-        
-        # Test documentation tools
-        doc_tool = self.get_documentation_tool()
-        if doc_tool:
-            self.mcp_logger.info(f"Found documentation tool: {doc_tool}")
-            # Quick test
-            test_result = self.mcp_manager.call_tool(doc_tool, "tools/list", {})
-            if test_result.get("error"):
-                self.mcp_logger.error(f"Documentation tool test failed: {test_result['error']}")
-            else:
-                self.mcp_logger.info(f"Documentation tool test passed")
-        else:
-            self.mcp_logger.warning(f"No documentation tool available for {self.agent_type}")
-        
-        self.mcp_logger.info(f"Agent MCP tool testing complete for {self.agent_type}")
+
     
     def use_mcp_tool(self, tool_id: str, method: str, params: Dict, timeout: Optional[int] = None, justification: str = None) -> Dict:
         """
@@ -228,7 +195,7 @@ class BaseAgent(ABC):
         if cached_result:
             self.mcp_usage["cache_hits"] += 1
             if self.mcp_logger:
-                self.mcp_logger.info(f"🎯 CACHE HIT: {tool_id}.{method} - using cached result")
+                self.mcp_logger.info(f"CACHE HIT: {tool_id}.{method} - using cached result")
             return cached_result
         
         self.mcp_usage["cache_misses"] += 1
@@ -236,7 +203,7 @@ class BaseAgent(ABC):
         # INTELLIGENT THROTTLING
         if self._should_throttle_call(tool_id, method, params, justification):
             self.mcp_usage["throttled_calls"] += 1
-            throttle_msg = f"🚫 THROTTLED: {tool_id}.{method} - excessive usage detected"
+            throttle_msg = f"THROTTLED: {tool_id}.{method} - excessive usage detected"
             if self.mcp_logger:
                 self.mcp_logger.warning(throttle_msg)
                 self.mcp_logger.warning(f"Justification: {justification or 'None provided'}")
@@ -272,7 +239,7 @@ class BaseAgent(ABC):
         if result.get("error"):
             self.mcp_usage["failed_calls"] += 1
             if self.mcp_logger:
-                self.mcp_logger.error(f"❌ MCP CALL FAILED: {tool_id}")
+                self.mcp_logger.error(f"MCP CALL FAILED: {tool_id}")
                 self.mcp_logger.error(f"Error: {result['error']}")
                 self.mcp_logger.error(f"Duration: {duration:.2f}s")
         else:
@@ -280,7 +247,7 @@ class BaseAgent(ABC):
             # CACHE SUCCESSFUL RESULTS
             self._cache_result(cache_key, result, tool_id, method, params)
             if self.mcp_logger:
-                self.mcp_logger.info(f"✅ MCP CALL SUCCESS: {tool_id}")
+                self.mcp_logger.info(f"MCP CALL SUCCESS: {tool_id}")
                 self.mcp_logger.info(f"Duration: {duration:.2f}s")
                 self.mcp_logger.info(f"Cached for future use")
         
@@ -293,22 +260,26 @@ class BaseAgent(ABC):
         """Generate a cache key for this MCP call."""
         import hashlib
         
-        # For documentation tools, key by library name only
-        if 'context7' in tool_id or 'documentation' in tool_id:
-            if method == "resolve-library-id":
-                library_name = params.get("libraryName", "unknown")
-                return f"doc_resolve_{library_name}"
-            elif method == "get-library-docs":
-                library_id = params.get("context7CompatibleLibraryID", "unknown")
-                topic = params.get("topic", "general")
-                return f"doc_get_{library_id}_{topic}"
-        
-        # For sequential thinking, hash the problem text
-        if 'sequential' in tool_id and method == "sequentialthinking":
-            thought = params.get("thought", "")
-            if len(thought) > 100:
-                problem_hash = hashlib.md5(thought.encode()).hexdigest()[:12]
-                return f"thinking_{problem_hash}"
+        # Get tool capabilities to determine caching strategy
+        if self.mcp_manager:
+            tool_info = self.mcp_manager.get_tool_info(tool_id)
+            if tool_info:
+                capabilities = tool_info.get("capabilities", [])
+                
+                # For documentation-capable tools
+                if "documentation" in capabilities:
+                    # Key by library/tech name for documentation tools
+                    lib_name = params.get("arguments", {}).get("libraryName") or params.get("library_name") or params.get("tech_name")
+                    if lib_name:
+                        return f"doc_{tool_id}_{lib_name}"
+                
+                # For reasoning-capable tools
+                if "reasoning" in capabilities:
+                    # Key by input content hash for reasoning tools
+                    input_text = params.get("arguments", {}).get("input") or params.get("input", "")
+                    if len(input_text) > 100:
+                        content_hash = hashlib.md5(input_text.encode()).hexdigest()[:12]
+                        return f"reasoning_{tool_id}_{content_hash}"
         
         # Default: hash all parameters
         param_str = json.dumps(params, sort_keys=True)
@@ -323,8 +294,8 @@ class BaseAgent(ABC):
         if cache_key.startswith("doc_"):
             return cache["documentation"].get(cache_key)
         
-        # Sequential thinking caching  
-        if cache_key.startswith("thinking_"):
+        # Reasoning caching  
+        if cache_key.startswith("reasoning_"):
             return cache["sequential_thinking"].get(cache_key)
         
         return None
@@ -340,39 +311,38 @@ class BaseAgent(ABC):
         if cache_key.startswith("doc_"):
             cache["documentation"][cache_key] = result
             if self.mcp_logger:
-                self.mcp_logger.debug(f"📚 Cached documentation: {cache_key}")
+                self.mcp_logger.debug(f"Cached documentation: {cache_key}")
         
-        # Sequential thinking caching
-        elif cache_key.startswith("thinking_"):
+        # Reasoning caching
+        elif cache_key.startswith("reasoning_"):
             cache["sequential_thinking"][cache_key] = result
             if self.mcp_logger:
-                self.mcp_logger.debug(f"🧠 Cached thinking result: {cache_key}")
+                self.mcp_logger.debug(f"Cached reasoning result: {cache_key}")
     
     def _should_throttle_call(self, tool_id: str, method: str, params: Dict, justification: str) -> bool:
         """Intelligent throttling to prevent wasteful MCP usage."""
         cache = BaseAgent._execution_cache
         current_count = cache["call_counts"].get(tool_id, 0)
         
-        # CONTEXT7/DOCUMENTATION THROTTLING: Max 3 calls per unique library
-        if 'context7' in tool_id or 'documentation' in tool_id:
-            if method == "resolve-library-id":
-                library_name = params.get("libraryName", "unknown")
-                library_calls = sum(1 for key in cache["documentation"].keys() 
-                                  if key.startswith(f"doc_resolve_{library_name}"))
-                if library_calls >= 2:  # Already resolved this library
-                    return True
-            
-            elif method == "get-library-docs":
-                library_id = params.get("context7CompatibleLibraryID", "unknown")
-                lib_doc_calls = sum(1 for key in cache["documentation"].keys() 
-                                  if key.startswith(f"doc_get_{library_id}"))
-                if lib_doc_calls >= 3:  # Max 3 doc calls per library
-                    return True
-        
-        # SEQUENTIAL THINKING THROTTLING: Max 20 calls per execution
-        if 'sequential' in tool_id and current_count >= 20:
-            if not justification or len(justification) < 20:
-                return True  # Require good justification for >20 calls
+        # Get tool capabilities for intelligent throttling
+        if self.mcp_manager:
+            tool_info = self.mcp_manager.get_tool_info(tool_id)
+            if tool_info:
+                capabilities = tool_info.get("capabilities", [])
+                
+                # DOCUMENTATION THROTTLING: Max 3 calls per unique library
+                if "documentation" in capabilities:
+                    lib_name = params.get("arguments", {}).get("libraryName") or params.get("library_name") or params.get("tech_name")
+                    if lib_name:
+                        library_calls = sum(1 for key in cache["documentation"].keys() 
+                                          if key.startswith(f"doc_{tool_id}_{lib_name}"))
+                        if library_calls >= 3:  # Max 3 doc calls per library per tool
+                            return True
+                
+                # REASONING THROTTLING: Max 20 calls per execution
+                if "reasoning" in capabilities and current_count >= 20:
+                    if not justification or len(justification) < 20:
+                        return True  # Require good justification for >20 calls
         
         # GENERAL THROTTLING: Max 50 calls per tool per execution
         if current_count >= 50:
@@ -380,263 +350,11 @@ class BaseAgent(ABC):
         
         return False
     
-    def get_reasoning_tool(self) -> Optional[str]:
-        """
-        Get the best available reasoning tool for this agent.
-        
-        Returns:
-            Optional[str]: Tool ID of the best reasoning tool, or None if unavailable
-        """
-        if not self.mcp_manager:
-            return None
-        
-        reasoning_tools = self.mcp_manager.get_available_tools(['reasoning'])
-        if reasoning_tools:
-            # Prefer sequential thinking for complex reasoning
-            for tool_id in reasoning_tools:
-                if 'sequential' in tool_id.lower():
-                    return tool_id
-            return reasoning_tools[0]
-        return None
+
     
-    def get_context_tool(self) -> Optional[str]:
-        """
-        Get the best available context management tool.
-        
-        Returns:
-            Optional[str]: Tool ID of the best context tool, or None if unavailable
-        """
-        if not self.mcp_manager:
-            return None
-        
-        context_tools = self.mcp_manager.get_available_tools(['context_management'])
-        return context_tools[0] if context_tools else None
+
     
-    def get_documentation_tool(self) -> Optional[str]:
-        """
-        Get the best available documentation tool.
-        
-        Returns:
-            Optional[str]: Tool ID of the best documentation tool, or None if unavailable
-        """
-        if not self.mcp_manager:
-            return None
-        
-        doc_tools = self.mcp_manager.get_available_tools(['documentation'])
-        return doc_tools[0] if doc_tools else None
-    
-    def think_sequentially(self, problem: str, context: Optional[Dict] = None) -> str:
-        """
-        Use sequential thinking tool for complex problem solving.
-        
-        Args:
-            problem: Problem description to think about
-            context: Optional context for the thinking process
-            
-        Returns:
-            str: Sequential thinking result or LLM fallback
-        """
-        reasoning_tool = self.get_reasoning_tool()
-        
-        if reasoning_tool and self.mcp_logger:
-            self.mcp_logger.info(f"Using sequential thinking for problem: {problem[:100]}...")
-            
-            # Let the MCP tool decide how many thoughts are needed
-            params = {
-                "thought": problem,
-                "totalThoughts": 5,  # Start with a reasonable default, tool can adjust
-                "thoughtNumber": 1,
-                "nextThoughtNeeded": True
-            }
-            
-            if context:
-                params.update(context)
-            
-            # USE UNIFIED INTERFACE with justification
-            justification = f"Sequential thinking for: {problem[:50]}..."
-            result = self.use_mcp_tool(reasoning_tool, "tools/call", {
-                "name": "sequentialthinking",
-                "arguments": params
-            }, justification=justification)
-            
-            if not result.get("error"):
-                # Extract the actual thinking result
-                content = result.get("result", {}).get("content", [])
-                if content and len(content) > 0:
-                    thinking_result = content[0].get("text", "")
-                    if thinking_result:
-                        if self.mcp_logger:
-                            self.mcp_logger.info("Sequential thinking completed successfully")
-                            self.mcp_logger.debug(f"Thinking result: {thinking_result[:200]}...")
-                        return thinking_result
-                    else:
-                        if self.mcp_logger:
-                            self.mcp_logger.warning("Sequential thinking returned empty text content")
-                else:
-                    if self.mcp_logger:
-                        self.mcp_logger.warning("Sequential thinking returned empty content array")
-                        self.mcp_logger.debug(f"Full result: {json.dumps(result, indent=2)}")
-            else:
-                if self.mcp_logger:
-                    self.mcp_logger.warning(f"Sequential thinking failed: {result['error']}")
-        
-        # Fallback to LLM-based thinking
-        if self.mcp_logger:
-            self.mcp_logger.info("Using LLM fallback for sequential thinking")
-        
-        if self.llm_provider:
-            prompt = f"Think step by step about this problem:\n\n{problem}"
-            return self.llm_provider.generate_text(prompt, temperature=0.3)
-        else:
-            return f"Analysis needed for: {problem}"
-    
-    def lookup_documentation_for_technologies(self, goal_text: str) -> Dict[str, str]:
-        """
-        Dynamically identify and lookup documentation for technologies mentioned in the goal.
-        
-        Args:
-            goal_text: The goal text to analyze for technologies
-            
-        Returns:
-            Dict[str, str]: Mapping of technology names to their documentation
-        """
-        doc_tool = self.get_documentation_tool()
-        documentation_results = {}
-        
-        if not doc_tool:
-            if self.mcp_logger:
-                self.mcp_logger.info("No documentation tool available for technology lookup")
-            return documentation_results
-        
-        if not self.llm_provider:
-            return documentation_results
-        
-        # Use LLM to identify technologies mentioned in the goal
-        tech_detection_prompt = f"""
-        Analyze this project goal and identify specific technologies, libraries, frameworks, or tools mentioned:
-        
-        GOAL: {goal_text}
-        
-        Extract ONLY the specific technology names that would benefit from documentation lookup.
-        Focus on:
-        - Programming languages (python, javascript, go, rust, etc.)
-        - Frameworks (react, vue, django, fastapi, etc.)
-        - Libraries (pandas, numpy, requests, etc.)
-        - Tools (docker, kubernetes, git, etc.)
-        - Platforms (aws, azure, gcp, etc.)
-        
-        Return a simple comma-separated list of technology names (no explanations).
-        If no specific technologies are mentioned, return "none".
-        """
-        
-        try:
-            detected_technologies = self.llm_provider.generate_text(tech_detection_prompt, temperature=0.1)
-            detected_technologies = detected_technologies.strip().lower()
-            
-            if detected_technologies == "none" or not detected_technologies:
-                if self.mcp_logger:
-                    self.mcp_logger.info("No specific technologies detected in goal")
-                return documentation_results
-            
-            # Parse the technologies
-            technologies = [tech.strip() for tech in detected_technologies.split(',') if tech.strip()]
-            if self.mcp_logger:
-                self.mcp_logger.info(f"Detected technologies: {technologies}")
-            
-            # Look up documentation for each technology
-            for tech in technologies[:5]:  # Limit to avoid overwhelming
-                if tech:
-                    docs = self.lookup_documentation(tech)
-                    if docs and "Error" not in docs:
-                        documentation_results[tech] = docs
-                        if self.mcp_logger:
-                            self.mcp_logger.info(f"Retrieved documentation for {tech}")
-                    else:
-                        if self.mcp_logger:
-                            self.mcp_logger.debug(f"Could not retrieve documentation for {tech}")
-            
-            return documentation_results
-            
-        except Exception as e:
-            if self.mcp_logger:
-                self.mcp_logger.error(f"Error in dynamic technology documentation lookup: {e}")
-            return documentation_results
-    
-    def lookup_documentation(self, library_name: str, topic: Optional[str] = None) -> str:
-        """
-        Look up documentation for a specific library or topic.
-        
-        Args:
-            library_name: Name of the library to look up
-            topic: Optional specific topic within the library
-            
-        Returns:
-            str: Documentation content or error message
-        """
-        doc_tool = self.get_documentation_tool()
-        
-        if doc_tool:
-            if self.mcp_logger:
-                self.mcp_logger.info(f"Looking up documentation for '{library_name}'" + 
-                                   (f" (topic: {topic})" if topic else ""))
-            
-            # First resolve the library ID using UNIFIED INTERFACE
-            justification = f"Resolving library ID for: {library_name}"
-            resolve_result = self.use_mcp_tool(doc_tool, "tools/call", {
-                "name": "resolve-library-id",
-                "arguments": {"libraryName": library_name}
-            }, justification=justification)
-            
-            if resolve_result.get("error"):
-                return f"Error resolving library '{library_name}': {resolve_result['error']}"
-            
-            # Extract library ID from the result
-            result_content = resolve_result.get("result", {})
-            if "content" in result_content:
-                library_id = result_content["content"][0].get("text", "").strip()
-            else:
-                # Try direct result field
-                library_id = str(result_content.get("result", "")).strip()
-            
-            if not library_id:
-                return f"Could not resolve library ID for '{library_name}'"
-            
-            if self.mcp_logger:
-                self.mcp_logger.info(f"Resolved library ID: {library_id}")
-            
-            # Get the documentation using UNIFIED INTERFACE
-            doc_params = {"context7CompatibleLibraryID": library_id}
-            if topic:
-                doc_params["topic"] = topic
-            
-            justification = f"Getting docs for {library_name} ({library_id})" + (f" topic: {topic}" if topic else "")
-            doc_result = self.use_mcp_tool(doc_tool, "tools/call", {
-                "name": "get-library-docs", 
-                "arguments": doc_params
-            }, justification=justification)
-            
-            if not doc_result.get("error"):
-                result_content = doc_result.get("result", {})
-                if "content" in result_content:
-                    content = result_content["content"]
-                    if content:
-                        return content[0].get("text", "No documentation content found")
-                else:
-                    # Try direct result field
-                    return str(result_content.get("result", "No documentation content found"))
-                return "Documentation lookup returned empty content"
-            else:
-                return f"Error looking up documentation: {doc_result['error']}"
-        
-        # Fallback
-        if self.mcp_logger:
-            self.mcp_logger.info("No documentation tool available, using LLM fallback")
-        
-        if self.llm_provider:
-            prompt = f"Provide information about the {library_name} library" + (f" specifically about {topic}" if topic else "")
-            return self.llm_provider.generate_text(prompt, temperature=0.3)
-        else:
-            return f"Documentation lookup not available for {library_name}"
+
     
     def should_use_mcp_for_task(self, task: Dict) -> bool:
         """
@@ -805,6 +523,194 @@ class BaseAgent(ABC):
         
         return combined_metrics
     
+    def get_tools_by_capability(self, capability: str) -> List[str]:
+        """
+        Get all MCP tools that have the specified capability.
+        
+        Args:
+            capability: The capability to search for (e.g., "reasoning", "documentation")
+            
+        Returns:
+            List[str]: List of tool IDs with that capability
+        """
+        if not self.mcp_manager or not self.mcp_manager.is_enabled():
+            return []
+        
+        # Check if mcp_manager has get_tools_by_capability method
+        if hasattr(self.mcp_manager, 'get_tools_by_capability'):
+            return self.mcp_manager.get_tools_by_capability(capability)
+        
+        # Fallback: manually check tool info
+        tools = []
+        available_tools = self.mcp_manager.get_available_tools()
+        for tool_id in available_tools:
+            tool_info = self.mcp_manager.get_tool_info(tool_id)
+            if tool_info and capability in tool_info.get("capabilities", []):
+                tools.append(tool_id)
+        
+        return tools
+    
+    def get_tool_methods(self, tool_id: str) -> List[Dict]:
+        """
+        Get available methods/functions for an MCP tool dynamically.
+        
+        Args:
+            tool_id: The MCP tool ID
+            
+        Returns:
+            List[Dict]: List of method info with names, parameters, descriptions
+        """
+        if not self.mcp_manager:
+            return []
+        
+        # Try to get method list from MCP manager
+        if hasattr(self.mcp_manager, 'get_tool_methods'):
+            return self.mcp_manager.get_tool_methods(tool_id)
+        
+        # Try to call list_tools or similar discovery method
+        try:
+            result = self.mcp_manager.call_tool(tool_id, "list_tools", {})
+            if not result.get("error"):
+                return result.get("tools", [])
+        except:
+            pass
+        
+        return []
+    
+    def discover_and_use_capability(self, capability: str, task_description: str, context: Dict = None) -> Dict:
+        """
+        FULLY DYNAMIC MCP USAGE - Discover actual tools from MCP servers and use them intelligently.
+        
+        Args:
+            capability: The capability needed (e.g., "reasoning", "documentation")
+            task_description: What we're trying to accomplish
+            context: Additional context for the task
+            
+        Returns:
+            Dict: Result from using the discovered tool
+        """
+        if not self.mcp_manager or not self.mcp_manager.is_enabled():
+            return {"error": "MCP manager not available or disabled"}
+        
+        # Find MCP servers with this capability
+        servers = self.mcp_manager.get_tools_by_capability(capability)
+        if not servers:
+            return {"error": f"No MCP servers found with capability: {capability}"}
+        
+        if self.mcp_logger:
+            self.mcp_logger.info(f"Found {len(servers)} servers with '{capability}' capability: {servers}")
+        
+        # For each server, get the actual tool names available
+        all_server_tools = {}
+        for server_id in servers:
+            actual_tools = self.mcp_manager.get_actual_tool_names(server_id)
+            if actual_tools:
+                all_server_tools[server_id] = actual_tools
+                if self.mcp_logger:
+                    tool_names = [t["name"] for t in actual_tools]
+                    self.mcp_logger.info(f"Server '{server_id}' has tools: {tool_names}")
+        
+        if not all_server_tools:
+            return {"error": f"No actual tools found on {capability} servers"}
+        
+        if self.llm_provider:
+            # Let LLM intelligently select and use the appropriate tool
+            selection_prompt = f"""
+            I need to accomplish this task using MCP tools:
+            
+            TASK: {task_description}
+            CONTEXT: {context or {}}
+            CAPABILITY NEEDED: {capability}
+            
+            Available MCP servers and their actual tools:
+            {json.dumps(all_server_tools, indent=2)}
+            
+            Choose the most appropriate tool and construct the call. Consider:
+            1. Which tool best matches the task requirements
+            2. What parameters the tool's input schema expects
+            3. How to format the task description for the tool
+            
+            Return ONLY a JSON object with this exact format:
+            {{
+                "server_id": "exact_server_name", 
+                "tool_name": "exact_tool_name",
+                "arguments": {{
+                    "parameter_name": "parameter_value"
+                }}
+            }}
+            """
+            
+            try:
+                selection = self.llm_provider.generate_text(selection_prompt, temperature=0.1)
+                # Clean up the response to extract JSON
+                selection = selection.strip()
+                if selection.startswith("```json"):
+                    selection = selection[7:]
+                if selection.endswith("```"):
+                    selection = selection[:-3]
+                
+                call_info = json.loads(selection.strip())
+                
+                server_id = call_info.get("server_id")
+                tool_name = call_info.get("tool_name")
+                arguments = call_info.get("arguments", {})
+                
+                if server_id and tool_name:
+                    # Use the MCP manager's tool calling method
+                    if hasattr(self.mcp_manager, 'call_specific_tool'):
+                        result = self.mcp_manager.call_specific_tool(server_id, tool_name, arguments)
+                    else:
+                        # Fallback to direct tool call
+                        result = self.use_mcp_tool(server_id, "tools/call", {
+                            "name": tool_name,
+                            "arguments": arguments
+                        }, justification=f"LLM-selected {capability} tool: {tool_name}")
+                    
+                    if self.mcp_logger:
+                        self.mcp_logger.info(f"Called {capability} tool: {server_id}.{tool_name}")
+                    
+                    return result
+                else:
+                    if self.mcp_logger:
+                        self.mcp_logger.error(f"Invalid tool selection: {call_info}")
+                    
+            except json.JSONDecodeError as e:
+                if self.mcp_logger:
+                    self.mcp_logger.error(f"Failed to parse LLM tool selection: {e}")
+                    self.mcp_logger.debug(f"Raw LLM response: {selection}")
+            except Exception as e:
+                if self.mcp_logger:
+                    self.mcp_logger.error(f"Error in LLM tool selection: {e}")
+        
+        # Fallback: try the first available tool on the first server
+        if all_server_tools:
+            server_id = list(all_server_tools.keys())[0]
+            first_tool = all_server_tools[server_id][0]
+            tool_name = first_tool["name"]
+            
+            if self.mcp_logger:
+                self.mcp_logger.warning(f"Falling back to first available tool: {server_id}.{tool_name}")
+            
+            # Try with basic input format
+            basic_args = {"input": task_description}
+            
+            try:
+                if hasattr(self.mcp_manager, 'call_specific_tool'):
+                    result = self.mcp_manager.call_specific_tool(server_id, tool_name, basic_args)
+                else:
+                    result = self.use_mcp_tool(server_id, "tools/call", {
+                        "name": tool_name,
+                        "arguments": basic_args
+                    }, justification=f"Fallback {capability} tool call")
+                
+                if not result.get("error"):
+                    return result
+            except Exception as e:
+                if self.mcp_logger:
+                    self.mcp_logger.error(f"Fallback tool call failed: {e}")
+        
+        return {"error": f"Could not successfully use any {capability} tools"}
+
     def collect_llm_metrics(self) -> Dict:
         """
         Collect LLM metrics for status reporting.
@@ -844,207 +750,23 @@ class BaseAgent(ABC):
     
     # Common Project File Operations
     
-    def _read_project_files(self, project_dir: str) -> Dict:
-        """Read all files in the project directory with enhanced analysis."""
-        import os
-        
-        files = {}
-        total_files = 0
-        total_lines = 0
-        
-        try:
-            for root, dirs, filenames in os.walk(project_dir):
-                # Skip hidden directories and common ignore patterns
-                dirs[:] = [d for d in dirs if not d.startswith('.') and d not in ['__pycache__', 'node_modules', '.git']]
-                
-                for filename in filenames:
-                    if filename.startswith('.'):
-                        continue
-                        
-                    file_path = os.path.join(root, filename)
-                    relative_path = os.path.relpath(file_path, project_dir)
-                    
-                    try:
-                        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-                            content = f.read()
-                            lines = content.count('\n') + 1
-                            
-                        files[relative_path] = {
-                            "content": content,
-                            "lines": lines,
-                            "size": len(content),
-                            "extension": os.path.splitext(filename)[1],
-                            "directory": os.path.dirname(relative_path)
-                        }
-                        
-                        total_files += 1
-                        total_lines += lines
-                        
-                    except Exception as e:
-                        self.logger.warning(f"Could not read file {relative_path}: {e}")
-                        continue
-            
-            # Perform structure analysis using the existing files
-            structure_analysis = self._analyze_project_structure_with_llm(files)
-            
-            self.logger.info(f"Read {total_files} files with {total_lines} total lines")
-            
-            return {
-                "files": files,
-                "total_files": total_files,
-                "total_lines": total_lines,
-                "structure_analysis": structure_analysis
-            }
-            
-        except Exception as e:
-            self.logger.error(f"Error reading project files: {e}")
-            return {
-                "files": {},
-                "total_files": 0,
-                "total_lines": 0,
-                "structure_analysis": {"status": "error", "issues": [f"Failed to read project: {e}"]}
-            }
-    
-    def _analyze_project_structure_with_llm(self, existing_files: Dict) -> Dict:
-        """Analyze project structure using LLM to identify issues and recommendations."""
-        if not existing_files:
-            return {
-                "status": "empty",
-                "issues": ["No files found in project"],
-                "recommendations": ["Create initial project structure"]
-            }
-        
-        # Prepare file structure summary for analysis
-        file_structure = ""
-        for file_path, file_info in existing_files.items():
-            file_structure += f"- {file_path} ({file_info.get('lines', 0)} lines, {file_info.get('extension', 'no ext')})\n"
-        
-        prompt = f"""
-        Analyze this project structure and identify any issues or improvements needed:
-        
-        PROJECT FILES:
-        {file_structure}
-        
-        Please analyze for:
-        1. Duplicate folder structures (e.g., python/python/, src/src/)
-        2. Files in wrong locations for their type
-        3. Missing important structure files (like __init__.py for Python)
-        4. Inconsistent organization patterns
-        5. Potential improvements to project organization
-        
-        Respond in this format:
-        STATUS: [good/needs_improvement/poor]
-        
-        ISSUES:
-        - [list any structural issues found]
-        
-        RECOMMENDATIONS:
-        - [list specific recommendations]
-        
-        DUPLICATE_PATHS:
-        - [list any duplicate folder structures]
+    def investigate_project(self, project_dir: str) -> str:
         """
+        Simple method for LLM to investigate a project directory.
         
-        try:
-            if self.llm_provider:
-                response = self.llm_provider.generate(prompt, max_tokens=1000)
-                return self._parse_structure_analysis(response)
-            else:
-                return {
-                    "status": "unknown",
-                    "issues": ["No LLM provider available for analysis"],
-                    "recommendations": ["Manual review recommended"]
-                }
-        except Exception as e:
-            self.logger.error(f"Error analyzing project structure: {e}")
-            return {
-                "status": "unknown",
-                "issues": [f"Analysis failed: {e}"],
-                "recommendations": ["Manual review recommended"]
-            }
-    
-    def _parse_structure_analysis(self, analysis_response: str) -> Dict:
-        """Parse the structure analysis response from LLM."""
-        result = {
-            "status": "unknown",
-            "issues": [],
-            "recommendations": [],
-            "duplicate_paths": []
-        }
-        
-        try:
-            lines = analysis_response.strip().split('\n')
-            current_section = None
+        Args:
+            project_dir: Project directory path
             
-            for line in lines:
-                line = line.strip()
-                if not line:
-                    continue
-                    
-                if line.startswith('STATUS:'):
-                    result["status"] = line.split(':', 1)[1].strip().lower()
-                elif line.startswith('ISSUES:'):
-                    current_section = "issues"
-                elif line.startswith('RECOMMENDATIONS:'):
-                    current_section = "recommendations"
-                elif line.startswith('DUPLICATE_PATHS:'):
-                    current_section = "duplicate_paths"
-                elif line.startswith('- ') and current_section:
-                    item = line[2:].strip()
-                    if item:
-                        result[current_section].append(item)
-            
-        except Exception as e:
-            self.logger.error(f"Error parsing structure analysis: {e}")
+        Returns:
+            str: Just the project directory path - LLM can investigate it directly
+        """
+        if not os.path.exists(project_dir):
+            raise Exception(f"Project directory does not exist: {project_dir}")
         
-        return result
+        self.logger.info(f"Project investigation target: {project_dir}")
+        return project_dir
     
-    def _detect_target_technology(self) -> str:
-        """Detect the target technology based on goal and context."""
-        # This can be overridden by specific agents or enhanced with more logic
-        goal_text = getattr(self, '_current_goal', '').lower()
-        
-        # Technology detection patterns
-        if any(keyword in goal_text for keyword in ['python', 'django', 'flask', 'fastapi', 'pandas']):
-            return "python"
-        elif any(keyword in goal_text for keyword in ['javascript', 'js', 'node', 'react', 'vue', 'angular']):
-            return "javascript"
-        elif any(keyword in goal_text for keyword in ['web', 'html', 'css', 'website', 'frontend']):
-            return "web"
-        elif any(keyword in goal_text for keyword in ['java', 'spring', 'maven']):
-            return "java"
-        elif any(keyword in goal_text for keyword in ['c++', 'cpp', 'cmake']):
-            return "cpp"
-        else:
-            return "python"  # Default to Python
-    
-    def _get_file_extension_for_technology(self, technology: str) -> str:
-        """Get the appropriate file extension for a technology."""
-        extensions = {
-            "python": ".py",
-            "javascript": ".js",
-            "web": ".html",
-            "java": ".java",
-            "cpp": ".cpp",
-            "typescript": ".ts",
-            "go": ".go",
-            "rust": ".rs"
-        }
-        return extensions.get(technology, ".py")
-    
-    def _format_files_for_analysis(self, project_files: Dict) -> str:
-        """Format project files for LLM analysis."""
-        if not project_files:
-            return "No files found in project."
-        
-        formatted = "PROJECT FILES:\n"
-        for file_path, file_info in project_files.items():
-            lines = file_info.get('lines', 0)
-            size = file_info.get('size', 0)
-            ext = file_info.get('extension', '')
-            formatted += f"- {file_path} ({lines} lines, {size} bytes, {ext})\n"
-        
-        return formatted
+
 
     @classmethod
     def log_execution_cache_summary(cls):
@@ -1081,3 +803,7 @@ class BaseAgent(ABC):
             'execution_id': None,
             'call_counts': {}
         }
+
+
+    
+
