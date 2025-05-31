@@ -3,7 +3,8 @@
 /scanner_test
 /swarmdev.log
 /src/swarmdev.egg-info
-
+/goals
+/goals/*
 # Python cache directories at any level
 __pycache__/
 *.py[cod]

@@ -923,6 +923,12 @@ class DevelopmentAgent(BaseAgent):
         """Implement specific improvements suggested by analysis."""
         self.logger.info(f"Implementing {len(improvements)} specific improvements")
         
+        # Detect target technology for proper implementation
+        target_technology = self._detect_target_technology()
+        file_extension = self._get_file_extension_for_technology(target_technology)
+        
+        self.logger.info(f"Implementing for {target_technology} with {file_extension} files")
+        
         # Create detailed implementation prompt
         improvements_text = '\n'.join([
             f"**{i+1}. {imp.get('what', 'Unknown')}**\n"
@@ -934,7 +940,10 @@ class DevelopmentAgent(BaseAgent):
         ])
         
         prompt = f"""
-        BUILD NEW CAPABILITIES BASED ON CREATIVE EXPANSIONS:
+        BUILD NEW {target_technology.upper()} CAPABILITIES BASED ON CREATIVE EXPANSIONS:
+        
+        TARGET TECHNOLOGY: {target_technology}
+        FILE EXTENSION: {file_extension}
         
         GOAL: {goal}
         
@@ -944,20 +953,24 @@ class DevelopmentAgent(BaseAgent):
         EXISTING PROJECT FILES TO BUILD UPON:
         {self._format_files_for_implementation(existing_files)}
         
-        Your task is to BUILD these creative expansions into substantial new capabilities:
+        Your task is to BUILD these creative expansions into substantial new {target_technology} capabilities:
         
         CRITICAL REQUIREMENT: DO NOT recreate or overwrite existing files. BUILD UPON what exists.
         
+        TECHNOLOGY-SPECIFIC REQUIREMENTS FOR {target_technology.upper()}:
+        {self._get_technology_specific_requirements(target_technology)}
+        
         BUILDING REQUIREMENTS:
-        - Create 500+ lines of new, working code this iteration
-        - Build 3-5 entirely new modules implementing the suggested expansions
-        - Implement complete, functional features (not stubs or placeholders)
-        - Create supporting utilities and configurations
-        - Focus on additive development that brings the expansions to life
+        - Create 3-5 entirely new {target_technology} files with {file_extension} extension
+        - Build substantial, functional {target_technology} code (not stubs or placeholders)
+        - Follow {target_technology} best practices and conventions
+        - Implement complete, working features using {target_technology} syntax
+        - Create supporting files and configurations appropriate for {target_technology}
         - EXTEND existing files where appropriate instead of recreating them
         
         FORBIDDEN ACTIONS:
-        - Recreating files that already exist (vulnerability_prediction.py, threat_intelligence_integration.py, remediation_suggestions.py)
+        - Creating files with wrong extensions (avoid .py if not Python)
+        - Using syntax from other languages in {target_technology} files
         - Making small modifications to existing files
         - Creating incomplete stub functions
         - Generic technical improvements (error handling, logging, documentation)
@@ -965,35 +978,36 @@ class DevelopmentAgent(BaseAgent):
         
         INTELLIGENT FILE HANDLING:
         1. If a file already exists, EXTEND it with new functionality using ACTION: MODIFY
-        2. Only use ACTION: CREATE for genuinely new files
+        2. Only use ACTION: CREATE for genuinely new {target_technology} files
         3. Check existing files and build complementary features
         4. Create new directories/modules for major new capability areas
+        5. Use {file_extension} extension for new {target_technology} files
         
         SUBSTANTIAL BUILDING FOCUS:
         1. Focus on the CREATIVE EXPANSIONS listed above, not technical improvements
-        2. Build entirely NEW capabilities that users can interact with
-        3. Create complete workflows and user experiences
+        2. Build entirely NEW {target_technology} capabilities that users can interact with
+        3. Create complete workflows and user experiences in {target_technology}
         4. Add substantial new functionality that expands project scope
         5. Implement features that transform what the project can do
-        6. Build reusable components that enable future expansion
+        6. Build reusable {target_technology} components that enable future expansion
         
         For each new capability you build, return:
         
         === ACTION: CREATE ===  (only for new files)
-        === FILENAME: path/filename.ext ===
+        === FILENAME: path/filename{file_extension} ===
         === IMPROVEMENT: Description of new capability/expansion implemented ===
-        [complete file content with substantial new functionality]
+        [{target_technology} code with complete new functionality]
         === END FILE ===
         
         OR for extending existing files:
         
         === ACTION: MODIFY ===  (for existing files)
-        === FILENAME: path/existing_filename.ext ===
+        === FILENAME: path/existing_filename{file_extension} ===
         === IMPROVEMENT: Description of new functionality added to existing file ===
-        [new functionality to add to the existing file]
+        [{target_technology} code to add to the existing file]
         === END FILE ===
         
-        BUILD SUBSTANTIAL NEW FEATURES that implement the creative expansions!
+        BUILD SUBSTANTIAL NEW {target_technology.upper()} FEATURES that implement the creative expansions!
         """
         
         response = self.llm_provider.generate_text(prompt, temperature=0.2)
@@ -1463,707 +1477,110 @@ class DevelopmentAgent(BaseAgent):
             self.logger.error(f"Failed to load iteration progress: {e}")
         
         return {"iterations": [], "all_files_created": [], "all_files_modified": []}
-
-
-class AnalysisAgent(BaseAgent):
-    """
-    Analysis Agent for analyzing project state and suggesting improvements.
     
-    This agent specializes in examining existing project files, comparing
-    against goals, and suggesting specific improvements or new features.
-    """
-    
-    def __init__(self, agent_id: str, llm_provider: LLMProviderInterface, config: Optional[Dict] = None):
-        """
-        Initialize the Analysis Agent.
-        
-        Args:
-            agent_id: Unique identifier for this agent
-            llm_provider: LLM provider instance
-            config: Optional configuration dictionary
-        """
-        super().__init__(agent_id, "analysis", config)
-        self.llm_provider = llm_provider
-        
-        # Initialize logger
-        self.logger = logging.getLogger(f"swarmdev.agents.{agent_id}")
-    
-    def process_task(self, task: Dict) -> Dict:
-        """
-        Process an analysis task.
-        
-        Args:
-            task: Task dictionary with details about the analysis task
-            
-        Returns:
-            Dict: Analysis results including improvement suggestions and evolved goal
-        """
-        self.status = "processing"
-        
-        # DEBUG: Add basic logging to track execution
-        print(f"[DEBUG] AnalysisAgent.process_task called with task: {task.get('task_id', 'unknown')}")
-        self.logger.info(f"AnalysisAgent processing task: {task.get('task_id', 'unknown')}")
-        
+    def _detect_target_technology(self) -> str:
+        """Detect the target technology for the project from the goal."""
         try:
-            # Extract task details
-            goal = task.get("goal", "")
-            project_dir = task.get("project_dir", ".")
-            iteration_count = task.get("iteration_count", 0)
-            max_iterations = task.get("max_iterations", None)
-            workflow_type = task.get("workflow_type", "indefinite")
+            # Read the goal file to understand what technology should be used
+            goal_text = ""
+            goal_files = ["goal.txt", "goal.md", "README.md"]
             
-            print(f"[DEBUG] Analysis task details: goal='{goal[:50]}...', iteration={iteration_count}")
+            for goal_file in goal_files:
+                try:
+                    with open(goal_file, 'r') as f:
+                        goal_text = f.read()
+                        break
+                except FileNotFoundError:
+                    continue
             
-            # Analyze current project state
-            project_state = self._analyze_project_state(project_dir)
+            if not goal_text:
+                self.logger.warning("No goal file found, defaulting to Python")
+                return "python"
             
-            print(f"[DEBUG] Project state analyzed: {project_state.get('file_count', 0)} files")
+            # Use LLM to detect the target technology dynamically
+            detection_prompt = f"""
+            Analyze this project goal and determine the primary programming language/technology that should be used:
             
-            # Compare against original goal and suggest improvements
-            improvement_analysis = self._analyze_improvements(goal, project_state, iteration_count)
+            GOAL: {goal_text}
             
-            print(f"[DEBUG] Improvements analyzed: {improvement_analysis.get('improvement_count', 0)} suggestions")
+            Based on the goal description, what programming language, framework, or technology should be used for this project?
             
-            # Create evolved goal for next iteration (if not the final iteration)
-            evolved_goal = None
-            if iteration_count > 0 and iteration_count < (max_iterations or 10):
-                evolved_goal = self._create_evolved_goal(goal, project_state, improvement_analysis, iteration_count)
-                print(f"[DEBUG] Evolved goal created for iteration {iteration_count + 1}")
+            Consider:
+            - Explicit mentions of technologies (e.g., "use Python", "create in JavaScript", "build with Go")
+            - Domain-specific technologies (e.g., PineScript for TradingView indicators, SQL for databases)
+            - Implicit technology requirements based on the project type
             
-            # Determine if another iteration is needed
-            should_continue = self._should_continue_iteration(
-                improvement_analysis, iteration_count, max_iterations, workflow_type
-            )
-            
-            print(f"[DEBUG] Should continue: {should_continue}")
-            
-            # Prepare result
-            result = {
-                "task_id": task.get("task_id"),
-                "status": "completed",
-                "project_state": project_state,
-                "improvement_analysis": improvement_analysis,
-                "should_continue": should_continue,
-                "iteration_count": iteration_count + 1,
-                "improvements_suggested": improvement_analysis.get("improvements", []),
-                "evolved_goal": evolved_goal  # New: evolved goal for next iteration
-            }
-            
-            print(f"[DEBUG] AnalysisAgent task completed successfully")
-            self.status = "ready"
-            return result
-            
-        except Exception as e:
-            print(f"[DEBUG] AnalysisAgent error: {e}")
-            return self.handle_error(e, task)
-    
-    def _analyze_project_state(self, project_dir: str) -> Dict:
-        """
-        Analyze the current state of the project.
-        
-        Args:
-            project_dir: Project directory path
-            
-        Returns:
-            Dict: Project state analysis
-        """
-        try:
-            project_files = {}
-            file_count = 0
-            
-            # Read all files in the project directory
-            for root, dirs, files in os.walk(project_dir):
-                # Skip hidden directories, build/cache directories, and agent work directories
-                dirs[:] = [d for d in dirs if not d.startswith('.') and d not in 
-                          ['__pycache__', 'node_modules', 'target', 'build', 'dist', 'agent_work', 'goals']]
-                
-                for file in files:
-                    if file.startswith('.') or file.endswith(('.pyc', '.log')):
-                        continue
-                    
-                    file_path = os.path.join(root, file)
-                    relative_path = os.path.relpath(file_path, project_dir)
-                    
-                    try:
-                        with open(file_path, 'r', encoding='utf-8') as f:
-                            content = f.read()
-                            project_files[relative_path] = {
-                                "content": content,
-                                "size": len(content),
-                                "lines": len(content.split('\n'))
-                            }
-                            file_count += 1
-                            
-                    except (UnicodeDecodeError, PermissionError):
-                        # Skip binary files or files we can't read
-                        continue
-            
-            # Use LLM to analyze the project structure and functionality
-            analysis_prompt = f"""
-            Analyze this project structure and content:
-            
-            Files found: {list(project_files.keys())}
-            
-            File contents:
-            {self._format_files_for_analysis(project_files)}
-            
-            Provide a comprehensive analysis including:
-            1. Project type and technology stack
-            2. Current functionality and features
-            3. Code quality and structure assessment
-            4. Potential issues or limitations
-            5. Architecture overview
-            
-            Keep the analysis concise but thorough.
+            Return ONLY the primary technology name (e.g., "pinescript", "javascript", "python", "go", "rust", etc.)
+            Be specific and concise - return just the technology name in lowercase.
             """
             
-            analysis_text = self.llm_provider.generate_text(analysis_prompt, temperature=0.3)
+            detected_tech = self.llm_provider.generate_text(detection_prompt, temperature=0.1).strip().lower()
             
-            return {
-                "files": list(project_files.keys()),
-                "file_count": len(project_files),
-                "total_lines": sum(f["lines"] for f in project_files.values()),
-                "analysis": analysis_text,
-                "structure": self._identify_project_structure(project_files)
-            }
+            # Clean up the response (remove extra text if any)
+            tech_words = detected_tech.split()
+            if tech_words:
+                primary_tech = tech_words[0]
+                self.logger.info(f"Detected target technology: {primary_tech}")
+                return primary_tech
             
-        except Exception as e:
-            return {
-                "files": [],
-                "file_count": 0,
-                "total_lines": 0,
-                "analysis": f"Error analyzing project: {e}",
-                "structure": "unknown"
-            }
-    
-    def _format_files_for_analysis(self, project_files: Dict) -> str:
-        """Format project files for LLM analysis."""
-        formatted = ""
-        for file_path, file_info in list(project_files.items())[:10]:  # Limit to first 10 files
-            content = file_info["content"]
-            if len(content) > 1000:  # Truncate long files
-                content = content[:1000] + "... [truncated]"
-            formatted += f"\n--- {file_path} ---\n{content}\n"
-        return formatted
-    
-    def _identify_project_structure(self, project_files: Dict) -> str:
-        """Identify the project structure type."""
-        files = list(project_files.keys())
-        
-        if "package.json" in files:
-            return "nodejs"
-        elif "requirements.txt" in files or "setup.py" in files or any(f.endswith(".py") for f in files):
+            # Fallback
+            self.logger.warning("Could not detect technology from goal, defaulting to Python")
             return "python"
-        elif "Cargo.toml" in files:
-            return "rust"
-        elif "go.mod" in files or any(f.endswith(".go") for f in files):
-            return "go"
-        elif "pom.xml" in files or any(f.endswith(".java") for f in files):
-            return "java"
-        elif any(f.endswith(".html") for f in files):
-            return "web"
-        else:
-            return "unknown"
-    
-    def _analyze_improvements(self, goal: str, project_state: Dict, iteration_count: int) -> Dict:
-        """
-        Analyze potential improvements for the project.
-        
-        Args:
-            goal: Original project goal
-            project_state: Current project state analysis
-            iteration_count: Current iteration number
-            
-        Returns:
-            Dict: Improvement analysis and suggestions
-        """
-        self.logger.info(f"Starting deep improvement analysis for iteration {iteration_count}")
-        
-        # Extract what's already been implemented to avoid repetitive suggestions
-        implemented_features = self._extract_implemented_features(project_state)
-        
-        # Create creative expansion prompt that forces innovative thinking
-        improvement_prompt = f"""
-        CREATIVE PROJECT EXPANSION ANALYSIS (Iteration {iteration_count})
-        
-        ORIGINAL GOAL: {goal}
-        
-        CURRENT PROJECT STATE:
-        - Files: {project_state.get('file_count', 0)} files, {project_state.get('total_lines', 0)} lines
-        - Structure: {project_state.get('structure', 'unknown')}
-        - Current Analysis: {project_state.get('analysis', 'No analysis available')}
-        
-        ALREADY IMPLEMENTED FEATURES (DO NOT SUGGEST THESE AGAIN):
-        {implemented_features}
-        
-        EXISTING FILES TO ANALYZE:
-        {project_state.get('analysis', 'No file content available')}
-        
-        Your role is to identify opportunities for CREATIVE EXPANSION and substantial new capabilities that BUILD UPON what already exists.
-        
-        CRITICAL: DO NOT suggest features that are already implemented (listed above).
-        
-        FORBIDDEN SUGGESTIONS (NEVER suggest these repetitive improvements):
-        - Error handling improvements
-        - Documentation enhancements  
-        - Logging improvements
-        - Code refactoring
-        - Performance optimizations
-        - Testing improvements
-        - Security enhancements
-        - Configuration management
-        - Code organization
-        - Machine Learning-Based Vulnerability Prediction (already exists)
-        - Integration with Threat Intelligence Platforms (already exists)
-        - Automated Remediation Suggestions (already exists)
-        
-        REQUIRED CREATIVE EXPANSION APPROACH:
-        1. **Understand the Domain**: What problem space does this project operate in? Who are the users?
-        2. **Identify User Needs**: What do users in this domain typically struggle with beyond the current scope?
-        3. **Think Adjacent**: What related problems could this project solve if it expanded its capabilities?
-        4. **Expand Scope**: What entirely NEW capabilities would make this project indispensable to users?
-        5. **Consider Workflows**: What new user workflows or interaction methods are completely missing?
-        6. **Integration Opportunities**: What external systems, APIs, or data sources could be leveraged?
-        7. **Automation Potential**: What manual tasks in this domain could be automated for users?
-        
-        CREATIVITY REQUIREMENTS:
-        - Suggest 5+ entirely NEW capabilities that don't currently exist and aren't listed above
-        - Each suggestion must add substantial user value and expand project scope
-        - Focus on features that would differentiate this project from similar tools
-        - Think about different user personas and their unmet needs
-        - Consider what would make users say "I can't live without this feature"
-        - Propose capabilities that would make this project a "must-have" tool in its field
-        
-        EXPANSION THINKING:
-        - What could this project become if it reached its full potential?
-        - What adjacent problem domains could it expand into?
-        - How could it save users significant time or effort through new capabilities?
-        - What integrations would create powerful new workflows?
-        - What features would make competitors obsolete?
-        
-        PROVIDE SPECIFIC, CREATIVE EXPANSIONS:
-        For each expansion, specify:
-        - WHAT new capability to build (be very specific about the feature)
-        - WHY users would find this transformative (real user value)
-        - HOW to implement it (new modules, APIs, components needed)
-        - PRIORITY (critical/high/medium/low)
-        - EFFORT level (small/medium/large)
-        - IMPACT level (low/medium/high/transformative)
-        - USER_BENEFIT (how this changes users' lives/workflows)
-        
-        Focus on INNOVATIVE expansions that would make this project significantly more valuable and comprehensive!
-        """
-        
-        self.logger.info("Sending analysis prompt to LLM...")
-        analysis_text = self.llm_provider.generate_text(improvement_prompt, temperature=0.4)
-        self.logger.info(f"Received analysis response: {len(analysis_text)} characters")
-        
-        # Save the full analysis as an artifact for visibility
-        self._save_analysis_artifact(analysis_text, iteration_count)
-        
-        # Parse specific improvements from the analysis
-        improvements = self._parse_specific_improvements(analysis_text)
-        
-        # Filter out any suggestions that match already implemented features
-        filtered_improvements = self._filter_duplicate_improvements(improvements, implemented_features)
-        
-        self.logger.info(f"Parsed {len(improvements)} improvements, filtered to {len(filtered_improvements)} unique ones")
-        for i, improvement in enumerate(filtered_improvements):
-            self.logger.info(f"Improvement {i+1}: {improvement.get('what', 'Unknown')[:100]}...")
-        
-        return {
-            "full_analysis": analysis_text,
-            "improvements": filtered_improvements,
-            "improvement_count": len(filtered_improvements),
-            "has_significant_improvements": len(filtered_improvements) > 0,
-            "analysis_depth": "comprehensive",
-            "iteration": iteration_count,
-            "implemented_features": implemented_features
-        }
-    
-    def _extract_implemented_features(self, project_state: Dict) -> str:
-        """Extract already implemented features from the project state."""
-        try:
-            files = project_state.get('files', [])
-            analysis = project_state.get('analysis', '')
-            
-            implemented = []
-            
-            # Check for specific file patterns that indicate implemented features
-            for file_path in files:
-                if 'vulnerability_prediction' in file_path:
-                    implemented.append("- Vulnerability Prediction (machine learning)")
-                elif 'threat_intelligence' in file_path:
-                    implemented.append("- Threat Intelligence Integration")
-                elif 'remediation' in file_path:
-                    implemented.append("- Automated Remediation Suggestions")
-                elif 'network_visualization' in file_path:
-                    implemented.append("- Network Visualization")
-                elif 'incident_response' in file_path:
-                    implemented.append("- Incident Response Integration")
-                elif 'dashboard' in file_path:
-                    implemented.append("- Web Dashboard")
-                elif 'collaborative' in file_path:
-                    implemented.append("- Collaborative Platform")
-                elif 'compliance' in file_path:
-                    implemented.append("- Compliance Auditing")
-                elif 'anomaly_detection' in file_path:
-                    implemented.append("- Anomaly Detection")
-            
-            # Also extract from analysis text
-            analysis_lower = analysis.lower()
-            if 'machine learning' in analysis_lower or 'vulnerability prediction' in analysis_lower:
-                if "- Machine Learning/AI Capabilities" not in implemented:
-                    implemented.append("- Machine Learning/AI Capabilities")
-            
-            if 'threat intelligence' in analysis_lower:
-                if "- Threat Intelligence Integration" not in implemented:
-                    implemented.append("- Threat Intelligence Integration")
-            
-            if 'remediation' in analysis_lower:
-                if "- Automated Remediation Suggestions" not in implemented:
-                    implemented.append("- Automated Remediation Suggestions")
-            
-            if not implemented:
-                return "No major features implemented yet - this is a new project."
-            
-            return '\n'.join(implemented)
             
         except Exception as e:
-            self.logger.error(f"Failed to extract implemented features: {e}")
-            return "Unable to determine implemented features"
+            self.logger.error(f"Failed to detect target technology: {e}")
+            return "python"
     
-    def _filter_duplicate_improvements(self, improvements: List[Dict], implemented_features: str) -> List[Dict]:
-        """Filter out improvements that match already implemented features."""
-        filtered = []
-        implemented_lower = implemented_features.lower()
-        
-        for improvement in improvements:
-            what = improvement.get('what', '').lower()
-            
-            # Check if this improvement is already implemented
-            is_duplicate = False
-            
-            # Common duplicate patterns
-            duplicate_patterns = [
-                'vulnerability prediction',
-                'threat intelligence',
-                'remediation suggestion',
-                'machine learning',
-                'network visualization',
-                'incident response',
-                'dashboard',
-                'collaborative',
-                'compliance',
-                'anomaly detection'
-            ]
-            
-            for pattern in duplicate_patterns:
-                if pattern in what and pattern in implemented_lower:
-                    is_duplicate = True
-                    self.logger.info(f"Filtered duplicate suggestion: {improvement.get('what', 'Unknown')[:50]}...")
-                    break
-            
-            if not is_duplicate:
-                filtered.append(improvement)
-        
-        return filtered
-    
-    def _save_analysis_artifact(self, analysis_text: str, iteration_count: int):
-        """Save analysis as an artifact for visibility into agent thinking."""
+    def _get_file_extension_for_technology(self, technology: str) -> str:
+        """Get the appropriate file extension for a technology using LLM."""
         try:
-            import os
+            extension_prompt = f"""
+            What is the standard file extension for {technology} files?
             
-            # Create agent work directory
-            agent_work_dir = os.path.join(".", "agent_work")
-            os.makedirs(agent_work_dir, exist_ok=True)
-            
-            # Save detailed analysis
-            analysis_file = os.path.join(agent_work_dir, f"analysis_iteration_{iteration_count}.md")
-            with open(analysis_file, 'w') as f:
-                f.write(f"# Analysis Agent Work - Iteration {iteration_count}\n\n")
-                f.write(f"**Timestamp:** {datetime.now().isoformat()}\n\n")
-                f.write(f"**Agent:** {self.agent_id}\n\n")
-                f.write("## Detailed Analysis\n\n")
-                f.write(analysis_text)
-            
-            self.logger.info(f"Saved analysis artifact to: {analysis_file}")
-            
-        except Exception as e:
-            self.logger.error(f"Failed to save analysis artifact: {e}")
-    
-    def _parse_specific_improvements(self, analysis_text: str) -> List[Dict]:
-        """Parse specific, actionable improvements from analysis text."""
-        improvements = []
-        
-        # Use LLM to extract structured improvements
-        extraction_prompt = f"""
-        From this analysis, extract SPECIFIC, ACTIONABLE improvements:
-        
-        {analysis_text}
-        
-        Return a JSON array of improvements, each with:
-        {{
-            "what": "Specific description of what to improve",
-            "why": "Why this improvement is important",
-            "how": "Concrete implementation steps",
-            "priority": "critical|high|medium|low",
-            "effort": "small|medium|large", 
-            "impact": "low|medium|high|transformative",
-            "files_affected": ["list", "of", "files"],
-            "implementation_notes": "Specific technical details"
-        }}
-        
-        Focus on the most impactful improvements. Return valid JSON only.
-        """
-        
-        try:
-            improvements_json = self.llm_provider.generate_text(extraction_prompt, temperature=0.2)
-            
-            # Clean up the JSON response
-            import json
-            import re
-            
-            # Extract JSON from response
-            json_match = re.search(r'\[.*\]', improvements_json, re.DOTALL)
-            if json_match:
-                improvements_data = json.loads(json_match.group())
-                
-                for imp in improvements_data:
-                    if isinstance(imp, dict) and "what" in imp:
-                        improvements.append(imp)
-                        
-        except Exception as e:
-            self.logger.error(f"Failed to parse structured improvements: {e}")
-            
-            # Fallback: parse simple improvements from text
-            lines = analysis_text.split('\n')
-            current_improvement = {}
-            
-            for line in lines:
-                line = line.strip()
-                if line.startswith(('*', '-', '1.', '2.', '3.', '4.', '5.', '6.', '7.', '8.', '9.')):
-                    if current_improvement and "what" in current_improvement:
-                        improvements.append(current_improvement)
-                    
-                    current_improvement = {
-                        "what": re.sub(r'^[1-9*-]\.\s*', '', line),
-                        "priority": "medium",
-                        "effort": "medium",
-                        "impact": "medium"
-                    }
-                elif "priority" in line.lower() and current_improvement:
-                    if "critical" in line.lower():
-                        current_improvement["priority"] = "critical"
-                    elif "high" in line.lower():
-                        current_improvement["priority"] = "high"
-                    elif "low" in line.lower():
-                        current_improvement["priority"] = "low"
-            
-            if current_improvement and "what" in current_improvement:
-                improvements.append(current_improvement)
-        
-        # Ensure we have at least some improvements
-        if not improvements:
-            improvements = [{
-                "what": "Enhance project based on comprehensive analysis",
-                "why": "Project needs meaningful improvements to better fulfill its goals",
-                "how": "Implement improvements based on detailed analysis findings",
-                "priority": "high",
-                "effort": "medium",
-                "impact": "high",
-                "files_affected": ["multiple"],
-                "implementation_notes": "See full analysis for details"
-            }]
-        
-        return improvements[:8]  # Limit to top 8 improvements
-    
-    def _should_continue_iteration(self, improvement_analysis: Dict, iteration_count: int, 
-                                 max_iterations: Optional[int], workflow_type: str) -> bool:
-        """
-        Determine if another iteration should be run based on iteration limits.
-        
-        Args:
-            improvement_analysis: Analysis of potential improvements
-            iteration_count: Current iteration count
-            max_iterations: Maximum iterations allowed (None for indefinite)
-            workflow_type: Type of workflow (indefinite or iteration)
-            
-        Returns:
-            bool: True if another iteration should be run
-        """
-        # Simple logic - continue if we haven't hit the max iterations limit
-        if workflow_type == "iteration" and max_iterations is not None:
-            return iteration_count < max_iterations
-        
-        # For indefinite workflows, always continue (user will stop manually)
-        if workflow_type == "indefinite":
-            return True
-            
-        # Default to continuing for reasonable number of iterations
-        return iteration_count < 10
-    
-    def _create_evolved_goal(self, original_goal: str, project_state: Dict, improvement_analysis: Dict, iteration_count: int) -> str:
-        """
-        Create an evolved, more comprehensive goal for the next iteration.
-        
-        Args:
-            original_goal: The original goal text
-            project_state: Current project state analysis
-            improvement_analysis: Analysis of potential improvements
-            iteration_count: Current iteration number
-            
-        Returns:
-            str: Evolved goal text for next iteration
-        """
-        self.logger.info(f"Creating evolved goal for iteration {iteration_count + 1}")
-        
-        # Gather context about what's been built
-        current_features = self._analyze_implemented_features(project_state)
-        missing_features = improvement_analysis.get("improvements", [])
-        
-        evolution_prompt = f"""
-        COMPREHENSIVE TECHNICAL SPECIFICATION FOR ITERATION {iteration_count + 1}
-        
-        ORIGINAL PROJECT GOAL:
-        {original_goal}
-        
-        CURRENT PROJECT STATE (Iteration {iteration_count}):
-        - Files: {project_state.get('file_count', 0)} files
-        - Structure: {project_state.get('structure', 'unknown')}
-        - Implementation Status: {project_state.get('analysis', 'No analysis')}
-        
-        FEATURES SUCCESSFULLY IMPLEMENTED:
-        {current_features}
-        
-        CREATIVE EXPANSION OPPORTUNITIES:
-        {self._format_improvements_for_goal(missing_features)}
-        
-        Create a COMPREHENSIVE TECHNICAL SPECIFICATION for iteration {iteration_count + 1} structured as follows:
-        
-        **ITERATION {iteration_count + 1} TECHNICAL SPECIFICATIONS:**
-        
-        **PROJECT VISION:**
-        [Brief description of what this project should become]
-        
-        **EXISTING CAPABILITIES (maintain and build upon):**
-        - [Complete inventory of all current features and modules]
-        - [List all working functionality from previous iterations]
-        
-        **NEW CAPABILITIES TO BUILD THIS ITERATION:**
-        
-        **Major Feature 1: [Feature Name]**
-        - Purpose: [What user need does this address]
-        - Implementation: [Specific modules/files to create - be very detailed]
-        - Acceptance Criteria: [How to know it's complete and working]
-        - User Benefit: [Why users will find this transformative]
-        - Technical Requirements: [APIs, libraries, data structures needed]
-        
-        **Major Feature 2: [Feature Name]**
-        - Purpose: [What problem does this solve]
-        - Implementation: [Technical specifications - modules, classes, functions]
-        - Integration: [How it connects to existing features]
-        - Success Metrics: [Measurable outcomes]
-        - Technical Requirements: [Specific implementation details]
-        
-        **Major Feature 3: [Feature Name]**
-        - [Same detailed structure for each new capability]
-        
-        **TECHNICAL REQUIREMENTS:**
-        - Minimum 500+ lines of new functional code
-        - 3-5 new modules or major components
-        - Complete user workflows implemented
-        - Supporting utilities and configurations
-        - Integration with existing architecture
-        
-        **QUALITY STANDARDS:**
-        - [Specific performance targets]
-        - [User experience requirements]
-        - [Reliability and robustness standards]
-        
-        **EXPANSION PHILOSOPHY:**
-        This iteration should make the project significantly more capable and valuable to users while maintaining all existing functionality and adding substantial new value that transforms the user experience.
-        
-        EVOLVED TECHNICAL SPECIFICATION FOR ITERATION {iteration_count + 1}:
-        """
-        
-        try:
-            evolved_goal_text = self.llm_provider.generate_text(evolution_prompt, temperature=0.3)
-            
-            # Save the evolved goal as an artifact and file
-            self._save_evolved_goal(evolved_goal_text, iteration_count + 1)
-            
-            return evolved_goal_text
-            
-        except Exception as e:
-            self.logger.error(f"Failed to create evolved goal: {e}")
-            return original_goal  # Fallback to original goal
-    
-    def _analyze_implemented_features(self, project_state: Dict) -> str:
-        """Analyze what features have been successfully implemented."""
-        try:
-            files_summary = f"Project contains {project_state.get('file_count', 0)} files"
-            structure_info = f"Architecture: {project_state.get('structure', 'unknown')}"
-            
-            # Use LLM to analyze what's been implemented
-            analysis_prompt = f"""
-            Based on this project analysis, summarize what features have been successfully implemented:
-            
-            {project_state.get('analysis', 'No detailed analysis available')}
-            
-            Files: {project_state.get('files', [])}
-            
-            Provide a concise summary of working features and capabilities.
+            Return ONLY the file extension including the dot (e.g., ".py", ".js", ".pine", ".go", ".rs")
+            Be precise and return just the extension.
             """
             
-            implemented_features = self.llm_provider.generate_text(analysis_prompt, temperature=0.2)
-            return implemented_features
+            extension = self.llm_provider.generate_text(extension_prompt, temperature=0.1).strip()
+            
+            # Ensure it starts with a dot
+            if not extension.startswith('.'):
+                extension = '.' + extension
+            
+            # Clean up any extra text
+            if ' ' in extension:
+                extension = extension.split()[0]
+            
+            self.logger.info(f"Determined file extension for {technology}: {extension}")
+            return extension
             
         except Exception as e:
-            self.logger.error(f"Failed to analyze implemented features: {e}")
-            return "Feature analysis unavailable"
+            self.logger.error(f"Failed to determine file extension for {technology}: {e}")
+            return ".txt"
     
-    def _format_improvements_for_goal(self, improvements: List[Dict]) -> str:
-        """Format improvement suggestions for inclusion in evolved goal."""
-        if not improvements:
-            return "No specific improvements identified"
-        
-        formatted = "Key opportunities for expansion:\n"
-        for i, imp in enumerate(improvements[:8], 1):  # Limit to top 8
-            what = imp.get("what", "Unknown improvement")
-            why = imp.get("why", "No reason specified")
-            formatted += f"{i}. {what} - {why}\n"
-        
-        return formatted
-    
-    def _save_evolved_goal(self, evolved_goal: str, iteration_number: int):
-        """Save the evolved goal as both an artifact and a goal file."""
+    def _get_technology_specific_requirements(self, technology: str) -> str:
+        """Get technology-specific requirements and best practices using LLM."""
         try:
-            import os
+            requirements_prompt = f"""
+            What are the key best practices, syntax requirements, and conventions for {technology} development?
             
-            # Save as agent artifact
-            agent_work_dir = os.path.join(".", "agent_work")
-            os.makedirs(agent_work_dir, exist_ok=True)
+            Provide a concise list of 5-8 important guidelines including:
+            - Syntax and language-specific conventions
+            - File structure and naming conventions
+            - Key functions, libraries, or frameworks commonly used
+            - Code organization patterns
+            - Any domain-specific requirements
             
-            artifact_file = os.path.join(agent_work_dir, f"evolved_goal_iteration_{iteration_number}.md")
-            with open(artifact_file, 'w') as f:
-                f.write(f"# Evolved Goal - Iteration {iteration_number}\n\n")
-                f.write(f"**Created:** {datetime.now().isoformat()}\n\n")
-                f.write(f"**Agent:** {self.agent_id}\n\n")
-                f.write("## Evolved Goal Text\n\n")
-                f.write(evolved_goal)
+            Format as a bulleted list with specific, actionable guidelines.
+            """
             
-            # Also save as a goal file that can be used by other agents (in goals directory for cleaner organization)
-            goals_dir = "goals"
-            os.makedirs(goals_dir, exist_ok=True)
-            goal_file = os.path.join(goals_dir, f"goal_iteration_{iteration_number}.txt")
-            with open(goal_file, 'w') as f:
-                f.write(evolved_goal)
-            
-            self.logger.info(f"Saved evolved goal to: {artifact_file} and {goal_file}")
+            requirements = self.llm_provider.generate_text(requirements_prompt, temperature=0.2)
+            self.logger.info(f"Generated requirements for {technology}")
+            return requirements
             
         except Exception as e:
-            self.logger.error(f"Failed to save evolved goal: {e}")
+            self.logger.error(f"Failed to generate requirements for {technology}: {e}")
+            return f"Follow best practices for {technology} development."
 
 
 class DocumentationAgent(BaseAgent):
@@ -2352,3 +1769,267 @@ class DocumentationAgent(BaseAgent):
         }
         
         return user_guide
+
+
+class AnalysisAgent(BaseAgent):
+    """
+    Analysis Agent for analyzing project state and suggesting improvements.
+    
+    This agent specializes in examining existing project files, comparing
+    against goals, and suggesting specific improvements or new features.
+    """
+    
+    def __init__(self, agent_id: str, llm_provider: LLMProviderInterface, config: Optional[Dict] = None):
+        """
+        Initialize the Analysis Agent.
+        
+        Args:
+            agent_id: Unique identifier for this agent
+            llm_provider: LLM provider instance
+            config: Optional configuration dictionary
+        """
+        super().__init__(agent_id, "analysis", config)
+        self.llm_provider = llm_provider
+        
+        # Initialize logger
+        self.logger = logging.getLogger(f"swarmdev.agents.{agent_id}")
+    
+    def process_task(self, task: Dict) -> Dict:
+        """
+        Process an analysis task.
+        
+        Args:
+            task: Task dictionary with details about the analysis task
+            
+        Returns:
+            Dict: Analysis results including improvement suggestions and evolved goal
+        """
+        self.status = "processing"
+        
+        # DEBUG: Add basic logging to track execution
+        print(f"[DEBUG] AnalysisAgent.process_task called with task: {task.get('task_id', 'unknown')}")
+        self.logger.info(f"AnalysisAgent processing task: {task.get('task_id', 'unknown')}")
+        
+        try:
+            # Extract task details
+            goal = task.get("goal", "")
+            project_dir = task.get("project_dir", ".")
+            iteration_count = task.get("iteration_count", 0)
+            max_iterations = task.get("max_iterations", None)
+            workflow_type = task.get("workflow_type", "indefinite")
+            
+            print(f"[DEBUG] Analysis task details: goal='{goal[:50]}...', iteration={iteration_count}")
+            
+            # Analyze current project state
+            project_state = self._analyze_project_state(project_dir)
+            
+            print(f"[DEBUG] Project state analyzed: {project_state.get('file_count', 0)} files")
+            
+            # Compare against original goal and suggest improvements
+            improvement_analysis = self._analyze_improvements(goal, project_state, iteration_count)
+            
+            print(f"[DEBUG] Improvements analyzed: {improvement_analysis.get('improvement_count', 0)} suggestions")
+            
+            # Create evolved goal for next iteration (if not the final iteration)
+            evolved_goal = None
+            if iteration_count > 0 and iteration_count < (max_iterations or 10):
+                evolved_goal = self._create_evolved_goal(goal, project_state, improvement_analysis, iteration_count)
+                print(f"[DEBUG] Evolved goal created for iteration {iteration_count + 1}")
+            
+            # Determine if another iteration is needed
+            should_continue = self._should_continue_iteration(
+                improvement_analysis, iteration_count, max_iterations, workflow_type
+            )
+            
+            print(f"[DEBUG] Should continue: {should_continue}")
+            
+            # Prepare result
+            result = {
+                "task_id": task.get("task_id"),
+                "status": "completed",
+                "project_state": project_state,
+                "improvement_analysis": improvement_analysis,
+                "should_continue": should_continue,
+                "iteration_count": iteration_count + 1,
+                "improvements_suggested": improvement_analysis.get("improvements", []),
+                "evolved_goal": evolved_goal  # New: evolved goal for next iteration
+            }
+            
+            print(f"[DEBUG] AnalysisAgent task completed successfully")
+            self.status = "ready"
+            return result
+            
+        except Exception as e:
+            print(f"[DEBUG] AnalysisAgent error: {e}")
+            return self.handle_error(e, task)
+    
+    def _analyze_project_state(self, project_dir: str) -> Dict:
+        """
+        Analyze the current state of the project.
+        
+        Args:
+            project_dir: Project directory path
+            
+        Returns:
+            Dict: Project state analysis
+        """
+        try:
+            project_files = {}
+            file_count = 0
+            
+            # Read all files in the project directory
+            for root, dirs, files in os.walk(project_dir):
+                # Skip hidden directories, build/cache directories, and agent work directories
+                dirs[:] = [d for d in dirs if not d.startswith('.') and d not in 
+                          ['__pycache__', 'node_modules', 'target', 'build', 'dist', 'agent_work', 'goals']]
+                
+                for file in files:
+                    if file.startswith('.') or file.endswith(('.pyc', '.log')):
+                        continue
+                    
+                    file_path = os.path.join(root, file)
+                    relative_path = os.path.relpath(file_path, project_dir)
+                    
+                    try:
+                        with open(file_path, 'r', encoding='utf-8') as f:
+                            content = f.read()
+                            project_files[relative_path] = {
+                                "content": content,
+                                "size": len(content),
+                                "lines": len(content.split('\n'))
+                            }
+                            file_count += 1
+                            
+                    except (UnicodeDecodeError, PermissionError):
+                        # Skip binary files or files we can't read
+                        continue
+            
+            # Read the goal to understand target technology BEFORE analyzing
+            target_technology = self._detect_target_technology()
+            
+            # Use LLM to analyze the project structure and functionality with technology context
+            analysis_prompt = f"""
+            Analyze this project structure and content for a {target_technology} project:
+            
+            TARGET TECHNOLOGY: {target_technology}
+            
+            Files found: {list(project_files.keys())}
+            
+            File contents:
+            {self._format_files_for_analysis(project_files)}
+            
+            Provide a comprehensive analysis including:
+            1. Project type and technology stack (focus on {target_technology})
+            2. Current functionality and features implemented in {target_technology}
+            3. Code quality and structure assessment for {target_technology}
+            4. Potential issues or limitations
+            5. Architecture overview for {target_technology} projects
+            
+            Keep the analysis focused on {target_technology} development patterns and best practices.
+            """
+            
+            analysis_text = self.llm_provider.generate_text(analysis_prompt, temperature=0.3)
+            
+            return {
+                "files": list(project_files.keys()),
+                "file_count": len(project_files),
+                "total_lines": sum(f["lines"] for f in project_files.values()),
+                "analysis": analysis_text,
+                "target_technology": target_technology,
+                "structure": self._identify_project_structure(project_files, target_technology)
+            }
+            
+        except Exception as e:
+            return {
+                "files": [],
+                "file_count": 0,
+                "total_lines": 0,
+                "analysis": f"Error analyzing project: {e}",
+                "target_technology": "unknown",
+                "structure": "unknown"
+            }
+    
+    def _format_files_for_analysis(self, project_files: Dict) -> str:
+        """Format project files for LLM analysis."""
+        formatted = ""
+        for file_path, file_info in list(project_files.items())[:10]:  # Limit to first 10 files
+            content = file_info["content"]
+            if len(content) > 1000:  # Truncate long files
+                content = content[:1000] + "... [truncated]"
+            formatted += f"\n--- {file_path} ---\n{content}\n"
+        return formatted
+    
+    def _identify_project_structure(self, project_files: Dict, target_technology: str) -> str:
+        """Identify the project structure type using LLM."""
+        try:
+            files = list(project_files.keys())
+            
+            structure_prompt = f"""
+            Based on these files and the target technology '{target_technology}', what type of project structure is this?
+            
+            Files: {files}
+            Target Technology: {target_technology}
+            
+            Return a brief description of the project structure type (e.g., "web application", "library", "CLI tool", "trading indicators", etc.)
+            Be concise - just return the project type.
+            """
+            
+            structure_type = self.llm_provider.generate_text(structure_prompt, temperature=0.1).strip()
+            return structure_type
+            
+        except Exception as e:
+            self.logger.error(f"Failed to identify project structure: {e}")
+            return "unknown"
+    
+    def _detect_target_technology(self) -> str:
+        """Detect the target technology for the project from the goal."""
+        try:
+            # Read the goal file to understand what technology should be used
+            goal_text = ""
+            goal_files = ["goal.txt", "goal.md", "README.md"]
+            
+            for goal_file in goal_files:
+                try:
+                    with open(goal_file, 'r') as f:
+                        goal_text = f.read()
+                        break
+                except FileNotFoundError:
+                    continue
+            
+            if not goal_text:
+                self.logger.warning("No goal file found, defaulting to Python")
+                return "python"
+            
+            # Use LLM to detect the target technology dynamically
+            detection_prompt = f"""
+            Analyze this project goal and determine the primary programming language/technology that should be used:
+            
+            GOAL: {goal_text}
+            
+            Based on the goal description, what programming language, framework, or technology should be used for this project?
+            
+            Consider:
+            - Explicit mentions of technologies (e.g., "use Python", "create in JavaScript", "build with Go")
+            - Domain-specific technologies (e.g., PineScript for TradingView indicators, SQL for databases)
+            - Implicit technology requirements based on the project type
+            
+            Return ONLY the primary technology name (e.g., "pinescript", "javascript", "python", "go", "rust", etc.)
+            Be specific and concise - return just the technology name in lowercase.
+            """
+            
+            detected_tech = self.llm_provider.generate_text(detection_prompt, temperature=0.1).strip().lower()
+            
+            # Clean up the response (remove extra text if any)
+            tech_words = detected_tech.split()
+            if tech_words:
+                primary_tech = tech_words[0]
+                self.logger.info(f"Detected target technology: {primary_tech}")
+                return primary_tech
+            
+            # Fallback
+            self.logger.warning("Could not detect technology from goal, defaulting to Python")
+            return "python"
+            
+        except Exception as e:
+            self.logger.error(f"Failed to detect target technology: {e}")
+            return "python"
