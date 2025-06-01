@@ -275,7 +275,7 @@ def cmd_assistant(args):
         logging.getLogger("swarmdev.mcp").setLevel(logging.WARNING)
         logging.getLogger("swarmdev.collaborative_agent").setLevel(logging.WARNING)
     else:
-        print("🔧 Verbose mode enabled - showing detailed MCP tool debugging")
+        print("Verbose mode enabled - showing detailed MCP tool debugging")
         logging.getLogger("swarmdev.mcp").setLevel(logging.DEBUG)
         logging.getLogger("swarmdev.collaborative_agent").setLevel(logging.DEBUG)
     
@@ -299,14 +299,14 @@ def cmd_assistant(args):
         }
         mcp_manager = MCPManager(mcp_config, getattr(args, 'project_dir', './demo_project'))
         
-        print("🔧 Initializing MCP tools...")
+        print("Initializing MCP tools...")
         mcp_manager.initialize_tools()
         available_tools = mcp_manager.get_available_tools()
         print(f"MCP Tools: {len(available_tools)} ready")
         
         # Show detailed tool information in verbose mode
         if getattr(args, 'verbose', False):
-            print("\n🔧 MCP Tool Details:")
+            print("\nMCP Tool Details:")
             for tool_id in available_tools:
                 tool_info = mcp_manager.get_tool_info(tool_id)
                 if tool_info:
@@ -318,7 +318,7 @@ def cmd_assistant(args):
         
         # Run MCP diagnostics in verbose mode
         if getattr(args, 'verbose', False):
-            print("🔧 Running MCP diagnostics...")
+            print("Running MCP diagnostics...")
             mcp_manager.diagnose_tools()
             print()
             
@@ -326,7 +326,7 @@ def cmd_assistant(args):
         print(f"MCP initialization failed: {e}")
         if getattr(args, 'verbose', False):
             import traceback
-            print("🔧 Full MCP initialization error:")
+            print("Full MCP initialization error:")
             traceback.print_exc()
         print("   Continuing without MCP tools...")
         mcp_manager = None
@@ -348,7 +348,7 @@ def cmd_assistant(args):
         print(f"Failed to initialize Collaborative Agent: {e}")
         if getattr(args, 'verbose', False):
             import traceback
-            print("🔧 Full agent initialization error:")
+            print("Full agent initialization error:")
             traceback.print_exc()
         return
     
@@ -395,7 +395,7 @@ def cmd_assistant(args):
                 elif user_input.lower() == 'mcp-status' and getattr(args, 'verbose', False):
                     # Debug command to check MCP status
                     if mcp_manager:
-                        print("\n🔧 MCP Manager Status:")
+                        print("\nMCP Manager Status:")
                         print(f"  Enabled: {mcp_manager.is_enabled()}")
                         available_tools = mcp_manager.get_available_tools()
                         print(f"  Available tools: {available_tools}")
@@ -409,26 +409,26 @@ def cmd_assistant(args):
                             tool_info = mcp_manager.get_tool_info(tool_id)
                             print(f"  {tool_id}: {tool_info.get('status', 'unknown')} (used {tool_info.get('usage_count', 0)} times)")
                     else:
-                        print("\n🔧 MCP Manager is not initialized")
+                        print("\nMCP Manager is not initialized")
                     continue
                 
                 elif user_input.lower() == 'mcp-test' and getattr(args, 'verbose', False):
                     # Debug command to test MCP tools
                     if mcp_manager and mcp_manager.get_available_tools():
-                        print("\n🔧 Testing MCP tools...")
+                        print("\nTesting MCP tools...")
                         for tool_id in mcp_manager.get_available_tools()[:3]:  # Test first 3 tools
                             print(f"Testing {tool_id}...")
                             try:
                                 # Try a simple test call
                                 result = mcp_manager.call_tool(tool_id, "tools/list", {}, timeout=5)
                                 if result.get("error"):
-                                    print(f"  ❌ {tool_id}: {result['error']}")
+                                    print(f"  ERROR {tool_id}: {result['error']}")
                                 else:
-                                    print(f"  ✅ {tool_id}: OK")
+                                    print(f"  OK {tool_id}: OK")
                             except Exception as e:
-                                print(f"  ❌ {tool_id}: Exception - {e}")
+                                print(f"  ERROR {tool_id}: Exception - {e}")
                     else:
-                        print("\n🔧 No MCP tools available to test")
+                        print("\nNo MCP tools available to test")
                     continue
                 
                 elif user_input.lower() == 'pause':
@@ -453,12 +453,12 @@ def cmd_assistant(args):
                     workflow_prompt = """
                     
 Would you like me to start a workflow for this project? I can:
-• 🔍 **research_only** - Just research and gather information
-• 🚀 **standard_project** - Full development lifecycle (research → planning → development → docs)
-• ⚙️ **development_only** - Skip research, go straight to implementation
-• 🔄 **indefinite** - Continuous improvement cycles
-• 📊 **iteration** - Fixed number of improvement cycles
-• 🔨 **refactor** - Focus on improving existing code
+• **research_only** - Just research and gather information
+• **standard_project** - Full development lifecycle (research → planning → development → docs)
+• **development_only** - Skip research, go straight to implementation
+• **indefinite** - Continuous improvement cycles
+• **iteration** - Fixed number of improvement cycles
+• **refactor** - Focus on improving existing code
 
 Just say "start [workflow_type]" or tell me what you'd like to do!"""
                     print(workflow_prompt)
@@ -767,7 +767,7 @@ def _display_mcp_metrics(mcp_metrics: dict):
         
         # Fail loudly if agent metrics are missing
         if not agent_data:
-            print(f"  ❌ ERROR: Agent {agent_id} has no MCP metrics!")
+            print(f"  ERROR: Agent {agent_id} has no MCP metrics!")
             print(f"  This means the agent is NOT using BaseAgent.use_mcp_tool()!")
             print(f"  ALL MCP calls must go through the unified interface!")
             continue
@@ -989,7 +989,7 @@ def cmd_analyze_logs(args):
         print(f"Generating report to: {args.output}")
         report = analyzer.generate_workflow_report(args.output)
         
-        print(f"\n✓ Analysis complete! Report saved to: {args.output}")
+        print(f"\nAnalysis complete! Report saved to: {args.output}")
         
         # Show summary if requested
         if args.show_report:
