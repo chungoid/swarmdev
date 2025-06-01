@@ -10,6 +10,8 @@ from .workflow_definitions import (
     DevelopmentOnlyWorkflow,
     IndefiniteWorkflow,
     IterationWorkflow,
+    RefactorWorkflow,
+    VersionedWorkflow,
     get_workflow_by_id,
     list_available_workflows
 )
@@ -20,7 +22,9 @@ __all__ = [
     "ResearchOnlyWorkflow",
     "DevelopmentOnlyWorkflow",
     "IndefiniteWorkflow",
-    "IterationWorkflow", 
+    "IterationWorkflow",
+    "RefactorWorkflow",
+    "VersionedWorkflow", 
     "get_workflow_by_id",
     "list_available_workflows"
 ]

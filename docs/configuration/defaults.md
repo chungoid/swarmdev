@@ -19,7 +19,7 @@ SwarmDev uses a **model-aware configuration system** that automatically sets opt
 
 | Provider | Default Model | Default Max Tokens | Temperature |
 |----------|---------------|-------------------|-------------|
-| `openai` | `gpt-4o` | `4000` | `0.7` |
+| `openai` | `o4-mini-2025-04-16` | `4000` | `0.7` |
 | `anthropic` | `claude-3-opus-20240229` | `4000` (capped at model limit) | `0.7` |
 | `google` | `gemini-2.0-flash-001` | `4000` | `0.7` |
 

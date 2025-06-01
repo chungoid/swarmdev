@@ -245,7 +245,7 @@ When using `--llm-provider` without specifying a model, these defaults are used 
 
 | Provider | Default Model | Automatic Optimizations |
 |----------|---------------|-------------------------|
-| `openai` | `gpt-4o` | Parameter translation for o1 models, temperature constraints |
+| `openai` | `o4-mini-2025-04-16` | Parameter translation for reasoning models, temperature constraints |
 | `anthropic` | `claude-3-opus-20240229` | Token limit enforcement (8192 for Claude 3.5) |
 | `google` | `gemini-2.0-flash-001` | Parameter translation (max_tokens → max_output_tokens) |
 
@@ -326,7 +326,7 @@ swarmdev assistant
 ### Provider Switching with Same Configuration
 ```bash
 # Same project with different providers (no config changes needed)
-swarmdev build --goal goal.txt --llm-provider openai --llm-model gpt-4o
+swarmdev build --goal goal.txt --llm-provider openai --llm-model o4-mini-2025-04-16
 swarmdev build --goal goal.txt --llm-provider anthropic --llm-model claude-3-5-sonnet-20241022
 swarmdev build --goal goal.txt --llm-provider google --llm-model gemini-2.0-flash-001
 ```

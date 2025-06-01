@@ -87,9 +87,11 @@ def setup_parser():
     build_parser.add_argument('--llm-model', help='LLM model to use')
     build_parser.add_argument('--background', '-b', action='store_true', help='Run build in background and return immediately')
     build_parser.add_argument('--wait', '-w', action='store_true', help='Wait for build to complete (default behavior)')
-    build_parser.add_argument('--workflow', choices=['standard_project', 'research_only', 'development_only', 'indefinite', 'iteration'], 
+    build_parser.add_argument('--workflow', choices=['standard_project', 'research_only', 'development_only', 'indefinite', 'iteration', 'refactor', 'versioned'], 
                              default='standard_project', help='Workflow type to use')
     build_parser.add_argument('--max-iterations', type=int, default=3, help='Maximum iterations for iteration workflow')
+    build_parser.add_argument('--target-version', help='Target version for versioned workflow (e.g., "2.0", "1.5")')
+    build_parser.add_argument('--current-version', help='Current version for versioned workflow (auto-detected if not provided)')
     
     # Status command
     status_parser = subparsers.add_parser('status', help='Check the status of a project')
@@ -185,7 +187,7 @@ def get_llm_provider(provider_name, model=None):
         if not api_key:
             logger.error("OPENAI_API_KEY environment variable not set")
             sys.exit(1)
-        return OpenAIProvider(api_key=api_key, model=model or 'gpt-4o')
+        return OpenAIProvider(api_key=api_key, model=model or 'o4-mini-2025-04-16')
     
     elif provider_name == 'anthropic':
         api_key = os.environ.get('ANTHROPIC_API_KEY')
@@ -367,7 +369,9 @@ def cmd_build(args):
         "max_runtime": args.max_runtime,
         "verbose": args.verbose if hasattr(args, 'verbose') else False,
         "workflow": args.workflow,
-        "max_iterations": args.max_iterations
+        "max_iterations": args.max_iterations,
+        "target_version": getattr(args, 'target_version', None),
+        "current_version": getattr(args, 'current_version', None)
     }
     
     # Only override llm settings if explicitly provided in CLI
@@ -776,6 +780,13 @@ def cmd_workflows(args):
                 elif workflow['id'] == 'iteration':
                     print(f"  Usage: swarmdev build --goal goal.txt --workflow {workflow['id']} --max-iterations 5")
                     print(f"  Note: Runs specified number of improvement cycles")
+                elif workflow['id'] == 'refactor':
+                    print(f"  Usage: swarmdev build --goal refactor_goal.txt --workflow {workflow['id']} --project-dir ./existing_project")
+                    print(f"  Note: Analyzes existing codebase and refactors according to goal")
+                elif workflow['id'] == 'versioned':
+                    print(f"  Usage: swarmdev build --goal goal.txt --workflow {workflow['id']} --target-version 2.0 --max-iterations 15")
+                    print(f"  Note: Version-driven development with incremental progression (1.3→1.4→...→2.0)")
+                    print(f"  Advanced: Can overshoot max-iterations to reach target version, or stop early if target reached")
                 else:
                     print(f"  Usage: swarmdev build --goal goal.txt --workflow {workflow['id']}")
             else:

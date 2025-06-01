@@ -40,7 +40,7 @@ class EnhancedInteractiveAgent(LLMEnabledInteractiveAgent):
         self.build_config = {}  # Build configuration being assembled
         self.available_workflows = [
             "standard_project", "research_only", "development_only", 
-            "indefinite", "iteration"
+            "indefinite", "iteration", "refactor", "versioned"
         ]
         self.recommended_config = {}
     
@@ -418,6 +418,12 @@ class EnhancedInteractiveAgent(LLMEnabledInteractiveAgent):
             
             if "max_iterations" in self.build_config:
                 cmd.extend(["--max-iterations", str(self.build_config["max_iterations"])])
+            
+            if "target_version" in self.build_config:
+                cmd.extend(["--target-version", self.build_config["target_version"]])
+            
+            if "current_version" in self.build_config:
+                cmd.extend(["--current-version", self.build_config["current_version"]])
             
             # Start the build process
             result = subprocess.run(cmd, capture_output=True, text=True)

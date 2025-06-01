@@ -1,8 +1,8 @@
 requirements.txt
 swarms>=0.1.0
 openai>=1.0.0
-anthropic>=0.5.0
-google-genai>=0.3.0
+anthropic>=0.18.0
+google-generativeai>=0.3.0
 chromadb>=0.4.0
 pydantic>=2.0.0
 python-dotenv>=1.0.0
@@ -13,3 +13,15 @@ pandas>=2.0.0
 scikit-learn>=1.0.0
 tqdm>=4.0.0
 sentence-transformers>=2.2.0
+
+# MCP Integration
+docker>=6.0.0
+
+# Optional MCP Servers (official)
+mcp-server-git>=0.1.0
+mcp-server-time>=0.1.0
+mcp-server-fetch>=0.1.0
+
+# Development
+pytest>=7.0.0
+pytest-asyncio>=0.21.0

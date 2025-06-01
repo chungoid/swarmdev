@@ -35,7 +35,7 @@ Example configuration file (JSON):
 {
   "llm": {
     "provider": "openai",
-    "model": "gpt-4o",
+    "model": "o4-mini-2025-04-16",
     "temperature": 0.7,
     "max_tokens": 4000
   },
@@ -147,7 +147,7 @@ export GOOGLE_API_KEY="your-google-key"
 
 # Default LLM settings
 export SWARMDEV_LLM_PROVIDER="auto"
-export SWARMDEV_LLM_MODEL="gpt-4o"
+export SWARMDEV_LLM_MODEL="o4-mini-2025-04-16"
 
 # Core settings
 export SWARMDEV_PROJECT_DIR="./projects"
@@ -196,7 +196,7 @@ Configure which LLM providers to use with model-aware parameter handling:
 {
   "llm": {
     "provider": "openai",
-    "model": "gpt-4o",
+    "model": "o4-mini-2025-04-16",
     "temperature": 0.7,
     "max_tokens": 4000,
     "timeout": 60

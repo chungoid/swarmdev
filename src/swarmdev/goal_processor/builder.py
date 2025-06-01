@@ -169,7 +169,7 @@ class SwarmBuilder:
                     api_key = os.environ.get('OPENAI_API_KEY')
                     if not api_key:
                         raise ValueError("OPENAI_API_KEY environment variable not set")
-                    self.llm_provider = OpenAIProvider(api_key=api_key, model=model_name or 'gpt-4o')
+                    self.llm_provider = OpenAIProvider(api_key=api_key, model=model_name or 'o4-mini-2025-04-16')
                 
                 elif provider_name == 'anthropic':
                     api_key = os.environ.get('ANTHROPIC_API_KEY')
@@ -268,8 +268,14 @@ class SwarmBuilder:
             workflow_type = self.config.get("workflow", "standard_project")
             max_iterations = self.config.get("max_iterations", 3)
             
+            # Get version parameters for versioned workflow
+            workflow_kwargs = {}
+            if workflow_type == "versioned":
+                workflow_kwargs["target_version"] = self.config.get("target_version", "1.0")
+                workflow_kwargs["current_version"] = self.config.get("current_version")
+            
             # Get the workflow definition
-            workflow = get_workflow_by_id(workflow_type, max_iterations)
+            workflow = get_workflow_by_id(workflow_type, max_iterations, **workflow_kwargs)
             
             if not workflow:
                 raise ValueError(f"Workflow '{workflow_type}' not found")

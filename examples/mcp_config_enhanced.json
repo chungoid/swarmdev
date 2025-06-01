@@ -1,0 +1,45 @@
+{
+  "mcpServers": {
+    "git": {
+      "command": "uvx",
+      "args": ["mcp-server-git"],
+      "capabilities": ["git_operations", "repository_analysis"],
+      "description": "Git repository operations and analysis"
+    },
+    "time": {
+      "command": "uvx", 
+      "args": ["mcp-server-time"],
+      "capabilities": ["time_operations", "scheduling"],
+      "description": "System time and scheduling operations"
+    },
+    "fetch": {
+      "command": "uvx",
+      "args": ["mcp-server-fetch"],
+      "capabilities": ["web_requests", "documentation_lookup"],
+      "description": "Web requests and online research"
+    },
+    "sequential-thinking": {
+      "capabilities": ["reasoning", "problem_solving"],
+      "docker": {
+        "image": "mcp-sequential-thinking:latest",
+        "build_context": ".",
+        "dockerfile": "Dockerfile"
+      },
+      "description": "Advanced reasoning and sequential thinking"
+    },
+    "memory": {
+      "capabilities": ["memory", "context_persistence"], 
+      "docker": {
+        "image": "mcp-memory:latest",
+        "build_context": ".",
+        "dockerfile": "Dockerfile"
+      },
+      "description": "Persistent agent memory and context"
+    }
+  },
+  "settings": {
+    "auto_install_pip_servers": true,
+    "enable_official_servers": true,
+    "docker_build_bundled": true
+  }
+} 

@@ -108,7 +108,7 @@ class OpenAIProvider(LLMProviderInterface):
     handles parameter differences between model families (o1, GPT-4, GPT-3.5, etc.).
     """
     
-    def __init__(self, api_key: Optional[str] = None, model: str = "gpt-4o", **kwargs):
+    def __init__(self, api_key: Optional[str] = None, model: str = "o4-mini-2025-04-16", **kwargs):
         """
         Initialize the OpenAI provider.
         

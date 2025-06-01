@@ -72,3 +72,46 @@ venv.bak/
 .Trashes
 ehthumbs.db
 Thumbs.db
+
+# MCP Bundled Servers - ignore unnecessary files but keep essentials for Docker builds
+# Node.js dependencies and build artifacts
+src/swarmdev/bundled_mcp/*/node_modules/
+src/swarmdev/bundled_mcp/*/.next/
+src/swarmdev/bundled_mcp/*/dist/
+src/swarmdev/bundled_mcp/*/build/
+
+# Lock files (can be regenerated)
+src/swarmdev/bundled_mcp/*/bun.lock
+src/swarmdev/bundled_mcp/*/yarn.lock
+src/swarmdev/bundled_mcp/*/package-lock.json
+src/swarmdev/bundled_mcp/*/pnpm-lock.yaml
+
+# Multiple language documentation (keep only English README.md)
+src/swarmdev/bundled_mcp/*/docs/README.*.md
+src/swarmdev/bundled_mcp/*/README.*.md
+
+# Development and config files that aren't needed for Docker builds
+src/swarmdev/bundled_mcp/*/.git/
+src/swarmdev/bundled_mcp/*/.github/
+src/swarmdev/bundled_mcp/*/eslint.config.js
+src/swarmdev/bundled_mcp/*/prettier.config.*
+src/swarmdev/bundled_mcp/*/.eslintrc*
+src/swarmdev/bundled_mcp/*/.prettierrc*
+src/swarmdev/bundled_mcp/*/smithery.yaml
+
+# Additional development files
+src/swarmdev/bundled_mcp/*/docs/adding-projects.md
+src/swarmdev/bundled_mcp/*/.travis.yml
+src/swarmdev/bundled_mcp/*/.editorconfig
+src/swarmdev/bundled_mcp/*/.nycrc
+
+# Schema files that can be regenerated
+src/swarmdev/bundled_mcp/*/schema/
+
+# Keep essential files for Docker builds:
+# - Dockerfile
+# - package.json
+# - tsconfig.json
+# - src/ directory
+# - Main README.md
+# - LICENSE

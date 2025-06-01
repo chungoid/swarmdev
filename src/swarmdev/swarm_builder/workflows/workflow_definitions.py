@@ -350,13 +350,217 @@ class IterationWorkflow(WorkflowDefinition):
         )
 
 
-def get_workflow_by_id(workflow_id: str, max_iterations: int = 3) -> Optional[Dict]:
+class RefactorWorkflow(WorkflowDefinition):
+    """
+    Refactor workflow for improving existing codebases.
+    
+    This workflow analyzes an existing project and refactors it according 
+    to a specified goal, running multiple improvement cycles as needed.
+    """
+    
+    def __init__(self, max_iterations: int = 3):
+        """
+        Initialize the refactor workflow.
+        
+        Args:
+            max_iterations: Maximum number of refactor iterations to run
+        """
+        super().__init__(
+            workflow_id="refactor",
+            name="Refactor Workflow",
+            description=f"Analyzes existing codebase and refactors it according to goal over {max_iterations} iterations."
+        )
+        
+        self.max_iterations = max_iterations
+        
+        # Start with comprehensive codebase analysis
+        self.add_initial_task(
+            task_id="codebase_analysis",
+            agent_type="analysis",
+            data={
+                "workflow_type": "refactor",
+                "iteration_count": 0,
+                "max_iterations": max_iterations,
+                "analysis_depth": "comprehensive",
+                "focus_on_existing": True,
+                "analyze_architecture": True,
+                "identify_pain_points": True
+            }
+        )
+        
+        # Research refactor approaches and best practices
+        self.add_dependent_task(
+            task_id="refactor_research",
+            dependencies=["codebase_analysis"],
+            agent_type="research",
+            data={
+                "research_type": "refactor_approaches",
+                "use_analysis_results": True,
+                "focus_on_architecture": True,
+                "research_best_practices": True
+            }
+        )
+        
+        # Plan the refactor strategy
+        self.add_dependent_task(
+            task_id="refactor_planning",
+            dependencies=["refactor_research"],
+            agent_type="planning",
+            data={
+                "planning_type": "refactor",
+                "use_analysis_results": True,
+                "use_research_results": True,
+                "preserve_functionality": True,
+                "plan_incremental_steps": True,
+                "risk_assessment": True
+            }
+        )
+        
+        # Implement the refactor
+        self.add_dependent_task(
+            task_id="refactor_implementation",
+            dependencies=["refactor_planning"],
+            agent_type="development",
+            data={
+                "implementation_style": "refactor",
+                "preserve_existing": True,
+                "incremental_refactor": True,
+                "maintain_compatibility": True,
+                "focus_on_improvements": True
+            }
+        )
+        
+        # Analyze refactor results and plan next iteration if needed
+        self.add_dependent_task(
+            task_id="refactor_evaluation",
+            dependencies=["refactor_implementation"],
+            agent_type="analysis",
+            data={
+                "workflow_type": "refactor",
+                "analysis_depth": "focused",
+                "check_continue": True,
+                "max_iterations": max_iterations,
+                "evaluate_improvements": True,
+                "assess_goal_completion": True
+            }
+        )
+
+
+class VersionedWorkflow(WorkflowDefinition):
+    """
+    Versioned workflow for milestone-driven development.
+    
+    This workflow works through incremental versions (1.3 → 1.4 → 1.5 → 2.0)
+    and stops when the target version is reached, regardless of iteration count.
+    Can overshoot max_iterations if target version not reached, or stop early if target reached.
+    """
+    
+    def __init__(self, target_version: str = "1.0", current_version: str = None, max_iterations: int = 10):
+        """
+        Initialize the versioned workflow.
+        
+        Args:
+            target_version: Target version to reach (e.g., "2.0", "1.5")
+            current_version: Current version (auto-detected if None)
+            max_iterations: Soft limit on iterations (can be exceeded for version completion)
+        """
+        super().__init__(
+            workflow_id="versioned",
+            name="Versioned Workflow",
+            description=f"Version-driven development targeting {target_version} with incremental version progression."
+        )
+        
+        self.target_version = target_version
+        self.current_version = current_version
+        self.max_iterations = max_iterations
+        
+        # Start with version analysis and planning
+        self.add_initial_task(
+            task_id="version_analysis",
+            agent_type="analysis",
+            data={
+                "workflow_type": "versioned",
+                "target_version": target_version,
+                "current_version": current_version,
+                "max_iterations": max_iterations,
+                "analysis_depth": "version_focused",
+                "detect_current_version": current_version is None,
+                "plan_version_roadmap": True,
+                "assess_version_completion": True
+            }
+        )
+        
+        # Research version-specific requirements and best practices
+        self.add_dependent_task(
+            task_id="version_research",
+            dependencies=["version_analysis"],
+            agent_type="research",
+            data={
+                "research_type": "version_requirements",
+                "use_analysis_results": True,
+                "focus_on_versioning": True,
+                "research_semantic_versioning": True,
+                "identify_breaking_changes": True
+            }
+        )
+        
+        # Plan version-scoped development
+        self.add_dependent_task(
+            task_id="version_planning",
+            dependencies=["version_research"],
+            agent_type="planning",
+            data={
+                "planning_type": "version_scoped",
+                "use_analysis_results": True,
+                "use_research_results": True,
+                "scope_to_current_version": True,
+                "plan_version_increment": True,
+                "define_completion_criteria": True,
+                "create_version_blueprint": True
+            }
+        )
+        
+        # Implement version-specific features
+        self.add_dependent_task(
+            task_id="version_implementation",
+            dependencies=["version_planning"],
+            agent_type="development",
+            data={
+                "implementation_style": "version_scoped",
+                "preserve_existing": True,
+                "version_aware": True,
+                "update_version_files": True,
+                "maintain_backwards_compatibility": True,
+                "focus_on_version_goals": True
+            }
+        )
+        
+        # Evaluate version completion and plan next increment
+        self.add_dependent_task(
+            task_id="version_evaluation",
+            dependencies=["version_implementation"],
+            agent_type="analysis",
+            data={
+                "workflow_type": "versioned",
+                "analysis_depth": "version_completion",
+                "check_version_complete": True,
+                "check_target_reached": True,
+                "target_version": target_version,
+                "max_iterations": max_iterations,
+                "plan_next_version": True,
+                "evaluate_stopping_criteria": True
+            }
+        )
+
+
+def get_workflow_by_id(workflow_id: str, max_iterations: int = 3, **kwargs) -> Optional[Dict]:
     """
     Get a workflow definition by ID.
     
     Args:
         workflow_id: Workflow identifier
         max_iterations: Maximum iterations for iteration workflow
+        **kwargs: Additional workflow parameters (e.g., target_version, current_version)
         
     Returns:
         Optional[Dict]: Workflow definition or None if not found
@@ -366,7 +570,13 @@ def get_workflow_by_id(workflow_id: str, max_iterations: int = 3) -> Optional[Di
         "research_only": ResearchOnlyWorkflow(),
         "development_only": DevelopmentOnlyWorkflow(),
         "indefinite": IndefiniteWorkflow(),
-        "iteration": IterationWorkflow(max_iterations)
+        "iteration": IterationWorkflow(max_iterations),
+        "refactor": RefactorWorkflow(max_iterations),
+        "versioned": VersionedWorkflow(
+            target_version=kwargs.get("target_version", "1.0"),
+            current_version=kwargs.get("current_version"),
+            max_iterations=max_iterations
+        )
     }
     
     if workflow_id in workflows:
@@ -407,6 +617,16 @@ def list_available_workflows() -> List[Dict]:
             "id": "iteration",
             "name": "Iteration Improvement Workflow", 
             "description": "Runs a configurable number of improvement cycles on the project."
+        },
+        {
+            "id": "refactor",
+            "name": "Refactor Workflow",
+            "description": "Analyzes existing codebase and refactors it according to specified goal."
+        },
+        {
+            "id": "versioned",
+            "name": "Versioned Workflow",
+            "description": "Version-driven development with incremental progression and target version completion."
         }
     ]
     
