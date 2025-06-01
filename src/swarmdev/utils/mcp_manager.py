@@ -109,27 +109,58 @@ class MCPManager:
         self.mcp_logger.info("=== MCP LOGGING INITIALIZED ===")
     
     def _load_mcp_config(self):
-        """Load MCP configuration from file."""
+        """Load MCP configuration with hierarchical merging: global config + project overrides."""
         try:
-            # Default to .swarmdev/mcp_config.json, fallback to ./mcp_config.json for compatibility
-            default_config = "./.swarmdev/mcp_config.json" if os.path.exists("./.swarmdev/mcp_config.json") else "./mcp_config.json"
-            config_file = self.config.get("config_file", default_config)
-            self.mcp_logger.debug(f"Loading MCP config from: {config_file}")
+            # Step 1: Load global configuration first
+            global_config_path = os.path.expanduser("~/.swarmdev/mcp_config.json")
+            merged_config = {}
             
-            if not Path(config_file).exists():
-                self.mcp_logger.error(f"MCP config file not found: {config_file}")
+            if os.path.exists(global_config_path):
+                self.mcp_logger.info(f"Loading global MCP config from: {global_config_path}")
+                with open(global_config_path, 'r') as f:
+                    global_config = json.load(f)
+                merged_config = global_config.copy()
+                self.mcp_logger.info(f"Global config loaded with {len(global_config.get('mcpServers', global_config.get('servers', {})))} servers")
+            else:
+                self.mcp_logger.warning(f"Global MCP config not found at: {global_config_path}")
+            
+            # Step 2: Look for project-specific config and merge
+            project_config_paths = [
+                "./.swarmdev/mcp_config.json",  # Preferred location
+                "./mcp_config.json",           # Legacy fallback
+                self.config.get("config_file") # Explicit override
+            ]
+            
+            project_config_found = False
+            for config_path in project_config_paths:
+                if config_path and os.path.exists(config_path):
+                    self.mcp_logger.info(f"Loading project MCP config from: {config_path}")
+                    with open(config_path, 'r') as f:
+                        project_config = json.load(f)
+                    
+                    # Merge project config over global config
+                    merged_config = self._merge_mcp_configs(merged_config, project_config)
+                    project_servers = len(project_config.get('mcpServers', project_config.get('servers', {})))
+                    self.mcp_logger.info(f"Project config merged with {project_servers} servers")
+                    project_config_found = True
+                    break
+            
+            if not project_config_found:
+                self.mcp_logger.info("No project-specific MCP config found, using global config only")
+            
+            # Step 3: Fallback if no configuration found
+            if not merged_config:
+                self.mcp_logger.error("No MCP configuration found in global or project locations")
                 return
             
-            with open(config_file, 'r') as f:
-                mcp_config = json.load(f)
+            self.mcp_logger.debug(f"Final merged MCP config: {json.dumps(merged_config, indent=2)}")
             
-            self.mcp_logger.debug(f"Loaded MCP config: {json.dumps(mcp_config, indent=2)}")
-            
+            # Step 4: Process the merged configuration
             # Load server configurations (support both old and new format)
-            servers = mcp_config.get("servers", mcp_config.get("mcpServers", {}))
-            settings = mcp_config.get("settings", mcp_config.get("mcpSettings", {}))
+            servers = merged_config.get("servers", merged_config.get("mcpServers", {}))
+            settings = merged_config.get("settings", merged_config.get("mcpSettings", {}))
             
-            self.mcp_logger.info(f"Found {len(servers)} MCP servers in config")
+            self.mcp_logger.info(f"Final configuration contains {len(servers)} MCP servers")
             
             # Update global settings
             old_timeout = self.global_timeout
@@ -154,10 +185,56 @@ class MCPManager:
                 else:
                     self.mcp_logger.info(f"Skipping disabled tool: {tool_id}")
             
-            self.mcp_logger.info(f"Successfully loaded {len(self.mcp_tools)} MCP tools from configuration")
+            self.mcp_logger.info(f"Successfully loaded {len(self.mcp_tools)} MCP tools from hierarchical configuration")
             
         except Exception as e:
             self.mcp_logger.error(f"Failed to load MCP configuration: {e}", exc_info=True)
+    
+    def _merge_mcp_configs(self, global_config: Dict, project_config: Dict) -> Dict:
+        """
+        Merge project MCP config over global config, with project settings taking priority.
+        
+        Args:
+            global_config: Global MCP configuration
+            project_config: Project-specific MCP configuration
+            
+        Returns:
+            Dict: Merged configuration with project overrides
+        """
+        import copy
+        merged = copy.deepcopy(global_config)
+        
+        # Merge server configurations
+        global_servers = merged.get("servers", merged.get("mcpServers", {}))
+        project_servers = project_config.get("servers", project_config.get("mcpServers", {}))
+        
+        # Project servers override global servers by ID
+        for server_id, server_config in project_servers.items():
+            if server_id in global_servers:
+                self.mcp_logger.debug(f"Project config overriding global server: {server_id}")
+            else:
+                self.mcp_logger.debug(f"Project config adding new server: {server_id}")
+            global_servers[server_id] = server_config
+        
+        # Update the merged config with the unified server key
+        if "mcpServers" in merged or "mcpServers" in project_config:
+            merged["mcpServers"] = global_servers
+        else:
+            merged["servers"] = global_servers
+        
+        # Merge settings with project taking priority
+        global_settings = merged.get("settings", merged.get("mcpSettings", {}))
+        project_settings = project_config.get("settings", project_config.get("mcpSettings", {}))
+        
+        merged_settings = {**global_settings, **project_settings}
+        
+        # Update the merged config with the unified settings key
+        if "mcpSettings" in merged or "mcpSettings" in project_config:
+            merged["mcpSettings"] = merged_settings
+        else:
+            merged["settings"] = merged_settings
+        
+        return merged
     
     def _register_tool(self, tool_id: str, server_config: Dict):
         """Register an MCP tool."""
@@ -195,39 +272,55 @@ class MCPManager:
             self.mcp_logger.error(f"Failed to register MCP tool '{tool_id}': {e}", exc_info=True)
     
     def initialize_tools(self) -> bool:
-        """
-        Initialize all registered MCP tools and start persistent connections if enabled.
-        
-        Returns:
-            bool: True if initialization was successful
-        """
+        """Initialize MCP tools with optimistic approach - like Cursor does."""
         if not self.enabled:
             self.mcp_logger.info("MCP tools disabled, skipping initialization")
-            return True
+            return False
         
-        self.mcp_logger.info("=== INITIALIZING MCP TOOLS ===")
-        self.mcp_logger.info(f"Found {len(self.mcp_tools)} tools to initialize")
-        self.mcp_logger.info(f"Persistent connections: {self.persistent_connections}")
+        self.mcp_logger.info("=== OPTIMISTIC MCP INITIALIZATION ===")
+        self.mcp_logger.info(f"Found {len(self.mcp_tools)} tools to make available")
+        self.mcp_logger.info("Using optimistic initialization - tools available immediately")
         
-        success_count = 0
-        for tool_id in self.mcp_tools.keys():
-            self.mcp_logger.info(f"Initializing tool: {tool_id}")
-            
-            # Start persistent connection (required for MCP tools)
-            if self._start_persistent_connection(tool_id):
-                success_count += 1
-                self.mcp_logger.info(f"✓ Tool '{tool_id}' persistent connection established")
-            else:
-                self.mcp_logger.error(f"✗ Tool '{tool_id}' persistent connection failed")
+        # Optimistic approach: Mark all registered tools as ready immediately
+        # Initialize connections lazily on first use (like Cursor)
+        ready_count = 0
+        for tool_id, tool_info in self.mcp_tools.items():
+            if tool_info["status"] == "registered":
+                tool_info["status"] = "ready"  # Optimistically mark as ready
+                tool_info["initialization_time"] = "optimistic"
+                ready_count += 1
+                self.mcp_logger.info(f"✅ {tool_id} marked as available (lazy initialization)")
         
-        success_rate = (success_count / len(self.mcp_tools)) * 100 if self.mcp_tools else 0
         self.mcp_logger.info(f"=== INITIALIZATION COMPLETE ===")
-        self.mcp_logger.info(f"Success rate: {success_count}/{len(self.mcp_tools)} ({success_rate:.1f}%)")
+        self.mcp_logger.info(f"Available tools: {ready_count}/{len(self.mcp_tools)}")
+        self.mcp_logger.info("Tools will initialize on first use with proper error handling")
         
-        self.metrics["connection_tests"] = len(self.mcp_tools)
-        self.metrics["connection_successes"] = success_count
+        return ready_count > 0
+    
+    def _start_persistent_connection_with_timeout(self, tool_id: str, timeout: int = 10) -> bool:
+        """Start persistent connection with timeout - prevents hanging like Cursor does."""
+        import signal
+        import threading
         
-        return success_count > 0
+        result = {"success": False}
+        
+        def connection_worker():
+            try:
+                result["success"] = self._start_persistent_connection(tool_id)
+            except Exception as e:
+                self.mcp_logger.error(f"Connection worker exception for {tool_id}: {e}")
+                result["success"] = False
+        
+        # Start connection in thread with timeout
+        thread = threading.Thread(target=connection_worker, daemon=True)
+        thread.start()
+        thread.join(timeout=timeout)
+        
+        if thread.is_alive():
+            self.mcp_logger.warning(f"Connection timeout ({timeout}s) for {tool_id} - continuing without blocking")
+            return False
+        
+        return result["success"]
     
     def _start_persistent_connection(self, tool_id: str) -> bool:
         """Start a persistent MCP connection for a tool."""
@@ -441,17 +534,19 @@ class MCPManager:
             
             self.mcp_logger.debug(f"JSON-RPC request: {json.dumps(request, indent=2)}")
             
-            # Use persistent connection (required for MCP tools)
-            if tool_id in self.persistent_processes:
-                self.mcp_logger.debug(f"Using persistent connection for {tool_id}")
-                response = self._call_persistent_tool(tool_id, method, params)
-            else:
-                # If no persistent connection exists, attempt to start one
-                self.mcp_logger.warning(f"No persistent connection for {tool_id}, attempting to establish one")
-                if self._start_persistent_connection(tool_id):
-                    response = self._call_persistent_tool(tool_id, method, params)
+            # Lazy initialization: establish connection on first use
+            if tool_id not in self.persistent_processes:
+                self.mcp_logger.info(f"Lazy initialization: establishing connection for {tool_id}")
+                if not self._start_persistent_connection_with_timeout(tool_id, timeout=10):
+                    # Graceful fallback - tool still marked as ready but call fails
+                    self.mcp_logger.warning(f"Lazy initialization failed for {tool_id}, but keeping tool available")
+                    response = {"error": f"Connection failed for {tool_id} - will retry on next call"}
                 else:
-                    response = {"error": f"Failed to establish persistent connection for {tool_id}"}
+                    self.mcp_logger.info(f"Lazy initialization successful for {tool_id}")
+                    response = self._call_persistent_tool(tool_id, method, params)
+            else:
+                self.mcp_logger.debug(f"Using existing persistent connection for {tool_id}")
+                response = self._call_persistent_tool(tool_id, method, params)
             
             # Update metrics and tool usage
             response_time = time.time() - start_time

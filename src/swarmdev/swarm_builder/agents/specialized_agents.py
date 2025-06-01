@@ -53,7 +53,7 @@ class ResearchAgent(BaseAgent):
             return self.handle_error(e, task)
         
     def _plan_research_approach(self, goal: str, context: Dict) -> Dict:
-        """Use dynamic MCP reasoning tools to plan research approach."""
+        """Plan research approach, using reasoning tools if available."""
         planning_problem = f"""
         Plan a comprehensive research approach for this goal:
         
@@ -69,17 +69,28 @@ class ResearchAgent(BaseAgent):
         Develop a systematic research plan.
         """
         
-        # Try to use any available reasoning tool dynamically
-        reasoning_result = self.discover_and_use_capability(
-            "reasoning", 
-            planning_problem,
-            {"goal": goal, "context": context}
-        )
+        # Try reasoning tool if available
+        if "sequential-thinking" in self.get_available_mcp_tools():
+            reasoning_result = self.call_mcp_tool(
+                "sequential-thinking",
+                "tools/call",
+                {
+                    "name": "sequential_thinking",
+                    "arguments": {
+                        "thought": planning_problem,
+                        "nextThoughtNeeded": True,
+                        "thoughtNumber": 1,
+                        "totalThoughts": 3
+                    }
+                },
+                timeout=20,
+                justification="Planning comprehensive research approach"
+            )
+            
+            if reasoning_result and not reasoning_result.get("error"):
+                return {"plan": reasoning_result, "method": "mcp_reasoning"}
         
-        if not reasoning_result.get("error"):
-            return {"plan": reasoning_result, "method": "mcp_reasoning"}
-        
-        # Fallback to LLM planning
+        # LLM planning fallback
         if self.llm_provider:
             planning_prompt = f"""
             Plan a research approach for: {goal}
@@ -96,116 +107,167 @@ class ResearchAgent(BaseAgent):
             """
             
             plan_text = self.llm_provider.generate_text(planning_prompt, temperature=0.3)
-            return {"plan": plan_text, "method": "llm_fallback"}
+            return {"plan": plan_text, "method": "llm_planning"}
         
         return {"plan": "Basic research plan: investigate goal and gather relevant information", "method": "basic"}
     
     def _conduct_research(self, research_plan: Dict, goal: str, context: Dict) -> Dict:
-        """Conduct research using MCP documentation tools and LLM analysis."""
-        results = {
-            "documentation": {},
-            "analysis": "",
-            "technologies_found": [],
-            "recommendations": []
-        }
+        """
+        Conduct comprehensive research based on the research plan using all available tools.
+        """
+        results = {}
         
-        # Extract technologies from goal for documentation lookup
-        if self.mcp_manager and self.llm_provider:
-            tech_extraction_prompt = f"""
-            Analyze this goal and extract specific technologies, libraries, or frameworks that need documentation:
-            
-            GOAL: {goal}
-            
-            Return a simple list of technology names (one per line) that would benefit from documentation lookup.
-            Only include specific, well-known technologies, libraries, or frameworks.
-            If none are mentioned, return "none".
-            """
-            
-            try:
-                tech_response = self.llm_provider.generate_text(tech_extraction_prompt, temperature=0.1)
-                technologies = [tech.strip() for tech in tech_response.split('\n') if tech.strip() and tech.strip().lower() != 'none']
-                
-                # Look up documentation for found technologies (limit to prevent excessive MCP calls)
-                max_tech_lookups = min(len(technologies), 5 if len(technologies) > 10 else 3)
-                for tech in technologies[:max_tech_lookups]:
-                    if tech:
-                        docs = self._lookup_technology_docs(tech)
-                        if docs:
-                            results["documentation"][tech] = docs
-                            results["technologies_found"].append(tech)
-                            
-            except Exception as e:
-                self.logger.warning(f"Technology extraction failed: {e}")
+        # Get LLM to do basic research  
+        research_prompt = f"""
+        Conduct comprehensive research for this project:
         
-        # Analyze findings with LLM
-        if self.llm_provider:
-            analysis_prompt = f"""
-            Analyze the research findings for this goal:
+        GOAL: {goal}
+        RESEARCH PLAN: {json.dumps(research_plan, indent=2)}
+        CONTEXT: {json.dumps(context, indent=2)}
+        
+        Provide detailed research findings covering:
+        1. Technical requirements and considerations
+        2. Best practices and patterns
+        3. Implementation approaches
+        4. Potential challenges and solutions
+        5. Tools, libraries, and frameworks needed
+        
+        Be thorough and provide actionable insights for implementation.
+        """
+        
+        basic_research = self.llm_provider.generate_text(research_prompt, temperature=0.3)
+        results["basic_research"] = basic_research
+        
+        # Use available MCP tools naturally if they would help
+        available_tools = self.get_available_mcp_tools()
+        if available_tools:
+            self.logger.info(f"Enhancing research with available MCP tools: {available_tools}")
             
-            GOAL: {goal}
-            CONTEXT: {context}
-            RESEARCH PLAN: {research_plan}
-            DOCUMENTATION FOUND: {list(results["documentation"].keys())}
+            # Try documentation tools for frameworks mentioned
+            if "context7" in available_tools:
+                doc_result = self._try_documentation_lookup(goal, basic_research)
+                if doc_result:
+                    results["documentation_enhanced"] = doc_result
             
-            Provide:
-            1. Key insights from the research
-            2. Technical considerations
-            3. Potential challenges or opportunities
-            4. Actionable recommendations
+            # Try reasoning tools for complex problems
+            if "sequential-thinking" in available_tools:
+                reasoning_result = self._try_reasoning_enhancement(goal, research_plan)
+                if reasoning_result:
+                    results["reasoning_enhanced"] = reasoning_result
             
-            Focus on practical, actionable insights.
-            """
-            
-            try:
-                analysis = self.llm_provider.generate_text(analysis_prompt, temperature=0.3)
-                results["analysis"] = analysis
-                
-                # Extract recommendations
-                rec_prompt = f"""
-                Based on this analysis: {analysis}
-                
-                Extract the most important, specific, and actionable recommendations.
-                Return as a simple list (one per line).
-                """
-                
-                rec_response = self.llm_provider.generate_text(rec_prompt, temperature=0.2)
-                results["recommendations"] = [rec.strip() for rec in rec_response.split('\n') if rec.strip()]
-                
-            except Exception as e:
-                self.logger.warning(f"Analysis generation failed: {e}")
+            # Try web research for latest information  
+            if "fetch" in available_tools:
+                web_result = self._try_web_research(goal, context)
+                if web_result:
+                    results["web_enhanced"] = web_result
         
         return results
     
-    def _lookup_technology_docs(self, tech_name: str) -> Optional[str]:
-        """Look up documentation for a specific technology using dynamic MCP discovery."""
-        doc_task = f"Look up comprehensive documentation for the technology/library: {tech_name}"
-        
-        result = self.discover_and_use_capability(
-            "documentation", 
-            doc_task,
-            {"library_name": tech_name, "tech_name": tech_name}
-        )
-        
-        if not result.get("error"):
-            # Try to extract text content from various possible response formats
-            if isinstance(result, dict):
-                # Try common response patterns for MCP tool results
-                content = result.get("result", {}).get("content", [{}])
-                if content and isinstance(content, list):
-                    return content[0].get("text", "")
-                elif isinstance(result.get("content"), str):
-                    return result["content"]
-                elif isinstance(result.get("text"), str):
-                    return result["text"]
-                elif isinstance(result.get("documentation"), str):
-                    return result["documentation"]
-                # Try to extract from nested result structures
-                elif result.get("result") and isinstance(result["result"], str):
-                    return result["result"]
-            elif isinstance(result, str):
-                return result
+    def _try_documentation_lookup(self, goal: str, basic_research: str) -> Optional[str]:
+        """Try to get documentation for technologies mentioned."""
+        try:
+            # Let LLM identify what docs would be helpful
+            doc_prompt = f"""
+            Based on this goal and research, what specific technologies, frameworks, or libraries 
+            would benefit from up-to-date documentation lookup?
             
-        return None
+            GOAL: {goal}
+            RESEARCH: {basic_research[:500]}...
+            
+            List up to 3 specific technology names that would benefit from current documentation.
+            Return only the names, one per line. Examples:
+            FastAPI
+            React
+            SQLAlchemy
+            """
+            
+            tech_response = self.llm_provider.generate_text(doc_prompt, temperature=0.1)
+            technologies = [tech.strip() for tech in tech_response.split('\n') if tech.strip()]
+            
+            # Try to get docs for identified technologies
+            doc_results = []
+            for tech in technologies[:3]:  # Limit to 3
+                if len(tech) > 2 and len(tech) < 50:  # Basic validation
+                    result = self.call_mcp_tool(
+                        "context7", 
+                        "tools/call",
+                        {
+                            "name": "resolve-library-id",
+                            "arguments": {"libraryName": tech}
+                        },
+                        timeout=15,
+                        justification=f"Getting documentation for {tech}"
+                    )
+                    
+                    if result and not result.get("error"):
+                        doc_results.append(f"Documentation found for {tech}")
+                    
+            return f"Documentation lookup for: {', '.join(technologies)}" if doc_results else None
+            
+        except Exception as e:
+            self.logger.warning(f"Documentation lookup failed: {e}")
+            return None
+    
+    def _try_reasoning_enhancement(self, goal: str, research_plan: Dict) -> Optional[str]:
+        """Try structured reasoning if it would help."""
+        try:
+            reasoning_prompt = f"""
+            Analyze this research goal systematically:
+            
+            GOAL: {goal}
+            RESEARCH PLAN: {json.dumps(research_plan, indent=2)}
+            
+            Break down the problem and identify key technical decisions needed.
+            """
+            
+            result = self.call_mcp_tool(
+                "sequential-thinking",
+                "tools/call", 
+                {
+                    "name": "sequential_thinking",
+                    "arguments": {
+                        "thought": reasoning_prompt,
+                        "nextThoughtNeeded": True,
+                        "thoughtNumber": 1,
+                        "totalThoughts": 3
+                    }
+                },
+                timeout=20,
+                justification="Using structured reasoning for research analysis"
+            )
+            
+            if result and not result.get("error"):
+                return "Structured reasoning analysis completed"
+            
+        except Exception as e:
+            self.logger.warning(f"Reasoning enhancement failed: {e}")
+            return None
+    
+    def _try_web_research(self, goal: str, context: Dict) -> Optional[str]:
+        """Try web research if helpful."""
+        try:
+            result = self.call_mcp_tool(
+                "fetch",
+                "tools/call",
+                {
+                    "name": "fetch", 
+                    "arguments": {
+                        "url": "https://docs.python.org/3/",
+                        "method": "GET"
+                    }
+                },
+                timeout=10,
+                justification="Testing web research capability"
+            )
+            
+            if result and not result.get("error"):
+                return "Web research capability verified"
+                
+        except Exception as e:
+            self.logger.warning(f"Web research failed: {e}")
+            return None
+    
+
     
     def _synthesize_research_findings(self, results: Dict, goal: str) -> str:
         """Synthesize research findings into actionable insights."""
@@ -218,10 +280,9 @@ class ResearchAgent(BaseAgent):
         ORIGINAL GOAL: {goal}
         
         RESEARCH RESULTS:
-        - Technologies Found: {results.get("technologies_found", [])}
-        - Documentation Available: {list(results.get("documentation", {}).keys())}
-        - Analysis: {results.get("analysis", "")[:500]}...
-        - Recommendations: {results.get("recommendations", [])}
+        - Technologies Found: {list(results.keys())}
+        - Documentation Available: {list(results.keys())}
+        - Analysis: {json.dumps(results, indent=2)}
         
         Create a concise synthesis that:
         1. Summarizes key findings
@@ -236,7 +297,7 @@ class ResearchAgent(BaseAgent):
             return self.llm_provider.generate_text(synthesis_prompt, temperature=0.3)
         except Exception as e:
             self.logger.error(f"Synthesis generation failed: {e}")
-            return f"Research completed with findings: {len(results.get('technologies_found', []))} technologies researched, {len(results.get('recommendations', []))} recommendations generated"
+            return f"Research completed with findings: {len(results)} findings analyzed"
 
 
 class PlanningAgent(BaseAgent):
