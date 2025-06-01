@@ -14,8 +14,9 @@ SwarmDev orchestrates 7 distinct workflow patterns using 5 specialized agents. T
 ### Key Architectural Insights
 1. **AnalysisAgent is the iteration orchestrator** - manages cycles, creates evolved goals
 2. **No dedicated architecture phase** - technical design mixed with planning
-3. **Limited context standardization** - inconsistent information handoff
+3. **Standardized agent interfaces** - BaseAgent provides consistent output structure
 4. **Blueprint creation centralized** - AnalysisAgent handles architectural analysis
+5. **Universal MCP access** - All agents inherit comprehensive MCP tool capabilities
 
 ---
 
@@ -97,10 +98,11 @@ sequenceDiagram
 - **Planning → Development**: Task breakdown guides implementation
 - **Development → Documentation**: Implementation results drive documentation
 
-**Current Gaps:**
-- No architectural design phase between research and planning
+**Current Characteristics:**
+- Research findings flow directly to planning phase
 - PlanningAgent handles both high-level planning AND technical architecture
-- No validation gates between phases
+- Sequential execution without validation gates between phases
+- All agents have MCP tool access for enhanced capabilities
 
 ### 2. ResearchOnlyWorkflow
 **Focused research for decision-making**
@@ -193,26 +195,43 @@ sequenceDiagram
     participant AnalysisAgent2 as AnalysisAgent (Final)
     
     User->>AnalysisAgent: refactor goal + project_context
-    AnalysisAgent->>ResearchAgent: refactor analysis + requirements
-    ResearchAgent->>PlanningAgent: research findings
-    PlanningAgent->>DevelopmentAgent: refactor plan
-    DevelopmentAgent->>AnalysisAgent2: implementation results
-    AnalysisAgent2->>User: refactor evaluation + success analysis
+    AnalysisAgent->>AnalysisAgent: codebase_analysis + architecture_assessment
+    AnalysisAgent->>ResearchAgent: analysis results + refactor requirements
+    ResearchAgent->>ResearchAgent: refactor_approaches + best_practices
+    ResearchAgent->>PlanningAgent: research findings + recommendations
+    PlanningAgent->>PlanningAgent: refactor_strategy + incremental_steps
+    PlanningAgent->>DevelopmentAgent: refactor plan + risk assessment
+    DevelopmentAgent->>DevelopmentAgent: refactor_implementation + compatibility_maintenance
+    DevelopmentAgent->>AnalysisAgent2: implementation results + changes
+    AnalysisAgent2->>AnalysisAgent2: refactor_evaluation + goal_assessment
+    AnalysisAgent2->>User: evaluation results + success analysis
 ```
 
-**Unique Pattern:** AnalysisAgent operates at both beginning and end
+**Unique Pattern:** AnalysisAgent operates at both beginning and end, with comprehensive codebase analysis first
 
 ### 6. VersionedWorkflow
 **Version-driven incremental development**
 
 ```mermaid
-flowchart LR
-    A[Version Goal] --> B[StandardProjectWorkflow]
-    B --> C[Version Analysis]
-    C --> D{Next Version?}
-    D -->|Yes| E[Version N+1 Goal]
-    D -->|No| F[Final Version]
-    E --> B
+sequenceDiagram
+    participant User
+    participant AnalysisAgent
+    participant ResearchAgent
+    participant PlanningAgent
+    participant DevelopmentAgent
+    participant AnalysisAgent2 as AnalysisAgent (Evaluation)
+    
+    User->>AnalysisAgent: version goal + target version
+    AnalysisAgent->>AnalysisAgent: version_analysis + roadmap planning
+    AnalysisAgent->>ResearchAgent: version requirements + current state
+    ResearchAgent->>ResearchAgent: version_research + semantic versioning
+    ResearchAgent->>PlanningAgent: version strategy + requirements
+    PlanningAgent->>PlanningAgent: version_planning + completion criteria
+    PlanningAgent->>DevelopmentAgent: version blueprint + scope
+    DevelopmentAgent->>DevelopmentAgent: version_implementation + file updates
+    DevelopmentAgent->>AnalysisAgent2: implementation results + version state
+    AnalysisAgent2->>AnalysisAgent2: version_evaluation + target check
+    AnalysisAgent2->>User: version completion or next increment plan
 ```
 
 ---
@@ -225,9 +244,9 @@ flowchart LR
 |-------|-------------|---------|---------|---------------|
 | **ResearchAgent** | Information gathering & analysis | goal, context | research_plan, findings, synthesis | sequential-thinking, context7, fetch |
 | **PlanningAgent** | Project planning & task breakdown | goal, context, research_outputs | detailed_plan, task_breakdown, execution_strategy, project_context | sequential-thinking |
-| **DevelopmentAgent** | Code implementation | goal, context, planning_outputs | project_analysis, implementation_plan, implementation_results | None (LLM-driven) |
-| **AnalysisAgent** | State analysis & blueprints | goal, context, project_dir, iteration_count | project_state, improvement_analysis, should_continue, evolved_goal | None (LLM-driven) |
-| **DocumentationAgent** | Documentation creation | goal, context, implementation_outputs | project_analysis, documentation_content, documentation_structure | None (LLM-driven) |
+| **DevelopmentAgent** | Code implementation | goal, context, planning_outputs | project_analysis, implementation_plan, implementation_results | **Full MCP access** (via BaseAgent) |
+| **AnalysisAgent** | State analysis & blueprints | goal, context, project_dir, iteration_count | project_state, improvement_analysis, should_continue, evolved_goal | **Full MCP access** (via BaseAgent) |
+| **DocumentationAgent** | Documentation creation | goal, context, implementation_outputs | project_analysis, documentation_content, documentation_structure | **Full MCP access** (via BaseAgent) |
 
 ### Information Dependencies
 
@@ -251,10 +270,11 @@ graph TD
 ```
 
 **Key Insights:**
-- **Linear Information Flow**: Each agent builds on previous outputs
-- **AnalysisAgent Cross-cutting**: Can analyze any layer for iterations
-- **No Validation Gates**: Missing quality checks between phases
-- **Context Accumulation Limited**: Basic context passing, no rich scaffolding
+- **Linear Information Flow**: Each agent builds on previous outputs using standardized BaseAgent interface
+- **AnalysisAgent Cross-cutting**: Can analyze any layer for iterations with full MCP access
+- **Sequential Execution**: Direct phase transitions without intermediate validation
+- **Context Accumulation Limited**: Simple parameter passing rather than rich context scaffolding
+- **Universal Tool Access**: All agents can leverage MCP tools when beneficial
 
 ---
 
@@ -292,11 +312,11 @@ graph LR
     end
 ```
 
-**Context Handoff Gaps:**
-1. **No Standardized Format**: Each agent uses different output structures
-2. **Limited Context Enrichment**: Basic parameter passing vs. rich context building
-3. **No Quality Validation**: No checks for context completeness
-4. **Missing Cross-references**: Limited linking between agent outputs
+**Context Handoff Characteristics:**
+1. **Standardized Base Structure**: All agents inherit BaseAgent output format (status, agent_type, core results, timestamp)
+2. **Agent-Specific Content**: Core results vary by agent type while maintaining consistent structure
+3. **Basic Context Passing**: Simple parameter passing rather than rich context accumulation  
+4. **Limited Cross-references**: Minimal linking between agent outputs across workflow phases
 
 ---
 
@@ -421,9 +441,9 @@ sequenceDiagram
 ## Recommendations for Future Architecture
 
 ### Immediate Opportunities (No Disruption)
-1. **Standardize Context Handoff**: Create unified agent output format
+1. **Enhance Context Enrichment**: Build rich context accumulation on top of existing BaseAgent standardization
 2. **Add Validation Gates**: Quality checks between workflow phases
-3. **Enhance Context Accumulation**: Rich context building vs. basic parameter passing
+3. **Leverage Universal MCP Access**: Optimize tool usage across all agent types
 
 ### Strategic Enhancements (Minimal Disruption)
 1. **Insert ArchitectureAgent**: Between research and planning in StandardProjectWorkflow
@@ -442,10 +462,11 @@ sequenceDiagram
 The current SwarmDev architecture demonstrates sophisticated workflow orchestration with **AnalysisAgent serving as the central iteration orchestrator and blueprint creator**. The system is well-positioned for enhancement without disruption:
 
 **Key Strengths:**
-- Comprehensive workflow coverage for different project types
-- Strong iteration management with AnalysisAgent
-- Flexible agent specialization
-- Proven MCP tool integration
+- Comprehensive workflow coverage for different project types (7 distinct patterns)
+- Strong iteration management with AnalysisAgent orchestration
+- Standardized agent interfaces through BaseAgent architecture
+- Universal MCP tool integration across all agent types
+- Flexible agent specialization with consistent output structures
 
 **Strategic Opportunities:**
 - **ArchitectureAgent can complement, not replace**, AnalysisAgent's blueprint creation
@@ -454,9 +475,10 @@ The current SwarmDev architecture demonstrates sophisticated workflow orchestrat
 - **Collaborative blueprint creation** between AnalysisAgent and ArchitectureAgent offers optimal value
 
 **Recommended Next Steps:**
-1. Implement standardized context handoff format
-2. Add ArchitectureAgent to StandardProjectWorkflow between research and planning phases
-3. Enhance AnalysisAgent to collaborate with ArchitectureAgent for architectural blueprints
-4. Maintain all existing workflows and iteration patterns unchanged
+1. Enhance context enrichment on top of existing BaseAgent standardization
+2. Add ArchitectureAgent to StandardProjectWorkflow between research and planning phases  
+3. Optimize MCP tool usage patterns across all agent types
+4. Enhance AnalysisAgent to collaborate with ArchitectureAgent for architectural blueprints
+5. Maintain all existing workflows and iteration patterns unchanged
 
-This approach preserves the proven AnalysisAgent-centered architecture while adding specialized technical design capabilities where they provide maximum value. 
+This approach preserves the proven AnalysisAgent-centered architecture and standardized BaseAgent interfaces while adding specialized technical design capabilities where they provide maximum value. 
