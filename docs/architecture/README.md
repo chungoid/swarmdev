@@ -78,9 +78,11 @@ The Utility Layer provides common functionality used across the platform, includ
 **Key Components:**
 - **LLM Providers**: Integration with language model providers
   - `LLMProviderInterface`: Common interface for all providers
-  - `OpenAIProvider`: Integration with OpenAI models
-  - `AnthropicProvider`: Integration with Anthropic models
+  - `OpenAIProvider`: Integration with OpenAI models (with model-aware parameter handling)
+  - `AnthropicProvider`: Integration with Anthropic models (with token limit enforcement)
+  - `GoogleProvider`: Integration with Google models (with parameter translation)
   - `ProviderRegistry`: Dynamic discovery and registration of providers
+  - **Model-Aware Configuration**: Automatic parameter optimization based on model capabilities
 - **MCP Tools**: Integration with multi-context processing tools
   - Docker-based tool integration
   - API-based tool integration
@@ -93,6 +95,42 @@ The Utility Layer provides common functionality used across the platform, includ
   - Metrics collection and analysis
   - Configuration adaptation
   - Performance optimization
+
+## Model-Aware Configuration System
+
+SwarmDev includes an intelligent model-aware configuration system that automatically optimizes parameters for different LLM models and providers:
+
+### Key Features
+
+1. **Automatic Parameter Translation**: 
+   - `max_tokens` becomes `max_completion_tokens` for OpenAI o1 models
+   - `max_tokens` becomes `max_output_tokens` for Google Gemini models
+   - Standard parameters preserved for other models
+
+2. **Model-Specific Constraints**:
+   - Temperature restrictions for reasoning models (o1, o3, o4 series) automatically enforced
+   - Token limits automatically set based on model capabilities
+   - Parameter sets filtered based on model support
+
+3. **Provider Optimization**:
+   - OpenAI: Handles reasoning vs chat model differences
+   - Anthropic: Enforces Claude family token limits (8192 for Claude 3.5)
+   - Google: Translates parameters for Gemini API compatibility
+
+4. **Unified Configuration**:
+   - Same configuration works across all providers
+   - No need for provider-specific parameter sets
+   - Automatic fallbacks and defaults
+
+### Implementation
+
+The model-aware system is implemented through:
+- Provider-specific parameter mapping methods
+- Model detection and classification logic
+- Automatic constraint enforcement
+- Transparent parameter translation
+
+This ensures that users can switch between providers and models without changing their configuration, while the system automatically handles the technical differences between different LLM APIs.
 
 ## Design Principles
 

@@ -148,17 +148,47 @@ class SwarmBuilder:
             provider_name = self.config.get('llm_provider', 'auto')
             model_name = self.config.get('llm_model')
             
-            # Initialize provider registry
-            registry = ProviderRegistry()
-            registry.discover_providers()
+            self.logger.info(f"Setting up LLM provider: {provider_name}, model: {model_name}")
             
             if provider_name == 'auto':
+                # Use provider registry to auto-detect available providers
+                registry = ProviderRegistry()
+                registry.discover_providers()
                 self.llm_provider = registry.get_provider()
+                
+                # If a specific model is configured, update the provider's model
+                if model_name and self.llm_provider:
+                    self.llm_provider.model = model_name
+                    self.logger.info(f"Updated auto-detected provider model to: {model_name}")
             else:
-                self.llm_provider = registry.get_provider(provider_name)
+                # Create provider directly with configured model
+                from ..utils.llm_provider import OpenAIProvider, AnthropicProvider, GoogleProvider
+                import os
+                
+                if provider_name == 'openai':
+                    api_key = os.environ.get('OPENAI_API_KEY')
+                    if not api_key:
+                        raise ValueError("OPENAI_API_KEY environment variable not set")
+                    self.llm_provider = OpenAIProvider(api_key=api_key, model=model_name or 'gpt-4o')
+                
+                elif provider_name == 'anthropic':
+                    api_key = os.environ.get('ANTHROPIC_API_KEY')
+                    if not api_key:
+                        raise ValueError("ANTHROPIC_API_KEY environment variable not set")
+                    self.llm_provider = AnthropicProvider(api_key=api_key, model=model_name or 'claude-3-opus-20240229')
+                
+                elif provider_name == 'google':
+                    api_key = os.environ.get('GOOGLE_API_KEY')
+                    if not api_key:
+                        raise ValueError("GOOGLE_API_KEY environment variable not set")
+                    self.llm_provider = GoogleProvider(api_key=api_key, model=model_name or 'gemini-2.0-flash-001')
+                
+                else:
+                    raise ValueError(f"Unknown provider: {provider_name}")
             
             if self.llm_provider:
-                self.logger.info(f"LLM provider initialized successfully: {provider_name}")
+                actual_model = getattr(self.llm_provider, 'model', 'unknown')
+                self.logger.info(f"LLM provider initialized successfully: {provider_name} with model: {actual_model}")
             else:
                 self.logger.warning("No LLM provider available")
                 

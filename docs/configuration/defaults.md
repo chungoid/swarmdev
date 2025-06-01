@@ -8,8 +8,28 @@ SwarmDev can be configured through multiple methods (in order of precedence):
 
 1. **Command-line Arguments** (highest priority)
 2. **Environment Variables**
-3. **Configuration Files** (JSON/YAML)
+3. **Configuration Files** (JSON)
 4. **Built-in Defaults** (lowest priority)
+
+## Model-Aware Configuration Defaults
+
+SwarmDev uses a **model-aware configuration system** that automatically sets optimal defaults based on the LLM model selected.
+
+### Provider Defaults
+
+| Provider | Default Model | Default Max Tokens | Temperature |
+|----------|---------------|-------------------|-------------|
+| `openai` | `gpt-4o` | `4000` | `0.7` |
+| `anthropic` | `claude-3-opus-20240229` | `4000` (capped at model limit) | `0.7` |
+| `google` | `gemini-2.0-flash-001` | `4000` | `0.7` |
+
+### Reasoning Model Defaults (o1, o3, o4 series)
+
+| Setting | Default Value | Description |
+|---------|---------------|-------------|
+| Max Tokens | `25000` | Much higher for reasoning tasks |
+| Temperature | `1.0` (forced) | Only supported value (user setting ignored) |
+| Parameters | Minimal set | Many standard parameters excluded automatically |
 
 ## Command-Line Argument Defaults
 
@@ -31,7 +51,6 @@ SwarmDev can be configured through multiple methods (in order of precedence):
 | `--llm-provider` | `"auto"` | string | LLM provider (openai, anthropic, google, auto) |
 | `--llm-model` | Provider default | string | LLM model to use |
 | `--background` | `False` | boolean | Run build in background |
-| `--wait` | `True` | boolean | Wait for build to complete |
 | `--workflow` | `"standard_project"` | string | Workflow type to use |
 | `--max-iterations` | `3` | integer | Maximum iterations for iteration workflow |
 
@@ -48,57 +67,117 @@ SwarmDev can be configured through multiple methods (in order of precedence):
 
 | Option | Default Value | Type | Description |
 |--------|---------------|------|-------------|
-| `--logs-dir` | `"logs"` | string | Directory containing log files |
+| `--logs-dir` | `".swarmdev/logs"` | string | Directory containing log files |
 | `--output` | `"workflow_analysis.md"` | string | Output file for analysis report |
-| `--workflow-id` | `None` | string | Filter analysis by specific workflow ID |
 | `--show-report` | `False` | boolean | Display report summary in terminal |
 
-## LLM Provider Defaults
+## Configuration File Defaults
 
-### Default Models by Provider
+### File Locations (in order of precedence)
 
-| Provider | Default Model | Context Length | Capabilities |
-|----------|---------------|----------------|--------------|
-| `openai` | `"gpt-4o"` | 128k tokens | Text, chat, embeddings, function calling, vision |
-| `anthropic` | `"claude-3-opus-20240229"` | 200k tokens | Text, chat, function calling, vision |
-| `google` | `"gemini-2.0-flash-001"` | 1M-2M tokens | Text, chat, embeddings, function calling, vision, code execution |
+1. Path specified by `--config` command-line argument
+2. `.swarmdev/swarmdev_config.json` in project directory
+3. `./swarmdev_config.json` in current directory
 
-### LLM Generation Parameters
+### LLM Configuration Defaults
 
-#### OpenAI Provider Defaults
+```json
+{
+  "llm": {
+    "provider": "auto",
+    "model": "gpt-4o",
+    "temperature": 0.7,
+    "max_tokens": 4000,
+    "timeout": 60
+  }
+}
+```
 
-| Parameter | Default Value | Type | Description |
-|-----------|---------------|------|-------------|
-| `temperature` | `0.7` | float | Creativity/randomness (0.0-2.0) |
-| `max_tokens` | `1000` | integer | Maximum tokens in response |
-| `top_p` | `1.0` | float | Nucleus sampling (0.0-1.0) |
-| `frequency_penalty` | `0.0` | float | Frequency penalty (-2.0 to 2.0) |
-| `presence_penalty` | `0.0` | float | Presence penalty (-2.0 to 2.0) |
+**Model-Aware Behavior:**
+- Parameters automatically optimized per model family
+- Token limits enforced based on model capabilities
+- Temperature restrictions handled for reasoning models
 
-#### Anthropic Provider Defaults
+### Project Configuration Defaults
 
-| Parameter | Default Value | Type | Description |
-|-----------|---------------|------|-------------|
-| `temperature` | `0.7` | float | Creativity/randomness (0.0-1.0) |
-| `max_tokens` | `1000` | integer | Maximum tokens in response |
-| `top_p` | `1.0` | float | Nucleus sampling (0.0-1.0) |
+```json
+{
+  "project": {
+    "project_dir": "./project",
+    "max_runtime": 3600
+  }
+}
+```
 
-#### Google Provider Defaults
+### Agent Configuration Defaults
 
-| Parameter | Default Value | Type | Description |
-|-----------|---------------|------|-------------|
-| `temperature` | `0.7` | float | Creativity/randomness (0.0-1.0) |
-| `max_output_tokens` | `1000` | integer | Maximum tokens in response |
-| `top_p` | `1.0` | float | Nucleus sampling (0.0-1.0) |
-| `top_k` | `32` | integer | Top-k sampling |
+With the model-aware system, agents inherit LLM settings automatically:
 
-### Embedding Models
+```json
+{
+  "agents": {
+    "research": {
+      "count": 1,
+      "memory_enabled": true
+    },
+    "planning": {
+      "count": 1,
+      "memory_enabled": true
+    },
+    "development": {
+      "count": 2,
+      "memory_enabled": true
+    },
+    "documentation": {
+      "count": 1,
+      "memory_enabled": true
+    }
+  }
+}
+```
 
-| Provider | Default Embedding Model | Description |
-|----------|-------------------------|-------------|
-| `openai` | `"text-embedding-3-small"` | OpenAI's latest small embedding model |
-| `anthropic` | `"all-MiniLM-L6-v2"` | SentenceTransformer fallback (no native embeddings) |
-| `google` | `"models/text-embedding-004"` | Google's latest embedding model |
+**Note:** Agent-specific model and temperature configurations are no longer needed or supported.
+
+### Memory Configuration Defaults
+
+```json
+{
+  "memory": {
+    "enabled": true,
+    "vector_store": "chroma",
+    "vector_store_path": "./vector_store",
+    "embedding_model": "text-embedding-3-small",
+    "cache_enabled": true,
+    "working_memory_limit": 100
+  }
+}
+```
+
+### Workflow Configuration Defaults
+
+```json
+{
+  "workflow": {
+    "parallelism": 4,
+    "timeout": 3600,
+    "retry_attempts": 3,
+    "checkpoint_interval": 300
+  }
+}
+```
+
+### MCP Configuration Defaults
+
+```json
+{
+  "mcp": {
+    "enabled": true,
+    "config_file": "./mcp_config.json",
+    "docker_enabled": true,
+    "docker_network": null
+  }
+}
+```
 
 ## Workflow Defaults
 
@@ -112,147 +191,61 @@ SwarmDev can be configured through multiple methods (in order of precedence):
 | `indefinite` | Indefinite Improvement Workflow | Continuous improvement until manually stopped | Unlimited |
 | `iteration` | Iteration Improvement Workflow | Configurable number of improvement cycles | 3 |
 
-### Workflow Task Configuration
-
-#### Research Agent Task Defaults
-
-| Parameter | Default Value | Description |
-|-----------|---------------|-------------|
-| `depth` | `"medium"` | Research depth (shallow, medium, deep) |
-| `focus_areas` | `["technologies", "best_practices", "similar_projects"]` | Areas to focus research on |
-
-#### Planning Agent Task Defaults
-
-| Parameter | Default Value | Description |
-|-----------|---------------|-------------|
-| `planning_depth` | `"detailed"` | Planning detail level |
-| `include_architecture` | `true` | Include architecture planning |
-| `include_timeline` | `true` | Include timeline estimation |
-
-#### Development Agent Task Defaults
-
-| Parameter | Default Value | Description |
-|-----------|---------------|-------------|
-| `implementation_style` | `"modular"` | Implementation approach |
-| `include_tests` | `true` | Include test implementation |
-| `code_quality` | `"high"` | Code quality standard |
-
-#### Documentation Agent Task Defaults
-
-| Parameter | Default Value | Description |
-|-----------|---------------|-------------|
-| `include_user_guide` | `true` | Include user guide |
-| `include_api_docs` | `true` | Include API documentation |
-| `include_examples` | `true` | Include examples |
-
-#### Analysis Agent Task Defaults
-
-| Parameter | Default Value | Description |
-|-----------|---------------|-------------|
-| `analysis_depth` | `"comprehensive"` | Analysis detail level |
-| `workflow_type` | Based on workflow | Type of workflow being analyzed |
-| `check_continue` | `true` | Check if workflow should continue |
-
 ## Agent Configuration Defaults
 
 ### Agent Capabilities by Type
 
-| Agent Type | Primary Function | Default Temperature | Memory Enabled |
-|------------|------------------|-------------------|----------------|
-| Research | Information gathering and analysis | 0.5 | true |
-| Planning | Blueprint creation and planning | 0.3 | true |
-| Development | Code implementation | 0.2 | true |
-| Documentation | Documentation creation | 0.7 | true |
-| Analysis | Project analysis and improvement suggestions | 0.3 | true |
+| Agent Type | Primary Function | Memory Enabled | Default Count |
+|------------|------------------|----------------|---------------|
+| Research | Information gathering and analysis | true | 1 |
+| Planning | Blueprint creation and planning | true | 1 |
+| Development | Code implementation | true | 2 |
+| Documentation | Documentation creation | true | 1 |
+| Analysis | Project analysis and improvement | true | 1 |
 
-### Agent Count Defaults
+## Directory Structure Defaults
 
-| Agent Type | Default Count | Configurable |
-|------------|---------------|--------------|
-| Research | 1 | Yes |
-| Planning | 1 | Yes |
-| Development | 2 | Yes |
-| Documentation | 1 | Yes |
-| Analysis | 1 | Yes |
+### Default Project Layout
 
-## File and Directory Defaults
+```
+./project/                 # Main project directory
+├── .swarmdev/            # SwarmDev metadata and configuration
+│   ├── swarmdev_config.json  # Project configuration
+│   ├── mcp_config.json       # MCP tools configuration
+│   ├── logs/                 # Agent execution logs
+│   └── goals/                # Goal storage
+├── src/                  # Source code (if applicable)
+├── docs/                 # Documentation
+├── tests/                # Tests (if applicable)
+└── README.md            # Project README
+```
 
-### Default Directory Structure
-
-| Directory | Purpose | Default Location |
-|-----------|---------|------------------|
-| Project Directory | Main project files | `./project` |
-| Goal Directory | Goal files | `./goals` |
-| Logs Directory | Agent logs | `./logs` |
-| Agent Work Directory | Agent artifacts and analysis | `./agent_work` |
-| Vector Store | Memory embeddings | `./vector_store` |
-
-### Default File Names
-
-| File Type | Default Name | Purpose |
-|-----------|--------------|---------|
-| Goal File | `goal.txt` | Project goal description |
-| Project Metadata | `project_metadata.json` | Project status and metadata |
-| Main Log | `swarmdev.log` | Main application log |
-| Analysis Report | `workflow_analysis.md` | Workflow analysis output |
-
-## Orchestrator Defaults
-
-### Task Management
-
-| Setting | Default Value | Description |
-|---------|---------------|-------------|
-| Task Queue Processing Interval | 0.1 seconds | How often to check task queue |
-| Task Timeout | 30 seconds | Default timeout for agent join operations |
-| Max Concurrent Tasks | Based on agent count | Maximum parallel task execution |
-
-### Execution Tracking
-
-| Setting | Default Value | Description |
-|---------|---------------|-------------|
-| Status Check Interval | 2 seconds | Default refresh rate for status monitoring |
-| Artifact Save | Enabled | Save task artifacts and results |
-| Progress Tracking | Enabled | Track task completion progress |
-
-## Memory System Defaults
-
-### Vector Store Configuration
-
-| Setting | Default Value | Description |
-|---------|---------------|-------------|
-| Vector Store Type | `"chroma"` | Vector database type |
-| Embedding Dimension | Model dependent | Embedding vector size |
-| Cache Size | 10000 | Number of cached embeddings |
-| Persistence | Enabled | Save embeddings to disk |
-
-### Memory Types
-
-| Memory Type | Default State | Description |
-|-------------|---------------|-------------|
-| Working Memory | Enabled | Short-term context |
-| Episodic Memory | Enabled | Task and interaction history |
-| Semantic Memory | Enabled | Knowledge and concepts |
-| Procedural Memory | Enabled | Skills and procedures |
-
-## Logging Defaults
-
-### Log Levels
-
-| Level | Default For | Description |
-|-------|-------------|-------------|
-| DEBUG | Development | Detailed debugging information |
-| INFO | Production | General information messages |
-| WARNING | All | Warning messages |
-| ERROR | All | Error messages |
-
-### Log Configuration
+### Log Configuration Defaults
 
 | Setting | Default Value | Description |
 |---------|---------------|-------------|
 | Console Logging | Enabled | Log to console/stdout |
-| File Logging | Enabled | Log to `swarmdev.log` |
-| Agent Logging | Enabled | Separate logs for each agent |
-| Rotation | Daily | Log file rotation policy |
+| File Logging | Enabled | Log to `.swarmdev/logs/swarmdev.log` |
+| Agent Logging | Enabled | Separate logs per agent type |
+| Log Level | INFO | Default logging level |
+
+## Environment Variable Defaults
+
+### Required Environment Variables
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `OPENAI_API_KEY` | If using OpenAI | OpenAI API key |
+| `ANTHROPIC_API_KEY` | If using Anthropic | Anthropic API key |
+| `GOOGLE_API_KEY` | If using Google | Google API key |
+
+### Optional Environment Variables
+
+| Variable | Default Value | Description |
+|----------|---------------|-------------|
+| `SWARMDEV_LLM_PROVIDER` | `"auto"` | Default LLM provider |
+| `SWARMDEV_PROJECT_DIR` | `"./project"` | Default project directory |
+| `SWARMDEV_LOG_LEVEL` | `"info"` | Default log level |
 
 ## Performance Defaults
 
@@ -260,110 +253,46 @@ SwarmDev can be configured through multiple methods (in order of precedence):
 
 | Setting | Default Value | Description |
 |---------|---------------|-------------|
-| Memory Limit | System dependent | Maximum memory usage |
-| CPU Cores | All available | Number of cores to use |
-| Network Timeout | 60 seconds | Network request timeout |
-| API Rate Limits | Provider dependent | API call rate limiting |
+| API Timeout | 60 seconds | LLM API request timeout |
+| Parallelism | 4 | Maximum parallel tasks |
+| Memory Limit | System dependent | Maximum memory usage per agent |
 
-### Optimization
-
-| Setting | Default Value | Description |
-|---------|---------------|-------------|
-| Parallel Processing | Enabled | Process tasks in parallel |
-| Caching | Enabled | Cache LLM responses and embeddings |
-| Batch Processing | Enabled | Batch similar operations |
-| Resource Monitoring | Enabled | Monitor resource usage |
-
-## Security Defaults
-
-### API Key Management
-
-| Setting | Default Value | Description |
-|---------|---------------|-------------|
-| Environment Variables | Required | API keys from environment only |
-| Key Validation | Enabled | Validate API keys on startup |
-| Key Rotation | Manual | No automatic key rotation |
-
-### File Permissions
-
-| Setting | Default Value | Description |
-|---------|---------------|-------------|
-| Project Files | User read/write | Created files permissions |
-| Log Files | User read/write | Log file permissions |
-| Config Files | User read/write | Configuration file permissions |
-
-## Error Handling Defaults
-
-### Retry Configuration
+### Error Handling Defaults
 
 | Setting | Default Value | Description |
 |---------|---------------|-------------|
 | Max Retry Attempts | 3 | Maximum retry attempts for failed operations |
 | Retry Backoff | Exponential | Backoff strategy for retries |
-| Timeout Handling | Graceful | How to handle timeouts |
-
-### Error Recovery
-
-| Setting | Default Value | Description |
-|---------|---------------|-------------|
 | Graceful Degradation | Enabled | Continue with partial failures |
-| Error Reporting | Enabled | Report errors to logs |
-| Crash Recovery | Enabled | Attempt to recover from crashes |
 
-## Configuration File Format
+## Model-Specific Configuration
 
-### JSON Configuration Example
+### OpenAI Model Families
 
-```json
-{
-  "llm": {
-    "provider": "openai",
-    "model": "gpt-4o",
-    "temperature": 0.7,
-    "max_tokens": 1000
-  },
-  "workflow": {
-    "type": "standard_project",
-    "max_iterations": 3,
-    "parallelism": 4
-  },
-  "agents": {
-    "research": {"count": 1, "temperature": 0.5},
-    "planning": {"count": 1, "temperature": 0.3},
-    "development": {"count": 2, "temperature": 0.2},
-    "documentation": {"count": 1, "temperature": 0.7}
-  }
-}
-```
+#### Standard Chat Models (GPT-4, GPT-3.5)
+- Full parameter support
+- Standard token limits (4000 default)
+- Temperature 0.0-2.0 supported
 
-### YAML Configuration Example
+#### Reasoning Models (o1, o3, o4 series)
+- `max_tokens` → `max_completion_tokens` automatically
+- Temperature fixed at 1.0 (user setting ignored)
+- Higher token defaults (25,000)
+- Limited parameter set
 
-```yaml
-llm:
-  provider: openai
-  model: gpt-4o
-  temperature: 0.7
-  max_tokens: 1000
+### Anthropic Model Families
 
-workflow:
-  type: standard_project
-  max_iterations: 3
-  parallelism: 4
+#### Claude 3 Series
+- Token limits enforced per model (4096 for Claude 3, 8192 for Claude 3.5)
+- Standard parameter set
+- Automatic limit capping
 
-agents:
-  research:
-    count: 1
-    temperature: 0.5
-  planning:
-    count: 1
-    temperature: 0.3
-  development:
-    count: 2
-    temperature: 0.2
-  documentation:
-    count: 1
-    temperature: 0.7
-```
+### Google Model Families
+
+#### Gemini Series
+- `max_tokens` → `max_output_tokens` automatically
+- Google-specific parameters added (`top_k`)
+- Model-appropriate defaults
 
 ## Override Priority
 
@@ -371,5 +300,46 @@ Configuration values are applied in this order (highest to lowest priority):
 
 1. **Command-line arguments** (e.g., `--llm-provider openai`)
 2. **Environment variables** (e.g., `SWARMDEV_LLM_PROVIDER=openai`)
-3. **Configuration file values** (JSON/YAML files)
-4. **Built-in defaults** (documented above) 
+3. **Configuration file values** (JSON files)
+4. **Model-aware defaults** (based on selected model)
+5. **Built-in system defaults** (documented above)
+
+## Migration from Legacy Configuration
+
+### Deprecated Settings
+
+The following settings are no longer needed with the model-aware system:
+
+- Agent-specific `model` settings (inherited from main LLM config)
+- Agent-specific `temperature` settings (optimized automatically)
+- Model-specific parameter configurations (handled automatically)
+- YAML configuration files (JSON only now)
+
+### Migration Example
+
+**Old Configuration:**
+```json
+{
+  "agents": {
+    "research": {"count": 1, "model": "gpt-4o", "temperature": 0.5},
+    "development": {"count": 2, "model": "gpt-4o", "temperature": 0.2}
+  }
+}
+```
+
+**New Configuration:**
+```json
+{
+  "llm": {
+    "provider": "openai",
+    "model": "gpt-4o",
+    "temperature": 0.7
+  },
+  "agents": {
+    "research": {"count": 1},
+    "development": {"count": 2}
+  }
+}
+```
+
+The system automatically handles agent optimization based on the main LLM configuration. 

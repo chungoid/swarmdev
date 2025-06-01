@@ -354,6 +354,14 @@ def cmd_build(args):
     # Start with file config, then override with CLI args
     merged_config = file_config.copy()
     
+    # Extract LLM settings from file config first
+    if "llm" in file_config:
+        llm_config = file_config["llm"]
+        if "provider" in llm_config:
+            merged_config["llm_provider"] = llm_config["provider"]
+        if "model" in llm_config:
+            merged_config["llm_model"] = llm_config["model"]
+    
     # CLI arguments override file config
     cli_config = {
         "max_runtime": args.max_runtime,
@@ -365,24 +373,12 @@ def cmd_build(args):
     # Only override llm settings if explicitly provided in CLI
     if args.llm_provider != 'auto':  # CLI default is 'auto'
         cli_config["llm_provider"] = args.llm_provider
-    elif "llm" not in merged_config:
-        cli_config["llm_provider"] = args.llm_provider
     
     if args.llm_model:  # CLI default is None
-        cli_config["llm_model"] = args.llm_model
-    elif "llm" not in merged_config:
         cli_config["llm_model"] = args.llm_model
     
     # Update merged config with CLI overrides
     merged_config.update(cli_config)
-    
-    # If we have llm config from file, extract it properly
-    if "llm" in file_config:
-        llm_config = file_config["llm"]
-        if "llm_provider" not in merged_config and "provider" in llm_config:
-            merged_config["llm_provider"] = llm_config["provider"]
-        if "llm_model" not in merged_config and "model" in llm_config:
-            merged_config["llm_model"] = llm_config["model"]
     
     logger.info(f"Final config - LLM Provider: {merged_config.get('llm_provider', 'auto')}, LLM Model: {merged_config.get('llm_model', 'default')}")
     

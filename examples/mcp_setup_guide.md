@@ -1,6 +1,6 @@
 # MCP (Model Context Protocol) Setup Guide
 
-This guide shows you how to configure external MCP servers to extend your SwarmDev agents' capabilities.
+This guide shows you how to configure external MCP servers to extend your SwarmDev agents' capabilities with the model-aware configuration system.
 
 ## What are MCP Servers?
 
@@ -14,22 +14,28 @@ First, ensure you have the MCP server Docker images available:
 
 ```bash
 # Pull the sequential thinking MCP server
-docker pull mcp/sequentialthinking
+docker pull sequential-thinking:latest
 
 # Pull the Context7 MCP server  
-docker pull context7-mcp
+docker pull context7-mcp:latest
 ```
 
-### 2. Copy Example Configuration Files
+### 2. Copy Configuration Files to Project
 
-Copy the example configuration files to your project:
+Create your project directory and copy configuration files:
 
 ```bash
+# Create project directory
+mkdir my_project && cd my_project
+
+# Create .swarmdev directory
+mkdir -p .swarmdev
+
 # Copy the main SwarmDev config
-cp examples/swarmdev_config.json ./swarmdev.json
+cp examples/swarmdev_config.json .swarmdev/swarmdev_config.json
 
 # Copy the MCP configuration
-cp examples/mcp_config.json ./mcp_config.json
+cp examples/mcp_config.json .swarmdev/mcp_config.json
 ```
 
 ### 3. Update Your Environment
@@ -40,66 +46,71 @@ Set any required environment variables:
 # For Context7 (if API key required)
 export CONTEXT7_API_KEY="your-api-key-if-needed"
 
-# Ensure Docker network exists
-docker network create swarmdev
+# Set your LLM provider API key
+export OPENAI_API_KEY="your-openai-key"  # or ANTHROPIC_API_KEY, GOOGLE_API_KEY
 ```
 
 ## Configuration Files Explained
 
-### Main Configuration (`swarmdev.json`)
+### Main Configuration (`.swarmdev/swarmdev_config.json`)
 
-The main configuration enables MCP tools and points to the MCP config file:
+The model-aware configuration automatically enables MCP tools:
 
 ```json
 {
+  "llm": {
+    "provider": "openai",
+    "model": "gpt-4o", 
+    "temperature": 0.7,
+    "max_tokens": 4000
+  },
   "mcp": {
     "enabled": true,
-    "config_file": "./mcp_config.json",
+    "config_file": "./.swarmdev/mcp_config.json",
     "docker_enabled": true,
     "docker_network": null
   }
 }
 ```
 
-### MCP Configuration (`mcp_config.json`)
+**Works with any LLM provider** - the same MCP configuration works whether you use OpenAI, Anthropic, or Google models.
+
+### MCP Configuration (`.swarmdev/mcp_config.json`)
 
 This file defines how to connect to each MCP server:
 
 ```json
 {
-  "enabled": true,
-  "docker_enabled": true,
-  "docker_network": null,
-  "global_timeout": 120,
-  "persistent_connections": true,
   "servers": {
-    "sequentialthinking": {
+    "sequential_thinking": {
       "command": "docker",
-      "args": ["run", "--rm", "-i", "mcp/sequentialthinking"],
-      "capabilities": ["reasoning"],
-      "timeout": 60,
-      "name": "sequentialthinking"
+      "args": ["run", "--rm", "-p", "8000:8000", "sequential-thinking:latest"],
+      "capabilities": ["reasoning", "planning"]
     },
     "context7": {
-      "command": "docker",
-      "args": ["run", "-i", "--rm", "context7-mcp"],
-      "capabilities": ["documentation"],
-      "timeout": 60,
-      "name": "context7"
+      "command": "mcp-context7",
+      "args": ["--api-key", "${CONTEXT7_API_KEY}"],
+      "capabilities": ["documentation", "reasoning"]
     }
   }
 }
 ```
 
-## Using MCP Tools in Your Workflow
+## Using MCP Tools with Model-Aware System
 
 ### Sequential Thinking Server
 
-The sequential thinking server helps agents with complex reasoning tasks:
+Works automatically with any LLM model for complex reasoning:
 
 ```bash
-# When building projects that require complex planning
-swarmdev build --goal complex_project.txt --workflow standard_project
+# With OpenAI o1 models (reasoning model aware)
+swarmdev build --goal complex_project.txt --llm-provider openai --llm-model o1-mini
+
+# With Anthropic Claude (standard chat model)  
+swarmdev build --goal complex_project.txt --llm-provider anthropic --llm-model claude-3-5-sonnet-20241022
+
+# With Google Gemini (multimodal support)
+swarmdev build --goal complex_project.txt --llm-provider google --llm-model gemini-2.0-flash-001
 ```
 
 Your agents will automatically use sequential thinking for:
@@ -110,10 +121,10 @@ Your agents will automatically use sequential thinking for:
 
 ### Context7 Server
 
-The Context7 server provides advanced context management:
+Provides advanced documentation and context management regardless of LLM provider:
 
 ```bash
-# For projects requiring extensive documentation or library research
+# For projects requiring extensive research (any provider)
 swarmdev build --goal research_project.txt --workflow research_only
 ```
 
@@ -122,6 +133,25 @@ Your agents will use Context7 for:
 - Managing project context across tasks
 - Generating comprehensive documentation
 - Reasoning about code relationships
+
+## Model-Aware MCP Integration
+
+The model-aware system automatically optimizes MCP tool usage based on your chosen LLM:
+
+### With Reasoning Models (o1, o3, o4 series)
+- Temperature restrictions handled automatically
+- Higher token limits for complex reasoning
+- MCP tools complement built-in reasoning capabilities
+
+### With Standard Chat Models (GPT-4, Claude, Gemini)
+- Full parameter support
+- MCP tools provide enhanced reasoning capabilities
+- Optimal balance between local and external reasoning
+
+### With Multimodal Models
+- Vision capabilities detected automatically
+- MCP tools provide text-based reasoning support
+- Extended context windows utilized appropriately
 
 ## Advanced Configuration
 
@@ -133,15 +163,14 @@ Create isolated networks for different projects:
 # Create project-specific network
 docker network create my-project-swarmdev
 
-# Update mcp_config.json
+# Update .swarmdev/mcp_config.json
 {
-  "enabled": true,
-  "docker_enabled": true,
-  "docker_network": "my-project-swarmdev",
-  "global_timeout": 120,
-  "persistent_connections": true,
   "servers": {
-    // ... your servers here
+    "sequential_thinking": {
+      "command": "docker",
+      "args": ["run", "--rm", "--network", "my-project-swarmdev", "-p", "8000:8000", "sequential-thinking:latest"],
+      "capabilities": ["reasoning", "planning"]
+    }
   }
 }
 ```
@@ -152,31 +181,67 @@ Control Docker resource usage:
 
 ```json
 {
-  "enabled": true,
-  "docker_enabled": true,
-  "docker_network": null,
-  "global_timeout": 180,
-  "persistent_connections": true,
   "servers": {
-    // ... your servers with custom resource limits can be configured via Docker args
+    "sequential_thinking": {
+      "command": "docker",
+      "args": [
+        "run", "--rm", 
+        "--memory", "2g",
+        "--cpus", "1.0",
+        "-p", "8000:8000", 
+        "sequential-thinking:latest"
+      ],
+      "capabilities": ["reasoning", "planning"]
+    }
+  }
+}
+```
+
+### Provider-Specific Optimizations
+
+Configure different MCP tool usage based on LLM provider:
+
+```json
+{
+  "llm": {
+    "provider": "openai",
+    "model": "o1-mini"
+  },
+  "mcp": {
+    "enabled": true,
+    "config_file": "./.swarmdev/mcp_config.json",
+    "provider_optimizations": {
+      "reasoning_models": {
+        "prefer_external_reasoning": false,
+        "use_for_planning": true
+      },
+      "chat_models": {
+        "prefer_external_reasoning": true,
+        "use_for_planning": true
+      }
+    }
   }
 }
 ```
 
 ### Disabling Specific Tools
 
-You can disable specific tools by setting `"disabled": true` in the MCP config:
+You can disable specific tools while keeping others enabled:
 
 ```json
 {
   "servers": {
-    "sequentialthinking": {
+    "sequential_thinking": {
       "command": "docker",
-      "args": ["run", "--rm", "-i", "mcp/sequentialthinking"],
-      "capabilities": ["reasoning"],
-      "timeout": 60,
-      "name": "sequentialthinking",
-      "disabled": true
+      "args": ["run", "--rm", "-p", "8000:8000", "sequential-thinking:latest"],
+      "capabilities": ["reasoning", "planning"],
+      "enabled": false
+    },
+    "context7": {
+      "command": "mcp-context7",
+      "args": ["--api-key", "${CONTEXT7_API_KEY}"],
+      "capabilities": ["documentation", "reasoning"],
+      "enabled": true
     }
   }
 }
@@ -191,10 +256,22 @@ You can disable specific tools by setting `"disabled": true` in the MCP config:
 docker info
 
 # Verify images are available
-docker images | grep -E "(mcp/sequentialthinking|context7-mcp)"
+docker images | grep -E "(sequential-thinking|context7-mcp)"
 
 # Test MCP server manually
-docker run --rm -i mcp/sequentialthinking
+docker run --rm sequential-thinking:latest --version
+```
+
+### Configuration Issues
+
+```bash
+# Check config file locations
+ls .swarmdev/swarmdev_config.json
+ls .swarmdev/mcp_config.json
+
+# Validate JSON syntax
+jq . .swarmdev/swarmdev_config.json
+jq . .swarmdev/mcp_config.json
 ```
 
 ### Network Issues
@@ -203,30 +280,43 @@ docker run --rm -i mcp/sequentialthinking
 # Check network exists
 docker network ls | grep swarmdev
 
-# Recreate network if needed
-docker network rm swarmdev
+# Create network if needed
 docker network create swarmdev
+
+# Test container network connectivity
+docker run --rm --network swarmdev alpine ping -c 1 google.com
 ```
 
-### Permission Issues
+### Model-Aware System Issues
 
 ```bash
-# Ensure user can run Docker
-sudo usermod -aG docker $USER
-# Then logout and login again
+# Verify model-aware parameter handling
+swarmdev build --goal test.txt --llm-provider openai --llm-model o1-mini --project-dir test_project
+
+# Check if MCP tools are being called appropriately
+tail -f test_project/.swarmdev/logs/swarmdev.log | grep -i mcp
 ```
 
 ## Monitoring MCP Tools
 
-### Enable Logging
+### Enable Detailed Logging
 
-Set detailed logging in your configuration:
+Set up comprehensive logging in your project:
 
 ```json
 {
-  "mcpSettings": {
-    "logLevel": "debug",
-    "enableMetrics": true
+  "llm": {
+    "provider": "openai",
+    "model": "gpt-4o"
+  },
+  "mcp": {
+    "enabled": true,
+    "config_file": "./.swarmdev/mcp_config.json",
+    "logging": {
+      "level": "debug",
+      "enable_metrics": true,
+      "log_tool_usage": true
+    }
   }
 }
 ```
@@ -236,40 +326,67 @@ Set detailed logging in your configuration:
 Monitor which tools your agents are using:
 
 ```bash
-# Watch SwarmDev logs
-tail -f swarmdev.log | grep -i mcp
+# Watch MCP usage in real-time
+tail -f .swarmdev/logs/swarmdev.log | grep -i mcp
 
-# Check specific agent logs
-tail -f logs/development_agent.log | grep -i "sequential\|context7"
+# Check agent-specific MCP usage
+tail -f .swarmdev/logs/*_agent.log | grep -i "sequential_thinking\|context7"
+
+# Monitor with status command
+swarmdev status --project-id <project-id> --detailed --logs
 ```
 
 ## Example Workflow with MCP Tools
 
-Here's a complete example of using SwarmDev with MCP tools:
+Here's a complete example using the model-aware system with MCP tools:
 
 ```bash
-# 1. Set up configuration
-cp examples/swarmdev_config.json ./swarmdev.json
-cp examples/mcp_config.json ./mcp_config.json
+# 1. Set up project with configuration
+mkdir dashboard_project && cd dashboard_project
+mkdir -p .swarmdev
+cp examples/swarmdev_config.json .swarmdev/
+cp examples/mcp_config.json .swarmdev/
 
 # 2. Create goal file
 echo "Create a React dashboard with user authentication, data visualization charts, and real-time updates. Include comprehensive documentation and testing." > goal.txt
 
-# 3. Start build with MCP tools enabled
-swarmdev build --goal goal.txt --workflow standard_project --project-dir ./dashboard
+# 3. Build with model-aware optimization and MCP tools
+swarmdev build --goal goal.txt --workflow standard_project --project-dir ./dashboard_project
 
-# 4. Monitor progress (agents will use MCP tools automatically)
+# 4. Monitor progress (agents use MCP tools automatically with any LLM)
 swarmdev status --project-id <project-id> --watch --detailed
 ```
 
 Your agents will automatically leverage:
+- **Model-aware parameter optimization** for your chosen LLM
 - **Sequential thinking** for complex architecture planning
 - **Context7** for React library documentation and best practices
-- Enhanced reasoning capabilities throughout the development process
+- **Enhanced reasoning capabilities** throughout the development process
+
+## Provider-Specific Examples
+
+### OpenAI with o1 (Reasoning Model)
+```bash
+swarmdev build --goal goal.txt --llm-provider openai --llm-model o1-mini
+# MCP tools complement built-in reasoning, temperature automatically set to 1.0
+```
+
+### Anthropic Claude
+```bash  
+swarmdev build --goal goal.txt --llm-provider anthropic --llm-model claude-3-5-sonnet-20241022
+# MCP tools provide enhanced reasoning, token limits automatically enforced
+```
+
+### Google Gemini
+```bash
+swarmdev build --goal goal.txt --llm-provider google --llm-model gemini-2.0-flash-001
+# MCP tools work with multimodal capabilities, parameters automatically translated
+```
 
 ## Next Steps
 
-- Explore creating custom MCP servers for domain-specific tools
-- Configure additional MCP servers from the community
-- Set up monitoring and metrics for MCP tool performance
-- Experiment with different tool combinations for various project types 
+- **Experiment with different LLM providers** using the same MCP configuration
+- **Monitor MCP tool efficiency** with different model families
+- **Configure provider-specific optimizations** for your workflow needs
+- **Explore creating custom MCP servers** for domain-specific tools
+- **Set up monitoring and metrics** for MCP tool performance across different models 

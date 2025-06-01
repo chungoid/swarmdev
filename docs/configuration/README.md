@@ -8,17 +8,26 @@ The SwarmDev platform can be configured using the following methods, listed in o
 
 1. **Command-line Arguments**: Passed directly to the CLI commands
 2. **Environment Variables**: Set in the shell or through a `.env` file
-3. **Configuration Files**: JSON or YAML files with detailed settings
+3. **Configuration Files**: JSON files with detailed settings
 4. **Default Values**: Built-in defaults for all settings
 
 ## Configuration Files
 
-SwarmDev supports configuration through JSON or YAML files. By default, the platform looks for configuration in the following locations:
+SwarmDev supports configuration through JSON files. The platform looks for configuration in the following locations:
 
 1. Path specified by the `--config` command-line argument
-2. Path specified by the `SWARMDEV_CONFIG_FILE` environment variable
-3. `./swarmdev.json` or `./swarmdev.yaml` in the current directory
-4. `~/.swarmdev/config.json` or `~/.swarmdev/config.yaml` in the user's home directory
+2. `.swarmdev/swarmdev_config.json` in the project directory (primary location)
+3. `./swarmdev_config.json` in the current directory (fallback)
+
+## Model-Aware Configuration System
+
+SwarmDev uses an intelligent **model-aware configuration system** that automatically translates parameters based on the specific LLM model being used. This eliminates the need to manage different parameter sets for different models.
+
+### Key Benefits:
+- **Unified Configuration**: The same config works across all LLM providers and models
+- **Automatic Parameter Translation**: `max_tokens` becomes `max_completion_tokens` for o1 models, `max_output_tokens` for Gemini, etc.
+- **Model-Specific Constraints**: Temperature restrictions for reasoning models (o1, o3, o4 series) are automatically handled
+- **Optimal Defaults**: Each model gets appropriate token limits and parameter settings
 
 Example configuration file (JSON):
 
@@ -28,33 +37,29 @@ Example configuration file (JSON):
     "provider": "openai",
     "model": "gpt-4o",
     "temperature": 0.7,
-    "max_tokens": 1000000
+    "max_tokens": 4000
   },
   "project": {
     "project_dir": "./projects",
     "goal_dir": "./goals",
-    "max_runtime": 86400
+    "max_runtime": 7200
   },
   "agents": {
     "research": {
       "count": 1,
-      "model": "gpt-4o",
-      "temperature": 0.5
+      "memory_enabled": true
     },
     "planning": {
       "count": 1,
-      "model": "gpt-4o",
-      "temperature": 0.3
+      "memory_enabled": true
     },
     "development": {
       "count": 2,
-      "model": "gpt-4o",
-      "temperature": 0.2
+      "memory_enabled": true
     },
     "documentation": {
       "count": 1,
-      "model": "gpt-4o",
-      "temperature": 0.7
+      "memory_enabled": true
     }
   },
   "memory": {
@@ -67,132 +72,90 @@ Example configuration file (JSON):
     "timeout": 3600,
     "retry_attempts": 3
   },
+  "mcp": {
+    "enabled": true,
+    "config_file": "./mcp_config.json",
+    "docker_enabled": true,
+    "docker_network": null
+  },
   "optimization": {
     "enabled": true,
     "objective": "balanced",
     "monitor_interval": 60,
     "adaptation_interval": 3600
-  },
-  "mcp_tools": {
-    "enabled": true,
-    "docker_enabled": true,
-    "tools": [
-      {
-        "id": "sequential_thinking",
-        "type": "docker",
-        "image": "sequential-thinking:latest",
-        "port": 8000,
-        "capabilities": ["reasoning", "planning"]
-      },
-      {
-        "id": "context7",
-        "type": "api",
-        "url": "https://api.context7.com",
-        "capabilities": ["context_management", "reasoning"]
-      }
-    ]
   }
 }
 ```
 
-Example configuration file (YAML):
+## Provider-Specific Examples
 
-```yaml
-llm:
-  provider: openai
-  model: gpt-4o
-  temperature: 0.7
-  max_tokens: 1000000
-
-project:
-  project_dir: ./projects
-  goal_dir: ./goals
-  max_runtime: 86400
-
-agents:
-  research:
-    count: 1
-    model: gpt-4o
-    temperature: 0.5
-  planning:
-    count: 1
-    model: gpt-4o
-    temperature: 0.3
-  development:
-    count: 2
-    model: gpt-4o
-    temperature: 0.2
-  documentation:
-    count: 1
-    model: gpt-4o
-    temperature: 0.7
-
-memory:
-  vector_store: chroma
-  vector_store_path: ./vector_store
-  embedding_model: text-embedding-3-small
-
-workflow:
-  parallelism: 4
-  timeout: 3600
-  retry_attempts: 3
-
-optimization:
-  enabled: true
-  objective: balanced
-  monitor_interval: 60
-  adaptation_interval: 3600
-
-mcp_tools:
-  enabled: true
-  docker_enabled: true
-  tools:
-    - id: sequential_thinking
-      type: docker
-      image: sequential-thinking:latest
-      port: 8000
-      capabilities: [reasoning, planning]
-    - id: context7
-      type: api
-      url: https://api.context7.com
-      capabilities: [context_management, reasoning]
+### OpenAI o1 (Reasoning Models)
+```json
+{
+  "llm": {
+    "provider": "openai",
+    "model": "o1-mini",
+    "temperature": 0.7,
+    "max_tokens": 25000
+  }
+}
 ```
+**Automatic Translation:**
+- `temperature` is ignored (o1 models only support 1.0)
+- `max_tokens` becomes `max_completion_tokens`
+- Default raised to 25,000 for reasoning tasks
+
+### Anthropic Claude
+```json
+{
+  "llm": {
+    "provider": "anthropic",
+    "model": "claude-3-5-sonnet-20241022",
+    "temperature": 0.7,
+    "max_tokens": 6000
+  }
+}
+```
+**Automatic Translation:**
+- Automatically capped at model limits (8192 for Claude 3.5)
+- Standard parameter set maintained
+
+### Google Gemini
+```json
+{
+  "llm": {
+    "provider": "google",
+    "model": "gemini-2.0-flash-001",
+    "temperature": 0.7,
+    "max_tokens": 5000
+  }
+}
+```
+**Automatic Translation:**
+- `max_tokens` becomes `max_output_tokens`
+- Google-specific parameters (`top_k`) added automatically
 
 ## Environment Variables
 
-For a complete list of supported environment variables, see the [Environment Variables Reference](./environment_variables.md).
-
-Key environment variables include:
+Key environment variables for LLM providers:
 
 ```bash
+# API Keys (required)
+export OPENAI_API_KEY="your-openai-key"
+export ANTHROPIC_API_KEY="your-anthropic-key"
+export GOOGLE_API_KEY="your-google-key"
+
+# Default LLM settings
+export SWARMDEV_LLM_PROVIDER="auto"
+export SWARMDEV_LLM_MODEL="gpt-4o"
+
 # Core settings
 export SWARMDEV_PROJECT_DIR="./projects"
-export SWARMDEV_GOAL_FILE="./goal.txt"
 export SWARMDEV_LOG_LEVEL="info"
-
-# LLM provider settings
-export OPENAI_API_KEY="your-api-key"
-export SWARMDEV_LLM_PROVIDER="openai"
-export SWARMDEV_LLM_MODEL="gpt-4o"
-export SWARMDEV_LLM_TEMPERATURE="0.7"
-
-# Agent settings
-export SWARMDEV_AGENT_RESEARCH_COUNT="1"
-export SWARMDEV_AGENT_PLANNING_COUNT="1"
-export SWARMDEV_AGENT_DEVELOPMENT_COUNT="2"
-export SWARMDEV_AGENT_DOCUMENTATION_COUNT="1"
-
-# Memory settings
-export SWARMDEV_MEMORY_VECTOR_STORE="chroma"
-export SWARMDEV_MEMORY_VECTOR_STORE_PATH="./vector_store"
 
 # Workflow settings
 export SWARMDEV_WORKFLOW_PARALLELISM="4"
 export SWARMDEV_WORKFLOW_TIMEOUT="3600"
-
-# Optimization settings
-export SWARMDEV_OPTIMIZATION_ENABLED="true"
-export SWARMDEV_OPTIMIZATION_OBJECTIVE="balanced"
 ```
 
 ## Command-line Arguments
@@ -200,20 +163,17 @@ export SWARMDEV_OPTIMIZATION_OBJECTIVE="balanced"
 The SwarmDev CLI supports various command-line arguments for different commands:
 
 ```bash
-# Refine a goal through conversation
-swarmdev refine --output goal.txt
-
 # Build a project from a goal
-swarmdev build --goal-file goal.txt --project-dir ./project
+swarmdev build --goal goal.txt --project-dir ./project
+
+# Use specific provider and model
+swarmdev build --goal goal.txt --llm-provider openai --llm-model o1-mini
 
 # Check the status of a project
 swarmdev status --project-id project_123456
 
 # List available workflows
-swarmdev workflows list
-
-# Execute a specific workflow
-swarmdev workflows execute --workflow-id standard_project --goal-file goal.txt
+swarmdev workflows --verbose
 ```
 
 Common arguments across all commands:
@@ -230,7 +190,7 @@ Common arguments across all commands:
 
 ### LLM Provider Configuration
 
-Configure which LLM providers to use and their settings:
+Configure which LLM providers to use with model-aware parameter handling:
 
 ```json
 {
@@ -238,53 +198,46 @@ Configure which LLM providers to use and their settings:
     "provider": "openai",
     "model": "gpt-4o",
     "temperature": 0.7,
-    "max_tokens": 1000000,
-    "top_p": 1.0,
-    "frequency_penalty": 0.0,
-    "presence_penalty": 0.0,
-    "timeout": 60,
-    "retry_attempts": 3,
-    "plugins_dir": "./llm_plugins",
-    "fallback_provider": "anthropic",
-    "fallback_model": "claude-3-opus-20240229"
+    "max_tokens": 4000,
+    "timeout": 60
   }
 }
 ```
 
+**Model-Aware Features:**
+- Automatic parameter translation for each model family
+- Reasoning model constraint handling (o1, o3, o4 series)
+- Provider-specific optimization (Gemini `top_k`, Claude limits)
+- Fallback to compatible parameters when needed
+
 ### Agent Configuration
 
-Configure the agents used in the swarm:
+Agents now inherit LLM settings from the main configuration with automatic optimization:
 
 ```json
 {
   "agents": {
     "research": {
       "count": 1,
-      "model": "gpt-4o",
-      "temperature": 0.5,
       "memory_enabled": true
     },
     "planning": {
       "count": 1,
-      "model": "gpt-4o",
-      "temperature": 0.3,
       "memory_enabled": true
     },
     "development": {
       "count": 2,
-      "model": "gpt-4o",
-      "temperature": 0.2,
       "memory_enabled": true
     },
     "documentation": {
       "count": 1,
-      "model": "gpt-4o",
-      "temperature": 0.7,
       "memory_enabled": true
     }
   }
 }
 ```
+
+**Note:** Agent-specific model and temperature configurations are no longer needed. All agents use the main LLM configuration with model-aware parameter optimization.
 
 ### Memory Configuration
 
@@ -298,16 +251,7 @@ Configure the vector memory system:
     "vector_store_path": "./vector_store",
     "embedding_model": "text-embedding-3-small",
     "cache_enabled": true,
-    "cache_size": 10000,
-    "working_memory_limit": 100,
-    "episodic_enabled": true,
-    "semantic_enabled": true,
-    "procedural_enabled": true,
-    "consolidation_threshold": 0.8,
-    "mmr_lambda": 0.7,
-    "persistence_enabled": true,
-    "backup_enabled": true,
-    "backup_interval": 3600
+    "working_memory_limit": 100
   }
 }
 ```
@@ -323,44 +267,41 @@ Configure workflow execution:
     "timeout": 3600,
     "retry_attempts": 3,
     "retry_backoff": 2.0,
-    "checkpoint_interval": 300,
-    "notification_enabled": true,
-    "notification_interval": 600
+    "checkpoint_interval": 300
   }
 }
 ```
 
-### MCP Tool Configuration
+### MCP Configuration
 
 Configure Multi-Context Processing tools:
 
 ```json
 {
-  "mcp_tools": {
+  "mcp": {
     "enabled": true,
-    "config_dirs": ["./mcp_tools"],
+    "config_file": "./mcp_config.json",
     "docker_enabled": true,
-    "docker_network": "swarmdev",
-    "docker_memory_limit": "2g",
-    "docker_cpu_limit": 1,
-    "tools": [
-      {
-        "id": "sequential_thinking",
-        "type": "docker",
-        "image": "sequential-thinking:latest",
-        "port": 8000,
-        "capabilities": ["reasoning", "planning"],
-        "enabled": true
-      },
-      {
-        "id": "context7",
-        "type": "api",
-        "url": "https://api.context7.com",
-        "api_key": "${CONTEXT7_API_KEY}",
-        "capabilities": ["context_management", "reasoning"],
-        "enabled": true
-      }
-    ]
+    "docker_network": null
+  }
+}
+```
+
+The MCP tools are configured in a separate `mcp_config.json` file:
+
+```json
+{
+  "servers": {
+    "sequential_thinking": {
+      "command": "docker",
+      "args": ["run", "--rm", "-p", "8000:8000", "sequential-thinking:latest"],
+      "capabilities": ["reasoning", "planning"]
+    },
+    "context7": {
+      "command": "mcp-context7",
+      "args": ["--api-key", "${CONTEXT7_API_KEY}"],
+      "capabilities": ["documentation", "reasoning"]
+    }
   }
 }
 ```
@@ -375,57 +316,57 @@ Configure self-optimization:
     "enabled": true,
     "objective": "balanced",
     "monitor_interval": 60,
-    "adaptation_interval": 3600,
-    "human_approval_required": true,
-    "metrics_retention": 604800,
-    "policies": [
-      "llm_parameter_tuning",
-      "agent_allocation",
-      "workflow_optimization",
-      "resource_scaling"
-    ]
+    "adaptation_interval": 3600
   }
 }
 ```
 
 ## Configuration Best Practices
 
-1. **Use Environment Variables for Secrets**: Never store API keys or other secrets in configuration files. Use environment variables instead.
+1. **Use Environment Variables for Secrets**: Never store API keys in configuration files. Use environment variables instead.
 
-2. **Start with Defaults**: The platform comes with sensible defaults. Only override settings that you need to change.
+2. **Leverage Model-Aware System**: Don't specify model-specific parameters manually. Let the system handle parameter translation automatically.
 
-3. **Use Configuration Files for Complex Settings**: For complex configurations, use a configuration file rather than environment variables.
+3. **Start with Defaults**: The platform comes with sensible defaults. Only override settings you need to change.
 
-4. **Version Control Configuration**: Keep your configuration files in version control, but exclude files with secrets.
+4. **Use Simple Configurations**: With the model-aware system, you can use the same configuration across all providers and models.
 
-5. **Use Environment-Specific Configurations**: Create different configuration files for development, testing, and production environments.
+5. **Configure by Provider**: When switching providers, only change the `provider` and `model` fields. All other parameters work automatically.
 
-6. **Validate Configuration**: Always validate your configuration before deploying to production.
+6. **Monitor Resource Usage**: Pay attention to resource usage, especially when configuring parallelism and agent counts.
 
-7. **Monitor Resource Usage**: Pay attention to resource usage, especially when configuring parallelism and agent counts.
+## Model-Specific Constraints
 
-8. **Start Small**: Begin with a minimal configuration and add complexity as needed.
+### Reasoning Models (o1, o3, o4 series)
+- **Temperature**: Only supports 1.0 (user setting ignored to prevent errors)
+- **Parameters**: Many standard parameters not supported (automatically excluded)
+- **Token Limits**: Much higher defaults (25,000+) for reasoning tasks
+
+### Standard Chat Models (GPT-4, Claude, etc.)
+- **Full Parameter Support**: All standard parameters available
+- **Model-Specific Limits**: Automatically enforced (Claude 3.5: 8192 tokens, etc.)
+
+### Multimodal Models
+- **Vision Capabilities**: Automatically detected and enabled
+- **Extended Context**: Large context windows utilized appropriately
 
 ## Troubleshooting
 
 Common configuration issues and solutions:
 
-1. **API Key Issues**: Ensure that API keys are correctly set in environment variables.
+1. **API Key Issues**: Ensure API keys are set as environment variables, not in config files.
 
-2. **Path Issues**: Ensure that all paths in the configuration are absolute or relative to the current working directory.
+2. **Model Parameter Errors**: With model-aware system, parameter conflicts are automatically resolved. If issues persist, check model availability.
 
-3. **Permission Issues**: Ensure that the user running the platform has permission to access all specified directories.
+3. **Configuration File Location**: Ensure config is in `.swarmdev/swarmdev_config.json` within your project directory.
 
-4. **Resource Constraints**: If the platform is running slowly, check resource usage and consider reducing parallelism or agent counts.
+4. **MCP Configuration**: MCP tools require a separate `mcp_config.json` file. Check that Docker is available for Docker-based tools.
 
-5. **Docker Issues**: If using Docker-based MCP tools, ensure that Docker is installed and running, and that the user has permission to use Docker.
-
-6. **Network Issues**: If using API-based MCP tools, ensure that the network allows connections to the specified URLs.
-
-7. **Configuration Precedence**: Remember that command-line arguments override environment variables, which override configuration files.
+5. **Provider-Specific Issues**: Use `--llm-provider auto` to let the system auto-detect available providers.
 
 ## Further Reading
 
+- [Model-Aware Configuration Details](../MODEL_AWARE_CONFIG.md)
 - [Environment Variables Reference](./environment_variables.md)
-- [API Documentation](../api/README.md)
+- [CLI Reference](../cli/README.md)
 - [Architecture Documentation](../architecture/README.md)

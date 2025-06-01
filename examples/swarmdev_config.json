@@ -1,42 +1,67 @@
 {
+  "_comment": "SwarmDev Configuration - Model-Aware System",
+  "_info": "The same configuration works across all LLM providers and models. Parameters are automatically translated based on the specific model chosen.",
+  
   "llm": {
+    "_comment": "LLM configuration - automatically optimized for each model family",
     "provider": "openai",
     "model": "gpt-4o",
     "temperature": 0.7,
     "max_tokens": 4000,
-    "timeout": 60
+    "timeout": 60,
+    "_examples": {
+      "_comment": "Example configurations for different providers",
+      "openai_reasoning": {
+        "provider": "openai",
+        "model": "o1-mini",
+        "temperature": 0.7,
+        "max_tokens": 25000,
+        "_note": "Temperature ignored for reasoning models (o1, o3, o4) - only supports 1.0. max_tokens becomes max_completion_tokens automatically."
+      },
+      "anthropic": {
+        "provider": "anthropic", 
+        "model": "claude-3-5-sonnet-20241022",
+        "temperature": 0.7,
+        "max_tokens": 6000,
+        "_note": "Automatically capped at model limits (8192 for Claude 3.5)"
+      },
+      "google": {
+        "provider": "google",
+        "model": "gemini-2.0-flash-001", 
+        "temperature": 0.7,
+        "max_tokens": 5000,
+        "_note": "max_tokens becomes max_output_tokens automatically"
+      }
+    }
   },
+  
   "project": {
     "project_dir": "./projects",
     "goal_dir": "./goals",
     "max_runtime": 7200
   },
+  
   "agents": {
+    "_comment": "Agent configuration - model settings inherited from main LLM config with model-aware optimization",
     "research": {
       "count": 1,
-      "model": "gpt-4o",
-      "temperature": 0.5,
-      "memory_enabled": true
+      "memory_enabled": true,
+      "_note": "Uses main LLM config with automatic parameter optimization"
     },
     "planning": {
       "count": 1,
-      "model": "gpt-4o",
-      "temperature": 0.3,
       "memory_enabled": true
     },
     "development": {
       "count": 2,
-      "model": "gpt-4o",
-      "temperature": 0.2,
       "memory_enabled": true
     },
     "documentation": {
       "count": 1,
-      "model": "gpt-4o",
-      "temperature": 0.7,
       "memory_enabled": true
     }
   },
+  
   "memory": {
     "enabled": true,
     "vector_store": "chroma",
@@ -45,18 +70,21 @@
     "cache_enabled": true,
     "working_memory_limit": 100
   },
+  
   "workflow": {
     "parallelism": 4,
     "timeout": 3600,
     "retry_attempts": 3,
     "checkpoint_interval": 300
   },
+  
   "mcp": {
     "enabled": true,
     "config_file": "./mcp_config.json",
     "docker_enabled": true,
     "docker_network": null
   },
+  
   "optimization": {
     "enabled": true,
     "objective": "balanced",
