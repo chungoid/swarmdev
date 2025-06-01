@@ -76,6 +76,7 @@ def setup_parser():
     assistant_parser.add_argument('--llm-provider', choices=['openai', 'anthropic', 'google', 'auto'], default='auto',
                                  help='LLM provider to use')
     assistant_parser.add_argument('--llm-model', help='LLM model to use')
+    assistant_parser.add_argument('--project-dir', '-d', default='./demo_project', help='Project directory for the assistant')
     
     # Build command
     build_parser = subparsers.add_parser('build', help='Build a project from a goal')
@@ -261,69 +262,229 @@ def cmd_refine(args):
  
 
 def cmd_assistant(args):
-    """Run the enhanced assistant for complete project setup."""
-    logger.info("Starting enhanced interactive assistant")
+    """Enhanced collaborative assistant mode with persistent session and workflow management."""
+    from .interactive_agent.collaborative_agent import CollaborativeAgent
+    from .utils.mcp_manager import MCPManager
     
-    # Get the LLM provider
-    provider = get_llm_provider(args.llm_provider, args.llm_model)
+    # Set cleaner logging levels for better UX, but allow MCP debugging in verbose mode
+    import logging
+    logging.getLogger("httpx").setLevel(logging.WARNING)
     
-    # Create the enhanced interactive agent
-    agent = EnhancedInteractiveAgent(provider)
+    # Only suppress MCP logging if not in verbose mode
+    if not getattr(args, 'verbose', False):
+        logging.getLogger("swarmdev.mcp").setLevel(logging.WARNING)
+        logging.getLogger("swarmdev.collaborative_agent").setLevel(logging.WARNING)
+    else:
+        print("🔧 Verbose mode enabled - showing detailed MCP tool debugging")
+        logging.getLogger("swarmdev.mcp").setLevel(logging.DEBUG)
+        logging.getLogger("swarmdev.collaborative_agent").setLevel(logging.DEBUG)
     
-    # Start the assistant mode
-    greeting = agent.start_assistant_mode()
-    print(f"Assistant: {greeting}")
+    print("SwarmDev Collaborative Assistant")
+    print("=" * 50)
     
-    # Main conversation loop
-    while True:
-        # Get user input
-        try:
-            user_input = input("\nYou: ")
-        except (KeyboardInterrupt, EOFError):
-            print("\nExiting assistant. Thanks for using SwarmDev!")
-            return
+    # Initialize LLM provider
+    try:
+        llm_provider = get_llm_provider(args.llm_provider, args.llm_model)
+        print(f"LLM Provider: {llm_provider.__class__.__name__}")
+    except Exception as e:
+        print(f"Failed to initialize LLM provider: {e}")
+        return
+    
+    # Initialize MCP manager with enhanced diagnostics
+    mcp_manager = None
+    try:
+        mcp_config = {
+            "enabled": True,
+            "config_file": ".swarmdev/mcp_config.json"
+        }
+        mcp_manager = MCPManager(mcp_config, getattr(args, 'project_dir', './demo_project'))
         
-        # Check for exit commands
-        if user_input.lower() in ["exit", "quit", "bye", "stop"]:
-            print("Assistant: Goodbye! Feel free to use the assistant anytime.")
-            break
+        print("🔧 Initializing MCP tools...")
+        mcp_manager.initialize_tools()
+        available_tools = mcp_manager.get_available_tools()
+        print(f"MCP Tools: {len(available_tools)} ready")
         
-        # Check for help commands
-        if user_input.lower().startswith("help"):
-            if "workflow" in user_input.lower():
-                help_text = agent.get_configuration_help("workflows")
-                print(f"Assistant: {help_text}")
-            elif "background" in user_input.lower():
-                help_text = agent.get_configuration_help("background")
-                print(f"Assistant: {help_text}")
-            elif "llm" in user_input.lower():
-                help_text = agent.get_configuration_help("llm")
-                print(f"Assistant: {help_text}")
-            elif "transition" in user_input.lower() or "phase" in user_input.lower():
-                print("Assistant: Here are the transition commands:\n"
-                      "- To move from goal refinement to configuration: 'configure', 'next phase', 'config'\n"
-                      "- To go back from configuration to goal refinement: 'refine more', 'go back'\n"
-                      "- The assistant will also suggest transitions when appropriate.")
-            else:
-                print("Assistant: I can help with 'workflows', 'background', 'llm', or 'transition' commands. "
-                      "Try 'help workflows' or 'help transition' for example.")
-            continue
+        # Show detailed tool information in verbose mode
+        if getattr(args, 'verbose', False):
+            print("\n🔧 MCP Tool Details:")
+            for tool_id in available_tools:
+                tool_info = mcp_manager.get_tool_info(tool_id)
+                if tool_info:
+                    print(f"   {tool_id}:")
+                    print(f"     Status: {tool_info.get('status', 'unknown')}")
+                    print(f"     Command: {tool_info.get('command', 'unknown')}")
+    
+            print()
         
-        # Process the message
-        try:
-            response = agent.process_assistant_message(user_input)
-            print(f"Assistant: {response}")
+        # Run MCP diagnostics in verbose mode
+        if getattr(args, 'verbose', False):
+            print("🔧 Running MCP diagnostics...")
+            mcp_manager.diagnose_tools()
+            print()
             
-            # Check if build was started
-            if "Build started successfully!" in response:
-                print("\nYour SwarmDev project is now running!")
-                print("Use the monitoring commands shown above to track progress.")
-                break
+    except Exception as e:
+        print(f"MCP initialization failed: {e}")
+        if getattr(args, 'verbose', False):
+            import traceback
+            print("🔧 Full MCP initialization error:")
+            traceback.print_exc()
+        print("   Continuing without MCP tools...")
+        mcp_manager = None
+    
+    # Create collaborative agent
+    try:
+        agent = CollaborativeAgent(
+            llm_provider=llm_provider,
+            mcp_manager=mcp_manager,
+            project_dir=getattr(args, 'project_dir', './demo_project'),
+            config={"verbose": getattr(args, 'verbose', False)}
+        )
+        
+        # Start session
+        welcome_message = agent.start_session()
+        print("\n" + welcome_message)
+        
+    except Exception as e:
+        print(f"Failed to initialize Collaborative Agent: {e}")
+        if getattr(args, 'verbose', False):
+            import traceback
+            print("🔧 Full agent initialization error:")
+            traceback.print_exc()
+        return
+    
+    # Interactive loop
+    print("\n" + "="*50)
+    print("COLLABORATIVE SESSION STARTED")
+    print("   Commands: 'exit', 'quit', 'status', 'pause', 'resume'")
+    if getattr(args, 'verbose', False):
+        print("   Debug Commands: 'mcp-status', 'mcp-test'")
+    print("   Or just chat naturally with the agent!")
+    print("="*50 + "\n")
+    
+    try:
+        while True:
+            try:
+                # Get user input
+                user_input = input("You: ").strip()
                 
-        except Exception as e:
-            logger.error(f"Error processing assistant message: {e}")
-            print(f"Assistant: I encountered an error: {e}")
-            print("Please try rephrasing your message or type 'help' for assistance.")
+                # Handle special commands
+                if user_input.lower() in ['exit', 'quit']:
+                    response = agent.stop_session()
+                    print(f"\nAgent: {response}")
+                    break
+                
+                elif user_input.lower() == 'status':
+                    status = agent.get_status()
+                    print(f"\nAgent Status:")
+                    print(f"  Session ID: {status['session_id']}")
+                    print(f"  Active: {status['is_active']}")
+                    print(f"  Conversation Length: {status['conversation_length']}")
+                    print(f"  MCP Tools: {len(status['mcp_tools_available'])}")
+                    
+                    if status['current_workflow']:
+                        wf = status['current_workflow']
+                        print(f"  Current Workflow:")
+                        print(f"    Type: {wf['workflow_id']}")
+                        print(f"    Status: {wf['status']}")
+                        print(f"    Phase: {wf['current_phase']}")
+                        print(f"    Started: {wf['started_at']}")
+                    else:
+                        print(f"  Current Workflow: None")
+                    continue
+                
+                elif user_input.lower() == 'mcp-status' and getattr(args, 'verbose', False):
+                    # Debug command to check MCP status
+                    if mcp_manager:
+                        print("\n🔧 MCP Manager Status:")
+                        print(f"  Enabled: {mcp_manager.is_enabled()}")
+                        available_tools = mcp_manager.get_available_tools()
+                        print(f"  Available tools: {available_tools}")
+                        
+                        metrics = mcp_manager.get_metrics()
+                        print(f"  Total calls: {metrics.get('total_calls', 0)}")
+                        print(f"  Successful calls: {metrics.get('successful_calls', 0)}")
+                        print(f"  Failed calls: {metrics.get('failed_calls', 0)}")
+                        
+                        for tool_id in available_tools:
+                            tool_info = mcp_manager.get_tool_info(tool_id)
+                            print(f"  {tool_id}: {tool_info.get('status', 'unknown')} (used {tool_info.get('usage_count', 0)} times)")
+                    else:
+                        print("\n🔧 MCP Manager is not initialized")
+                    continue
+                
+                elif user_input.lower() == 'mcp-test' and getattr(args, 'verbose', False):
+                    # Debug command to test MCP tools
+                    if mcp_manager and mcp_manager.get_available_tools():
+                        print("\n🔧 Testing MCP tools...")
+                        for tool_id in mcp_manager.get_available_tools()[:3]:  # Test first 3 tools
+                            print(f"Testing {tool_id}...")
+                            try:
+                                # Try a simple test call
+                                result = mcp_manager.call_tool(tool_id, "tools/list", {}, timeout=5)
+                                if result.get("error"):
+                                    print(f"  ❌ {tool_id}: {result['error']}")
+                                else:
+                                    print(f"  ✅ {tool_id}: OK")
+                            except Exception as e:
+                                print(f"  ❌ {tool_id}: Exception - {e}")
+                    else:
+                        print("\n🔧 No MCP tools available to test")
+                    continue
+                
+                elif user_input.lower() == 'pause':
+                    response = agent.pause_workflow()
+                    print(f"\nAgent: {response}")
+                    continue
+                
+                elif user_input.lower() == 'resume':
+                    response = agent.resume_workflow()
+                    print(f"\nAgent: {response}")
+                    continue
+                
+                elif not user_input:
+                    continue
+                
+                # Send message to agent
+                response = agent.send_message(user_input)
+                print(f"\nAgent: {response}")
+                
+                # Check if user wants to start a workflow
+                if any(keyword in user_input.lower() for keyword in ['build', 'create', 'develop', 'start workflow']):
+                    workflow_prompt = """
+                    
+Would you like me to start a workflow for this project? I can:
+• 🔍 **research_only** - Just research and gather information
+• 🚀 **standard_project** - Full development lifecycle (research → planning → development → docs)
+• ⚙️ **development_only** - Skip research, go straight to implementation
+• 🔄 **indefinite** - Continuous improvement cycles
+• 📊 **iteration** - Fixed number of improvement cycles
+• 🔨 **refactor** - Focus on improving existing code
+
+Just say "start [workflow_type]" or tell me what you'd like to do!"""
+                    print(workflow_prompt)
+                
+            except KeyboardInterrupt:
+                print("\n\nInterrupted - stopping session...")
+                agent.stop_session()
+                break
+            except EOFError:
+                print("\n\nSession ended")
+                agent.stop_session()
+                break
+            except Exception as e:
+                print(f"\nError during conversation: {e}")
+                print("The agent is still active. Try again or type 'exit' to quit.")
+                
+    except Exception as e:
+        print(f"Critical error in assistant session: {e}")
+    
+    finally:
+        if 'agent' in locals():
+            try:
+                agent.stop_session()
+            except:
+                pass
+        print("\nCollaborative session ended. Thank you!")
 
 
 def cmd_build(args):

@@ -63,9 +63,8 @@ class BaseAgent(ABC):
                 tool_info = self.mcp_manager.get_tool_info(tool_id)
                 if tool_info:
                     self.mcp_tools[tool_id] = tool_info
-                    capabilities = tool_info.get("capabilities", [])
                     status = tool_info.get("status", "unknown")
-                    self.logger.debug(f"  {tool_id}: {capabilities} (status: {status})")
+                    self.logger.debug(f"  {tool_id}: status={status}")
         else:
             self.mcp_tools = {}
             self.logger.info("No MCP manager - agent will work without external tools")
@@ -199,66 +198,21 @@ class BaseAgent(ABC):
     
     def _intelligent_mcp_assessment(self, goal: str, task: Dict) -> bool:
         """
-        Use LLM to intelligently assess whether MCP tools would be beneficial.
+        Simple assessment whether MCP tools would be beneficial.
         
         Args:
             goal: The goal text
             task: Task dictionary
             
         Returns:
-            bool: True if MCP tools would be beneficial
+            bool: True if MCP tools are available and could be useful
         """
-        if not self.llm_provider:
-            # Default to using MCP tools if available but no LLM for assessment
-            return len(self.mcp_manager.get_available_tools()) > 0
-        
-        try:
-            available_tools = self.mcp_manager.get_available_tools()
-            if not available_tools:
-                return False
+        # Simple logic: if we have MCP tools available, they're probably useful
+        if not self.mcp_manager:
+            return False
             
-            # Get capabilities of available tools
-            tool_capabilities = []
-            for tool_id in available_tools:
-                tool_info = self.mcp_manager.get_tool_info(tool_id)
-                if tool_info:
-                    capabilities = tool_info.get("capabilities", [])
-                    tool_capabilities.extend(capabilities)
-            
-            if not tool_capabilities:
-                return False
-            
-            assessment_prompt = f"""
-            Analyze if MCP tools would be beneficial for this task:
-            
-            GOAL: {goal}
-            AGENT TYPE: {self.agent_type}
-            TASK CONTEXT: {task.get("context", {})}
-            
-            AVAILABLE MCP CAPABILITIES: {set(tool_capabilities)}
-            
-            Would any of these MCP capabilities significantly improve the quality or effectiveness of this task?
-            Consider:
-            - Task complexity and scope
-            - Whether reasoning/planning tools would help break down the problem
-            - Whether documentation lookup would provide valuable context
-            - Whether the task involves technical concepts that benefit from external knowledge
-            
-            Return only "YES" if MCP tools would be beneficial, "NO" if standard LLM processing is sufficient.
-            """
-            
-            assessment = self.llm_provider.generate_text(assessment_prompt, temperature=0.1)
-            result = assessment.strip().upper() == "YES"
-            
-            if self.logger:
-                self.logger.debug(f"MCP assessment for {self.agent_type} task: {result}")
-            return result
-            
-        except Exception as e:
-            if self.logger:
-                self.logger.error(f"Error in MCP assessment: {e}")
-            # Default to using MCP tools if assessment fails but tools are available
-            return len(self.mcp_manager.get_available_tools()) > 0
+        available_tools = self.mcp_manager.get_available_tools()
+        return len(available_tools) > 0
     
     def get_mcp_usage_stats(self) -> Dict:
         """Get MCP usage statistics for this agent."""
@@ -332,32 +286,7 @@ class BaseAgent(ABC):
         
         return combined_metrics
     
-    def get_tools_by_capability(self, capability: str) -> List[str]:
-        """
-        Get all MCP tools that have the specified capability.
-        
-        Args:
-            capability: The capability to search for (e.g., "reasoning", "documentation")
-            
-        Returns:
-            List[str]: List of tool IDs with that capability
-        """
-        if not self.mcp_manager or not self.mcp_manager.is_enabled():
-            return []
-        
-        # Check if mcp_manager has get_tools_by_capability method
-        if hasattr(self.mcp_manager, 'get_tools_by_capability'):
-            return self.mcp_manager.get_tools_by_capability(capability)
-        
-        # Fallback: manually check tool info
-        tools = []
-        available_tools = self.mcp_manager.get_available_tools()
-        for tool_id in available_tools:
-            tool_info = self.mcp_manager.get_tool_info(tool_id)
-            if tool_info and capability in tool_info.get("capabilities", []):
-                tools.append(tool_id)
-        
-        return tools
+
     
     def get_tool_methods(self, tool_id: str) -> List[Dict]:
         """

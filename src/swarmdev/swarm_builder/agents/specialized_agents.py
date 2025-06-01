@@ -394,15 +394,26 @@ class PlanningAgent(BaseAgent):
         Develop a detailed, actionable plan.
         """
         
-        # Use dynamic reasoning capability discovery
-        reasoning_result = self.discover_and_use_capability(
-            "reasoning",
-            planning_problem,
-            {"goal": goal, "context": context, "project_context": project_context}
-        )
-        
-        if not reasoning_result.get("error"):
-            return {"plan": reasoning_result, "method": "mcp_reasoning"}
+        # Use sequential thinking for complex planning if available
+        if "sequential-thinking" in self.get_available_mcp_tools():
+            reasoning_result = self.call_mcp_tool(
+                "sequential-thinking",
+                "tools/call",
+                {
+                    "name": "sequential_thinking",
+                    "arguments": {
+                        "thought": planning_problem,
+                        "nextThoughtNeeded": True,
+                        "thoughtNumber": 1,
+                        "totalThoughts": 3
+                    }
+                },
+                timeout=20,
+                justification="Planning comprehensive implementation approach"
+            )
+            
+            if reasoning_result and not reasoning_result.get("error"):
+                return {"plan": reasoning_result, "method": "mcp_reasoning"}
         
         # Fallback to LLM planning
         if self.llm_provider:
@@ -848,7 +859,7 @@ class AnalysisAgent(BaseAgent):
                 4. Completeness and gaps
                 5. Quality and maintainability
                 6. Integration points and architecture
-                7. Areas for improvement or expansion
+                7. Areas for improvement or expansion within scope of the goal
                 
                 Provide a comprehensive project state analysis.
                 """
@@ -877,8 +888,9 @@ class AnalysisAgent(BaseAgent):
         1. Gaps between current state and desired goal
         2. Missing functionality or features
         3. Code improvements needed
-        4. Architectural enhancements
+        4. Architectural enhancements within scope of the goal
         5. Integration requirements
+        6. Reorganization of file or code structure
         6. Documentation needs
         7. Testing requirements
         
@@ -927,6 +939,7 @@ class AnalysisAgent(BaseAgent):
         2. Addresses the most important remaining gaps
         3. Is achievable in one iteration
         4. Maintains the overall project direction
+        5. Is within scope of the original goal
         
         Return only the evolved goal text.
         """

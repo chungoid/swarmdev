@@ -35,7 +35,6 @@ class MCPManager:
         self.mcp_tools = {}
         self.active_connections = {}
         self.persistent_processes = {}  # Store persistent MCP server processes
-        self.tool_capabilities = {}
         self.connection_pool = {}
         self.enabled = config.get("enabled", False)
         self.docker_enabled = config.get("docker_enabled", True)
@@ -88,9 +87,10 @@ class MCPManager:
         mcp_file_handler = logging.FileHandler(mcp_log_file)
         mcp_file_handler.setLevel(logging.DEBUG)
         
-        # Create console handler for immediate feedback
+        # Create console handler for immediate feedback - REDUCED SPAM
         mcp_console_handler = logging.StreamHandler()
-        mcp_console_handler.setLevel(logging.INFO)
+        # Only show WARNING and above on console to reduce spam
+        mcp_console_handler.setLevel(logging.WARNING)
         
         # Create detailed formatter
         mcp_formatter = logging.Formatter(
@@ -242,14 +242,12 @@ class MCPManager:
             self.mcp_logger.debug(f"Registering MCP tool: {tool_id}")
             self.mcp_logger.debug(f"Server config: {json.dumps(server_config, indent=2)}")
             
-            capabilities = server_config.get("capabilities", [])
             timeout = server_config.get("timeout", 30)
             command = server_config.get("command", "unknown")
             args = server_config.get("args", [])
             
             self.mcp_tools[tool_id] = {
                 "config": server_config,
-                "capabilities": capabilities,
                 "timeout": timeout,
                 "status": "registered",
                 "last_used": None,
@@ -259,13 +257,11 @@ class MCPManager:
                 "registration_time": datetime.now().isoformat()
             }
             
-            self.tool_capabilities[tool_id] = capabilities
             self.metrics["tools_used"][tool_id] = 0
             
             self.mcp_logger.info(f"Successfully registered MCP tool '{tool_id}'")
             self.mcp_logger.info(f"  Command: {command}")
             self.mcp_logger.info(f"  Args: {args}")
-            self.mcp_logger.info(f"  Capabilities: {capabilities}")
             self.mcp_logger.info(f"  Timeout: {timeout}s")
             
         except Exception as e:
@@ -297,56 +293,80 @@ class MCPManager:
         
         return ready_count > 0
     
-    def _start_persistent_connection_with_timeout(self, tool_id: str, timeout: int = 10) -> bool:
+    def _start_persistent_connection_with_timeout(self, tool_id: str, timeout: int = 15) -> bool:
         """Start persistent connection with timeout - prevents hanging like Cursor does."""
         import signal
         import threading
         
-        result = {"success": False}
+        result = {"success": False, "error": None}
         
         def connection_worker():
             try:
+                self.mcp_logger.info(f"Starting connection worker for {tool_id}")
                 result["success"] = self._start_persistent_connection(tool_id)
+                self.mcp_logger.info(f"Connection worker completed for {tool_id}: {result['success']}")
             except Exception as e:
                 self.mcp_logger.error(f"Connection worker exception for {tool_id}: {e}")
                 result["success"] = False
+                result["error"] = str(e)
         
         # Start connection in thread with timeout
+        self.mcp_logger.info(f"Starting connection thread for {tool_id} with {timeout}s timeout")
         thread = threading.Thread(target=connection_worker, daemon=True)
         thread.start()
         thread.join(timeout=timeout)
         
         if thread.is_alive():
             self.mcp_logger.warning(f"Connection timeout ({timeout}s) for {tool_id} - continuing without blocking")
+            if result.get("error"):
+                self.mcp_logger.error(f"Error during timeout: {result['error']}")
             return False
+        
+        if not result["success"] and result.get("error"):
+            self.mcp_logger.error(f"Connection failed for {tool_id}: {result['error']}")
         
         return result["success"]
     
     def _start_persistent_connection(self, tool_id: str) -> bool:
         """Start a persistent MCP connection for a tool."""
-        try:
-            tool_config = self.mcp_tools[tool_id]["config"]
-            self.mcp_logger.debug(f"Starting persistent connection for: {tool_id}")
-            
-            # Build command
-            command_type = tool_config.get("command")
-            if command_type == "docker":
-                full_command = self._build_docker_command(tool_config, persistent=True)
+        if tool_id in self.persistent_processes:
+            # Check if existing connection is still alive
+            if self.persistent_processes[tool_id]["process"].poll() is None:
+                self.mcp_logger.debug(f"Reusing existing connection for {tool_id}")
+                return True
             else:
-                command = tool_config.get("command")
-                args = tool_config.get("args", [])
-                full_command = [command] + args
+                self.mcp_logger.warning(f"Previous connection for {tool_id} died, starting new one")
+                
+        tool_config = self.mcp_tools.get(tool_id)
+        if not tool_config:
+            self.mcp_logger.error(f"Tool {tool_id} not configured")
+            return False
             
-            self.mcp_logger.info(f"Starting persistent MCP server: {' '.join(full_command)}")
+        try:
+            # Build command
+            if tool_config.get("command") == "docker":
+                command = self._build_docker_command(tool_config, persistent=True)
+            else:
+                command = [tool_config["command"]] + tool_config.get("args", [])
             
-            # Start the process
+            self.mcp_logger.info(f"Starting persistent MCP server: {' '.join(command)}")
+            
+            # Start process
             process = subprocess.Popen(
-                full_command,
+                command,
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                text=True
+                text=True,
+                bufsize=0
             )
+            
+            self.mcp_logger.info(f"Process started for {tool_id}, PID: {process.pid}")
+            self.persistent_processes[tool_id] = {
+                "process": process,
+                "call_counter": 0,
+                "last_used": datetime.now().isoformat()
+            }
             
             # Send initialization request
             init_request = {
@@ -363,59 +383,133 @@ class MCPManager:
                 "id": 1
             }
             
-            init_json = json.dumps(init_request) + '\n'
-            process.stdin.write(init_json)
+            self.mcp_logger.info(f"Sending initialization request to {tool_id}: {json.dumps(init_request)}")
+            
+            # Send the request
+            process.stdin.write(json.dumps(init_request) + "\n")
             process.stdin.flush()
             
-            # Read initialization response
-            try:
-                response_line = process.stdout.readline()
-                if not response_line.strip():
-                    self.mcp_logger.error(f"No initialization response from {tool_id}")
-                    process.kill()
-                    return False
-                
-                init_response = json.loads(response_line.strip())
-                if init_response.get("error"):
-                    self.mcp_logger.error(f"Initialization failed for {tool_id}: {init_response['error']}")
-                    process.kill()
-                    return False
-                
-                # Store the persistent connection
-                self.persistent_processes[tool_id] = {
-                    "process": process,
-                    "initialized": True,
-                    "last_used": datetime.now().isoformat(),
-                    "call_counter": 1
-                }
-                
-                # Test with tools/list to get available tools
-                tools_result = self._call_persistent_tool(tool_id, "tools/list", {})
-                if tools_result and not tools_result.get("error"):
-                    tools_list = tools_result.get("result", {}).get("tools", [])
-                    if tools_list:
-                        self.mcp_tools[tool_id]["available_tools"] = tools_list
-                        self.mcp_logger.info(f"Found {len(tools_list)} available tools for '{tool_id}'")
-                
-                self.mcp_tools[tool_id]["status"] = "ready"
-                self.mcp_tools[tool_id]["connection_type"] = "persistent"
-                self.mcp_logger.info(f"Persistent connection established for '{tool_id}'")
-                return True
-                
-            except json.JSONDecodeError as e:
-                self.mcp_logger.error(f"Invalid initialization response from {tool_id}: {e}")
-                process.kill()
-                return False
-                
+            self.mcp_logger.info(f"Reading initialization response from {tool_id}...")
+            
+            # Read initialization response with timeout
+            if self._wait_for_response(process, 3.0):
+                try:
+                    response_line = process.stdout.readline()
+                    if response_line:
+                        response = json.loads(response_line.strip())
+                        if response.get("id") == 1:
+                            self.mcp_logger.info(f"{tool_id}: Successfully parsed JSON response")
+                            
+                            # Now try to get tools list with detailed logging
+                            self.mcp_logger.info(f"Attempting to get tools list for {tool_id}...")
+                            tools_list = self._get_tools_list_with_timeout(tool_id, 3.0)
+                            
+                            if tools_list:
+                                self.mcp_logger.info(f"Found {len(tools_list)} available tools for '{tool_id}'")
+                                self.mcp_logger.debug(f"Tools for {tool_id}: {[tool.get('name', 'unknown') for tool in tools_list]}")
+                            else:
+                                self.mcp_logger.warning(f"Failed to get tools list for {tool_id}: Response timeout from persistent connection")
+                                self.mcp_logger.info(f"Continuing with {tool_id} connection despite tools/list failure")
+                            
+                            # Mark as successful either way
+                            self.mcp_logger.info(f"Persistent connection established for '{tool_id}'")
+                            return True
+                        else:
+                            self.mcp_logger.error(f"Invalid initialization response from {tool_id}: {response}")
+                    else:
+                        self.mcp_logger.error(f"Empty response from {tool_id}")
+                except json.JSONDecodeError as e:
+                    self.mcp_logger.error(f"Failed to parse initialization response from {tool_id}: {e}")
+                except Exception as e:
+                    self.mcp_logger.error(f"Error processing initialization response from {tool_id}: {e}")
+            else:
+                self.mcp_logger.error(f"No initialization response from {tool_id}")
+            
         except Exception as e:
-            self.mcp_logger.error(f"Failed to start persistent connection for {tool_id}: {e}", exc_info=True)
+            self.mcp_logger.error(f"Failed to start persistent connection for {tool_id}: {e}")
             if tool_id in self.persistent_processes:
                 try:
-                    self.persistent_processes[tool_id]["process"].kill()
-                    del self.persistent_processes[tool_id]
+                    self.persistent_processes[tool_id]["process"].terminate()
                 except:
                     pass
-            return False
+                del self.persistent_processes[tool_id]
+            
+        return False
+
+    def _get_tools_list_with_timeout(self, tool_id: str, timeout: float) -> Optional[List[Dict]]:
+        """Get tools list with explicit timeout and detailed logging."""
+        if tool_id not in self.persistent_processes:
+            self.mcp_logger.error(f"No persistent connection for {tool_id}")
+            return None
+            
+        process = self.persistent_processes[tool_id]["process"]
+        
+        try:
+            # Send tools/list request
+            tools_request = {
+                "jsonrpc": "2.0",
+                "method": "tools/list",
+                "params": {},
+                "id": 2
+            }
+            
+            self.mcp_logger.debug(f"Sending tools/list request to {tool_id}: {json.dumps(tools_request)}")
+            process.stdin.write(json.dumps(tools_request) + "\n")
+            process.stdin.flush()
+            
+            # Wait for response with timeout
+            if self._wait_for_response(process, timeout):
+                response_line = process.stdout.readline()
+                if response_line:
+                    self.mcp_logger.debug(f"Raw tools/list response from {tool_id}: {response_line.strip()}")
+                    response = json.loads(response_line.strip())
+                    
+                    if response.get("id") == 2:
+                        if "result" in response:
+                            tools = response["result"].get("tools", [])
+                            self.mcp_logger.info(f"Successfully retrieved {len(tools)} tools from {tool_id}")
+                            return tools
+                        elif "error" in response:
+                            self.mcp_logger.error(f"Error from {tool_id} tools/list: {response['error']}")
+                        else:
+                            self.mcp_logger.warning(f"Unexpected tools/list response from {tool_id}: {response}")
+                    else:
+                        self.mcp_logger.warning(f"tools/list response ID mismatch from {tool_id}: expected 2, got {response.get('id')}")
+                else:
+                    self.mcp_logger.warning(f"Empty tools/list response from {tool_id}")
+            else:
+                self.mcp_logger.warning(f"tools/list timeout ({timeout}s) for {tool_id}")
+                
+        except json.JSONDecodeError as e:
+            self.mcp_logger.error(f"Failed to parse tools/list response from {tool_id}: {e}")
+        except Exception as e:
+            self.mcp_logger.error(f"Error getting tools list from {tool_id}: {e}")
+            
+        return None
+
+    def _wait_for_response(self, process: subprocess.Popen, timeout: float) -> bool:
+        """Wait for response from process with timeout."""
+        import select
+        import time
+        
+        start_time = time.time()
+        
+        while time.time() - start_time < timeout:
+            if hasattr(select, 'select'):  # Unix systems
+                ready, _, _ = select.select([process.stdout], [], [], 0.1)
+                if ready:
+                    return True
+            else:  # Windows fallback
+                time.sleep(0.1)
+                if process.stdout.readable():
+                    return True
+                    
+            # Check if process died
+            if process.poll() is not None:
+                self.mcp_logger.warning(f"Process died while waiting for response")
+                return False
+                
+        return False
     
     def _build_docker_command(self, tool_config: Dict, persistent: bool = False) -> List[str]:
         """Build Docker command with proper flags for persistent or one-shot usage."""
@@ -430,8 +524,13 @@ class MCPManager:
             docker_args = modified_args
             self.mcp_logger.debug(f"Removed --rm flag for persistent connection")
         
-        # Add network if specified
-        if self.docker_enabled and self.docker_network and docker_args and docker_args[0] == "run":
+        # Add network if specified (must be a valid string, not boolean or None)
+        if (self.docker_enabled and 
+            self.docker_network and 
+            isinstance(self.docker_network, str) and 
+            docker_args and 
+            len(docker_args) > 0 and 
+            docker_args[0] == "run"):
             docker_args = docker_args[:1] + ["--network", self.docker_network] + docker_args[1:]
         
         return ["docker"] + docker_args
@@ -468,12 +567,41 @@ class MCPManager:
             process.stdin.write(request_json)
             process.stdin.flush()
             
-            # Read response
-            response_line = process.stdout.readline()
-            if not response_line.strip():
-                return {"error": "No response from persistent connection"}
+            # Read response - skip any non-JSON lines with timeout
+            response = None
+            max_attempts = 5
+            attempts = 0
+            import select
+            import sys
             
-            response = json.loads(response_line.strip())
+            while attempts < max_attempts:
+                # Use select to implement timeout on reading
+                if sys.platform != 'win32':  # select works on Unix-like systems
+                    ready, _, _ = select.select([process.stdout], [], [], 3.0)  # 3 second timeout
+                    if not ready:
+                        self.mcp_logger.debug(f"Timeout waiting for response from {tool_id}")
+                        return {"error": "Response timeout from persistent connection"}
+                
+                response_line = process.stdout.readline()
+                if not response_line:  # EOF
+                    self.mcp_logger.debug(f"EOF received from {tool_id}")
+                    return {"error": "Connection closed by server"}
+                    
+                if not response_line.strip():
+                    attempts += 1
+                    continue
+                
+                try:
+                    response = json.loads(response_line.strip())
+                    break
+                except json.JSONDecodeError:
+                    # Skip non-JSON lines
+                    self.mcp_logger.debug(f"Skipping non-JSON response line from {tool_id}: {response_line.strip()[:100]}...")
+                    attempts += 1
+                    continue
+            
+            if response is None:
+                return {"error": "No valid JSON response from persistent connection"}
             connection["last_used"] = datetime.now().isoformat()
             
             return response
@@ -537,12 +665,22 @@ class MCPManager:
             # Lazy initialization: establish connection on first use
             if tool_id not in self.persistent_processes:
                 self.mcp_logger.info(f"Lazy initialization: establishing connection for {tool_id}")
-                if not self._start_persistent_connection_with_timeout(tool_id, timeout=10):
+                if not self._start_persistent_connection_with_timeout(tool_id, timeout=15):
                     # Graceful fallback - tool still marked as ready but call fails
-                    self.mcp_logger.warning(f"Lazy initialization failed for {tool_id}, but keeping tool available")
-                    response = {"error": f"Connection failed for {tool_id} - will retry on next call"}
+                    self.mcp_logger.warning(f"Lazy initialization failed for {tool_id}, will retry next time")
+                    
+                    # Mark for retry but don't keep retrying immediately
+                    self.mcp_tools[tool_id]["last_error"] = "Initialization timeout"
+                    self.mcp_tools[tool_id]["retry_count"] = self.mcp_tools[tool_id].get("retry_count", 0) + 1
+                    
+                    if self.mcp_tools[tool_id]["retry_count"] > 3:
+                        response = {"error": f"Connection failed for {tool_id} after 3 attempts - may be misconfigured"}
+                    else:
+                        response = {"error": f"Connection timeout for {tool_id} - will retry on next call (attempt {self.mcp_tools[tool_id]['retry_count']})"} 
                 else:
                     self.mcp_logger.info(f"Lazy initialization successful for {tool_id}")
+                    # Reset retry count on success
+                    self.mcp_tools[tool_id]["retry_count"] = 0
                     response = self._call_persistent_tool(tool_id, method, params)
             else:
                 self.mcp_logger.debug(f"Using existing persistent connection for {tool_id}")
@@ -583,47 +721,20 @@ class MCPManager:
             self.mcp_logger.error(f"Duration: {response_time:.2f}s", exc_info=True)
             return {"error": error_msg}
 
-    def get_available_tools(self, capabilities: Optional[List[str]] = None) -> List[str]:
-        """
-        Get tools matching specific capabilities.
-        
-        Args:
-            capabilities: List of required capabilities
-            
-        Returns:
-            List[str]: List of matching tool IDs
-        """
+    def get_available_tools(self) -> List[str]:
+        """Get all ready tools."""
         if not self.enabled:
             self.mcp_logger.debug("MCP tools disabled, returning empty tool list")
             return []
         
         available_tools = []
         
-        self.mcp_logger.debug(f"Finding tools with capabilities: {capabilities}")
-        
         for tool_id, tool_info in self.mcp_tools.items():
             tool_status = tool_info["status"]
-            tool_capabilities = set(tool_info["capabilities"])
             
-            self.mcp_logger.debug(f"Tool {tool_id}: status={tool_status}, capabilities={tool_capabilities}")
-            
-            if tool_status != "ready":
-                self.mcp_logger.debug(f"Skipping {tool_id} - not ready (status: {tool_status})")
-                continue
-            
-            if capabilities is None:
+            if tool_status == "ready":
                 available_tools.append(tool_id)
-                self.mcp_logger.debug(f"Added {tool_id} - no capability filter")
-            else:
-                required_capabilities = set(capabilities)
-                
-                if required_capabilities.issubset(tool_capabilities):
-                    available_tools.append(tool_id)
-                    self.mcp_logger.debug(f"Added {tool_id} - capabilities match")
-                else:
-                    self.mcp_logger.debug(f"Skipped {tool_id} - missing capabilities: {required_capabilities - tool_capabilities}")
         
-        self.mcp_logger.info(f"Found {len(available_tools)} tools matching capabilities {capabilities}: {available_tools}")
         return available_tools
     
     def get_tool_info(self, tool_id: str) -> Optional[Dict]:
@@ -661,17 +772,7 @@ class MCPManager:
         available_tools = self.mcp_tools[tool_id].get("available_tools", [])
         return [tool.get("name", "") for tool in available_tools if tool.get("name")]
     
-    def get_tools_by_capability(self, capability: str) -> List[str]:
-        """Get all MCP servers that have the specified capability."""
-        if not self.enabled:
-            return []
-        
-        matching_tools = []
-        for tool_id, tool_info in self.mcp_tools.items():
-            if tool_info.get("status") == "ready" and capability in tool_info.get("capabilities", []):
-                matching_tools.append(tool_id)
-        
-        return matching_tools
+
     
     def get_actual_tool_names(self, server_id: str) -> List[Dict[str, str]]:
         """Get the actual tool names and schemas from an MCP server."""
@@ -765,10 +866,8 @@ class MCPManager:
         for tool_id, usage_count in self.metrics["tools_used"].items():
             tool_info = self.mcp_tools.get(tool_id, {})
             status = tool_info.get("status", "unknown")
-            capabilities = tool_info.get("capabilities", [])
             last_used = tool_info.get("last_used", "never")
             self.mcp_logger.info(f"  {tool_id}: {usage_count} calls, status={status}, last_used={last_used}")
-            self.mcp_logger.info(f"    capabilities: {capabilities}")
         
         self.mcp_logger.info("=== END USAGE SUMMARY ===")
     
@@ -787,7 +886,7 @@ class MCPManager:
             self.mcp_logger.info(f"  Status: {tool_info['status']}")
             self.mcp_logger.info(f"  Command: {tool_info['command']}")
             self.mcp_logger.info(f"  Args: {tool_info['args']}")
-            self.mcp_logger.info(f"  Capabilities: {tool_info['capabilities']}")
+
             self.mcp_logger.info(f"  Usage count: {tool_info['usage_count']}")
             self.mcp_logger.info(f"  Connection type: {tool_info.get('connection_type', 'one-shot')}")
             
