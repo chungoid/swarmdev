@@ -12,6 +12,9 @@ import json
 import sys
 from pathlib import Path
 
+# Determine the project root directory (one level up from the scripts directory)
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
 
 def run_command(cmd, cwd=None, env=None):
     """Run a command and return success status."""
@@ -51,170 +54,212 @@ def run_command(cmd, cwd=None, env=None):
 def load_build_config():
     """Load build configuration from file."""
     config_paths = [
-        "scripts/mcp_build_config.json",
-        ".swarmdev/mcp_build_config.json", 
-        "mcp_build_config.json"
+        PROJECT_ROOT / "scripts/mcp_build_config.json",
+        PROJECT_ROOT / ".swarmdev/mcp_build_config.json", 
+        PROJECT_ROOT / "mcp_build_config.json"
     ]
     
+    loaded_config = None
     for config_path in config_paths:
-        if os.path.exists(config_path):
+        if config_path.exists():
             print(f"Loading build config from: {config_path}")
             with open(config_path, 'r') as f:
-                return json.load(f)
+                loaded_config = json.load(f)
+            break
     
-    print("No build config found, using default configuration")
-    return get_default_build_config()
+    if loaded_config is None:
+        print("No build config found, using default configuration")
+        loaded_config = get_default_build_config()
+        
+    return make_paths_absolute_in_config(loaded_config)
 
 
 def get_default_build_config():
     """Get default build configuration if no config file exists."""
+    # Base path for ALL server sources and Dockerfiles if not overridden
+    base_server_src_path = PROJECT_ROOT / "src/swarmdev/bundled_mcp/servers"
+    # Path for individual server type directories (e.g. .../servers/src/memory)
+    direct_src_path = base_server_src_path / "src"
+
     return {
         "servers": [
             {
                 "name": "memory",
-                "directory": "src/swarmdev/bundled_mcp/servers/src/memory",
-                "build_commands": [
-                    ["npm", "install", "--no-fund"],
-                    ["npm", "run", "build"]
-                ],
+                "server_src_path": str(direct_src_path / "memory"),
+                # Build context is one level up, so Dockerfile's "COPY src/memory /app" works
+                "docker_build_dir": str(base_server_src_path), 
+                "dockerfile_path": str(Path("src") / "memory" / "Dockerfile"), # Path relative to new context
                 "docker_tag": "mcp/memory",
-                "docker_build_dir": "src/swarmdev/bundled_mcp/servers",
-                "dockerfile_path": "src/memory/Dockerfile"
+                "build_enabled": True,
+                "language": "nodejs"
             },
             {
-                "name": "sequential-thinking", 
-                "directory": "src/swarmdev/bundled_mcp/servers/src/sequentialthinking",
-                "build_commands": [
-                    ["npm", "install", "--no-fund"],
-                    ["npm", "run", "build"]
-                ],
+                "name": "sequential-thinking",
+                "server_src_path": str(direct_src_path / "sequentialthinking"),
+                "docker_build_dir": str(base_server_src_path),
+                "dockerfile_path": str(Path("src") / "sequentialthinking" / "Dockerfile"),
                 "docker_tag": "mcp/sequentialthinking",
-                "docker_build_dir": "src/swarmdev/bundled_mcp/servers",
-                "dockerfile_path": "src/sequentialthinking/Dockerfile"
-            },
-            {
-                "name": "context7",
-                "directory": "src/swarmdev/bundled_mcp/servers/src/context7",
-                "build_commands": [
-                    ["npm", "install", "--no-fund"],
-                    ["npm", "run", "build"]
-                ],
-                "docker_tag": "context7-mcp"
-            },
-            {
-                "name": "git",
-                "directory": "src/swarmdev/bundled_mcp/servers/src/git",
-                "build_commands": [],
-                "docker_tag": "mcp/git"
-            },
-            {
-                "name": "time",
-                "directory": "src/swarmdev/bundled_mcp/servers/src/time", 
-                "build_commands": [],
-                "docker_tag": "mcp/time"
-            },
-            {
-                "name": "fetch",
-                "directory": "src/swarmdev/bundled_mcp/servers/src/fetch",
-                "build_commands": [],
-                "docker_tag": "mcp/fetch"
+                "build_enabled": True,
+                "language": "nodejs"
             },
             {
                 "name": "filesystem",
-                "directory": "src/swarmdev/bundled_mcp/servers/src/filesystem",
-                "build_commands": [
-                    ["npm", "install", "--no-fund"],
-                    ["npm", "run", "build"]
-                ],
+                "server_src_path": str(direct_src_path / "filesystem"),
+                "docker_build_dir": str(base_server_src_path),
+                "dockerfile_path": str(Path("src") / "filesystem" / "Dockerfile"),
                 "docker_tag": "mcp/filesystem",
-                "docker_build_dir": "src/swarmdev/bundled_mcp/servers",
-                "dockerfile_path": "src/filesystem/Dockerfile"
+                "build_enabled": True,
+                "language": "nodejs"
+            },
+            { # context7 was building correctly, its Dockerfile likely uses 'COPY . /app'
+                "name": "context7",
+                "server_src_path": str(direct_src_path / "context7"),
+                "docker_build_dir": str(direct_src_path / "context7"), # Its own directory is the context
+                "dockerfile_path": "Dockerfile", # Dockerfile is at the root of this context
+                "docker_tag": "context7-mcp",
+                "build_enabled": True,
+                "language": "nodejs"
+            },
+            {
+                "name": "everything",
+                "server_src_path": str(direct_src_path / "everything"),
+                "docker_build_dir": str(base_server_src_path), # Assume similar structure to other failing node ones
+                "dockerfile_path": str(Path("src") / "everything" / "Dockerfile"),
+                "docker_tag": "mcp/everything",
+                "build_enabled": True,
+                "language": "nodejs"
+            },
+            { # Python servers were building correctly
+                "name": "time",
+                "server_src_path": str(direct_src_path / "time"),
+                "docker_build_dir": str(direct_src_path / "time"),
+                "dockerfile_path": "Dockerfile",
+                "docker_tag": "mcp/time",
+                "build_enabled": True,
+                "language": "python"
+            },
+            {
+                "name": "git",
+                "server_src_path": str(direct_src_path / "git"),
+                "docker_build_dir": str(direct_src_path / "git"),
+                "dockerfile_path": "Dockerfile",
+                "docker_tag": "mcp/git",
+                "build_enabled": True,
+                "language": "python"
+            },
+            {
+                "name": "fetch",
+                "server_src_path": str(direct_src_path / "fetch"),
+                "docker_build_dir": str(direct_src_path / "fetch"),
+                "dockerfile_path": "Dockerfile",
+                "docker_tag": "mcp/fetch",
+                "build_enabled": True,
+                "language": "python"
             }
-        ]
+        ],
+        "settings": {
+            "skip_existing_images": False
+        }
     }
 
 
 def build_server(server_config):
     """Build a single server based on its configuration."""
     name = server_config["name"]
-    directory = server_config["directory"]
-    build_commands = server_config.get("build_commands", [])
+    server_src_path_str = server_config["server_src_path"] # Use new key
+    build_commands = server_config.get("build_commands", []) # Keep for now
     docker_tag = server_config["docker_tag"]
-    dockerfile_dir = server_config.get("dockerfile_dir", ".")
     
-    print(f"\n=== Building {name} ===")
+    # New explicit Docker build paths
+    docker_build_dir_str = server_config["docker_build_dir"]
+    dockerfile_relative_path_str = server_config["dockerfile_path"] # Path relative to docker_build_dir
+    language = server_config.get("language", "unknown")
+
+    print(f"\n=== Building {name} ({language}) ===")
     
-    # Check if directory exists
-    if not os.path.exists(directory):
-        print(f"FAILED: Directory not found: {directory}")
+    # Ensure server_src_path is an absolute path
+    abs_server_src_path = Path(server_src_path_str)
+    if not abs_server_src_path.is_absolute():
+        abs_server_src_path = PROJECT_ROOT / server_src_path_str
+    
+    if not abs_server_src_path.exists():
+        print(f"FAILED: Server source directory not found: {abs_server_src_path}")
+        return False
+
+    # Ensure docker_build_dir is an absolute path
+    abs_docker_build_dir = Path(docker_build_dir_str)
+    if not abs_docker_build_dir.is_absolute():
+        abs_docker_build_dir = PROJECT_ROOT / docker_build_dir_str
+
+    if not abs_docker_build_dir.exists():
+        print(f"FAILED: Docker build directory not found: {abs_docker_build_dir}")
+        return False
+
+    # The Dockerfile path is relative to the abs_docker_build_dir
+    abs_dockerfile_path = abs_docker_build_dir / dockerfile_relative_path_str
+
+    if not abs_dockerfile_path.exists():
+        print(f"FAILED: Dockerfile not found: {abs_dockerfile_path} (expected relative path '{dockerfile_relative_path_str}' in '{abs_docker_build_dir}')")
         return False
     
-    # Temporarily disable workspace for TypeScript servers to avoid prepare script conflicts
-    workspace_pkg = "src/swarmdev/bundled_mcp/servers/package.json"
-    workspace_backup = workspace_pkg + ".tmp"
+    # Temporarily disable workspace for TypeScript/Node.js servers to avoid prepare script conflicts
+    # This logic might still be needed if build_commands (like npm install) are run outside Docker
+    workspace_pkg = PROJECT_ROOT / "src/swarmdev/bundled_mcp/servers/package.json"
+    workspace_backup = str(workspace_pkg) + ".tmp"
     workspace_disabled = False
     
-    if build_commands and name in ["memory", "sequential-thinking", "filesystem"]:
-        if os.path.exists(workspace_pkg):
-            print(f"Temporarily disabling workspace for {name} build")
+    # Only run pre-build commands if specified and for nodejs language
+    if build_commands and language == "nodejs":
+        if workspace_pkg.exists():
+            print(f"Temporarily disabling workspace for {name} pre-build steps")
             os.rename(workspace_pkg, workspace_backup)
             workspace_disabled = True
     
     try:
-        # Run pre-build commands (like npm install, npm run build)
-        for cmd in build_commands:
-            if not run_command(cmd, cwd=directory):
-                print(f"FAILED: Pre-build command failed for {name}")
-                return False
+        # Run pre-build commands (like npm install, npm run build) if they exist
+        # These are run in the server's source directory (abs_server_src_path)
+        if build_commands and language == "nodejs": # Only run for nodejs if specified
+            print(f"Running pre-build commands for {name} in {abs_server_src_path}...")
+            for cmd_list in build_commands: # Expecting a list of lists
+                if not run_command(cmd_list, cwd=str(abs_server_src_path)):
+                    print(f"FAILED: Pre-build command {' '.join(cmd_list)} failed for {name}")
+                    return False
         
-        # Determine Docker context directory and dockerfile path
-        docker_build_dir = server_config.get("docker_build_dir")
-        dockerfile_path = server_config.get("dockerfile_path")
+        # Docker build
+        # The context is abs_docker_build_dir
+        # The Dockerfile is dockerfile_relative_path_str (relative to context)
+        print(f"Attempting Docker build for {name}...")
+        print(f"  Context: {abs_docker_build_dir}")
+        print(f"  Dockerfile: {dockerfile_relative_path_str} (relative to context)")
+        print(f"  Tag: {docker_tag}")
+
+        # Try BuildKit first
+        env_buildkit = os.environ.copy()
+        env_buildkit["DOCKER_BUILDKIT"] = "1"
         
-        if docker_build_dir and dockerfile_path:
-            # Build from workspace root with specific dockerfile
-            docker_context_dir = docker_build_dir
-            dockerfile_full_path = os.path.join(docker_build_dir, dockerfile_path)
-        else:
-            # Build from server directory
-            docker_context_dir = os.path.join(directory, dockerfile_dir) if dockerfile_dir != "." else directory
-            dockerfile_full_path = os.path.join(docker_context_dir, "Dockerfile")
+        docker_cmd = ["docker", "build", "-f", dockerfile_relative_path_str, "-t", docker_tag, str(abs_docker_build_dir)]
         
-        # Check if Dockerfile exists
-        if not os.path.exists(dockerfile_full_path):
-            print(f"FAILED: Dockerfile not found: {dockerfile_full_path}")
-            return False
-        
-        # Try BuildKit first, then legacy mode
-        print(f"Attempting BuildKit build for {name}...")
-        env = os.environ.copy()
-        env["DOCKER_BUILDKIT"] = "1"
-        
-        if dockerfile_path:
-            # Use specific dockerfile
-            docker_cmd = ["docker", "build", "-f", dockerfile_path, "-t", docker_tag, "."]
-        else:
-            # Use default Dockerfile
-            docker_cmd = ["docker", "build", "-t", docker_tag, "."]
-        
-        if run_command(docker_cmd, cwd=docker_context_dir, env=env):
+        print(f"  Command: {' '.join(docker_cmd)}")
+        if run_command(docker_cmd, cwd=str(abs_docker_build_dir), env=env_buildkit): # cwd is context dir
             print(f"SUCCESS: Successfully built {name} -> {docker_tag} (BuildKit)")
             return True
         
+        # BuildKit failed, try legacy build
         print(f"BuildKit failed, trying legacy build for {name}...")
-        env["DOCKER_BUILDKIT"] = "0"
+        env_legacy = os.environ.copy()
+        env_legacy["DOCKER_BUILDKIT"] = "0" # Explicitly disable if needed, though default might be 0 if BuildKit fails
         
-        if run_command(docker_cmd, cwd=docker_context_dir, env=env):
+        if run_command(docker_cmd, cwd=str(abs_docker_build_dir), env=env_legacy): # cwd is context dir
             print(f"SUCCESS: Successfully built {name} -> {docker_tag} (Legacy)")
             return True
         
-        print(f"FAILED: Both BuildKit and legacy builds failed for {name}")
+        print(f"FAILED: Both BuildKit and legacy Docker builds failed for {name}")
         return False
         
     finally:
         # Restore workspace if it was disabled
-        if workspace_disabled and os.path.exists(workspace_backup):
-            print(f"Restoring workspace for {name}")
+        if workspace_disabled and Path(workspace_backup).exists():
+            print(f"Restoring workspace package.json after {name} build process")
             os.rename(workspace_backup, workspace_pkg)
 
 
@@ -237,46 +282,85 @@ def verify_docker_images(server_configs):
 
 
 def create_mcp_config(server_configs):
-    """Create MCP configuration based on built servers."""
+    """Create MCP configuration for MCP Manager."""
     print("\n=== Creating MCP Configuration ===")
     
-    config = {
-        "enabled": True,
-        "mcpSettings": {
-            "defaultTimeout": 30,
-            "initializationTimeout": 15,
-            "discoveryTimeout": 10,
-            "persistentConnections": True,
-            "autoDiscovery": True,
-            "retryCount": 3,
-            "retryDelay": 1.0
-        },
-        "mcpServers": {}
+    mcp_servers = {}
+    
+    for server_config in server_configs:
+        server_name = server_config["name"]
+        server_docker_tag = server_config["docker_tag"]
+        language = server_config.get("language", "unknown") # Get language
+        
+        server_command_list = []
+
+        # Use simple docker run commands, relying on image's default entrypoint.
+        server_command_list = ["docker", "run", "-i", "--rm"]
+
+        if server_name == "git":
+            # Git server needs project root mounted
+            server_command_list.extend(["-v", f"{PROJECT_ROOT.resolve()}:/workspace"])
+            server_command_list.append(server_docker_tag)
+            print(f"  Configuring '{server_name}' (Python) with volume mount and default image entrypoint.")
+        
+        elif language == "python": # For other python servers like time, fetch
+            server_command_list.append(server_docker_tag)
+            print(f"  Configuring '{server_name}' (Python) with default image entrypoint.")
+        
+        elif server_name == "filesystem":
+            server_command_list.extend([
+                "-v", f"{PROJECT_ROOT.resolve()}:/workspace", 
+                server_docker_tag,
+                "/workspace" # Argument to the filesystem server
+            ])
+            print(f"  Configuring '{server_name}' with volume mount: {PROJECT_ROOT.resolve()}:/workspace and arg /workspace")
+        
+        elif server_name == "context7":
+            server_command_list.extend([
+                "-e", "MCP_TRANSPORT=stdio",
+                server_docker_tag
+            ])
+            print(f"  Configuring '{server_name}' with MCP_TRANSPORT=stdio")
+            
+        else: # Default for other Node.js servers (memory, sequential-thinking, everything)
+            server_command_list.append(server_docker_tag)
+            print(f"  Configuring '{server_name}' ({language}) with basic docker run command using image default entrypoint.")
+
+        mcp_servers[server_name] = {
+            "command": server_command_list,
+            "timeout": 60 if server_name == "sequential-thinking" else 30,
+            "enabled": True,
+            "description": f"{language.capitalize()} MCP server for {server_name}"
+        }
+
+    # Default settings for MCP Manager
+    mcp_settings = {
+        "defaultTimeout": 40, # Increased default slightly
+        "persistentConnections": True,
+        "autoDiscovery": True, # Enable capability discovery
+        "retryCount": 2,
+        "retryDelay": 1.5
     }
     
-    # Add each server to config
-    for server_config in server_configs:
-        name = server_config["name"]
-        docker_tag = server_config["docker_tag"]
-        description = server_config.get("description", f"{name} MCP server")
-        
-        config["mcpServers"][name] = {
-            "command": ["docker", "run", "-i", "--rm", docker_tag],
-            "description": description,
-            "timeout": server_config.get("timeout", 30)
-        }
+    config = {
+        "mcpSettings": mcp_settings,
+        "mcpServers": mcp_servers
+    }
     
-    # Create config directory
-    config_dir = os.path.expanduser("~/.swarmdev")
-    os.makedirs(config_dir, exist_ok=True)
+    # Ensure the .swarmdev directory exists in the user's home
+    swarmdev_home_dir = Path.home() / ".swarmdev"
+    swarmdev_home_dir.mkdir(exist_ok=True)
     
-    # Write config file
-    config_file = os.path.join(config_dir, "mcp_config.json")
-    with open(config_file, 'w') as f:
-        json.dump(config, f, indent=2)
+    config_file_path = swarmdev_home_dir / "mcp_config.json"
     
-    print(f"SUCCESS: MCP configuration written to: {config_file}")
-    print(f"   Configured {len(config['mcpServers'])} servers")
+    try:
+        with open(config_file_path, 'w') as f:
+            json.dump(config, f, indent=2)
+        print(f"SUCCESS: MCP configuration written to {config_file_path}")
+        return True
+    except Exception as e:
+        print(f"FAILED: Could not write MCP config to {config_file_path}: {e}")
+        return False
 
 
 def run_mcp_tests():
@@ -371,6 +455,23 @@ def main():
     else:
         print("\nFAILED: No servers available for configuration")
         return False
+
+
+# Helper function to ensure paths are absolute from project root
+def ensure_absolute_path(path_str):
+    path_obj = Path(path_str)
+    if not path_obj.is_absolute():
+        return str(PROJECT_ROOT / path_obj)
+    return str(path_obj)
+
+# Update server configurations to use absolute paths
+def make_paths_absolute_in_config(config):
+    for server in config.get("servers", []):
+        if "directory" in server:
+            server["directory"] = ensure_absolute_path(server["directory"])
+        if "docker_build_dir" in server:
+            server["docker_build_dir"] = ensure_absolute_path(server["docker_build_dir"])
+    return config
 
 
 if __name__ == "__main__":

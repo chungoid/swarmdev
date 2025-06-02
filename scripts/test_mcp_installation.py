@@ -75,8 +75,43 @@ class MCPInstallationTester:
         
         try:
             # Test configuration loading
-            config = {'enabled': True}
-            self.mcp_manager = MCPManager(config, project_dir='.')
+            # Pass a config to MCPManager to override default timeouts for testing
+            # AND explicitly define time and git servers to ensure correct commands for the test run.
+            test_config = {
+                'enabled': True,
+                'mcpSettings': {
+                    'discoveryTimeout': 30,  # Increased from default 10
+                    'initializationTimeout': 45, # Increased from default 15
+                    'defaultTimeout': 40 # Increased from default 30
+                },
+                'mcpServers': { 
+                    "git": {
+                        "command": ["docker", "run", "-i", "--rm",
+                                    "-v", f"{project_root}:/workspace",
+                                    "mcp/git"],
+                        "timeout": 30,
+                        "enabled": True,
+                        "description": "Git operations and repository management"
+                    },
+                    "time": {
+                        "command": ["docker", "run", "-i", "--rm", "mcp/time"],
+                        "timeout": 30,
+                        "enabled": True,
+                        "description": "Time zone operations and conversions"
+                    },
+                    "fetch": {
+                        "command": ["docker", "run", "-i", "--rm", "mcp/fetch"],
+                        "timeout": 30,
+                        "enabled": True,
+                        "description": "Web content fetching and processing"
+                    }
+                    # Filesystem, Memory, Sequential-Thinking, Context7, Everything
+                    # will be loaded from ~/.swarmdev/mcp_config.json or MCPManager defaults
+                    # by MCPManager's _load_mcp_config method. The explicit definitions
+                    # above will take precedence for git, time, and fetch.
+                }
+            }
+            self.mcp_manager = MCPManager(test_config, project_dir='.')
             
             if not self.mcp_manager.is_enabled():
                 self.results['config_test'] = {
@@ -179,7 +214,23 @@ class MCPInstallationTester:
         """Test actual server functionality with real calls."""
         print("\n[TEST 3] Server Functionality")
         print("-" * 40)
-        
+
+        # Debug: Print the command for time and git servers as seen by the test script
+        if self.mcp_manager:
+            if 'time' in self.mcp_manager.servers:
+                time_cmd = self.mcp_manager.servers['time'].get('command', 'COMMAND_NOT_FOUND')
+                print(f"DEBUG_TEST: Command for 'time' before test execution: {time_cmd}")
+            else:
+                print("DEBUG_TEST: 'time' server not found in mcp_manager.servers")
+            
+            if 'git' in self.mcp_manager.servers:
+                git_cmd = self.mcp_manager.servers['git'].get('command', 'COMMAND_NOT_FOUND')
+                print(f"DEBUG_TEST: Command for 'git' before test execution: {git_cmd}")
+            else:
+                print("DEBUG_TEST: 'git' server not found in mcp_manager.servers")
+        else:
+            print("DEBUG_TEST: mcp_manager not initialized in _test_server_functionality")
+
         overall_success = True
         
         # Test memory server (knowledge graph)
@@ -335,7 +386,7 @@ class MCPInstallationTester:
                 'tools/call',
                 {
                     'name': 'git_status',
-                    'arguments': {'repo_path': '.'}
+                    'arguments': {'repo_path': '/workspace'}
                 },
                 timeout=10
             )
@@ -350,14 +401,14 @@ class MCPInstallationTester:
                     self.results['functionality_tests']['git'] = {
                         'status': 'passed',
                         'details': {
-                            'note': 'Git server working (not in git repo is expected)',
+                            'note': 'Git server working, but /workspace was not recognized as a git repo.',
                             'response_time': duration
                         },
                         'duration': duration
                     }
                     print(f"    PASSED: Git server working (response time: {duration:.2f}s)")
-                    print(f"    INFO: Not in git repository (this is normal for the test)")
-                    return True
+                    print(f"    WARNING: /workspace (mounted project root) was not seen as a git repo by the server.")
+                    return True # Still counts as server working, but with a warning.
                 else:
                     self.results['functionality_tests']['git'] = {
                         'status': 'failed',

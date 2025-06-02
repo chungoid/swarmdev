@@ -77,7 +77,7 @@ def setup_parser():
     assistant_parser.add_argument('--llm-provider', choices=['openai', 'anthropic', 'google', 'auto'], default='auto',
                                  help='LLM provider to use')
     assistant_parser.add_argument('--llm-model', help='LLM model to use')
-    assistant_parser.add_argument('--project-dir', '-d', default='./demo_project', help='Project directory for the assistant')
+    assistant_parser.add_argument('--project-dir', '-d', help='Project directory for the assistant (defaults to current directory)')
     
     # Build command
     build_parser = subparsers.add_parser('build', help='Build a project from a goal')
@@ -186,7 +186,30 @@ def get_llm_provider(provider_name, model=None):
         # Use provider registry to auto-detect available providers
         registry = ProviderRegistry()
         registry.discover_providers()
-        return registry.get_provider()
+        try:
+            return registry.get_provider()
+        except ValueError as e:
+            # No providers available, provide helpful error message
+            available_apis = []
+            if os.environ.get('OPENAI_API_KEY'):
+                available_apis.append('OpenAI')
+            if os.environ.get('ANTHROPIC_API_KEY'):
+                available_apis.append('Anthropic')
+            if os.environ.get('GOOGLE_API_KEY'):
+                available_apis.append('Google')
+            
+            if available_apis:
+                logger.error(f"Auto-detection failed but API keys found for: {', '.join(available_apis)}")
+                logger.error("Try specifying a provider explicitly with --llm-provider")
+            else:
+                logger.error("No LLM provider API keys found in environment variables!")
+                logger.error("Please set one of:")
+                logger.error("  export OPENAI_API_KEY='your-openai-key'")
+                logger.error("  export ANTHROPIC_API_KEY='your-anthropic-key'")
+                logger.error("  export GOOGLE_API_KEY='your-google-key'")
+                logger.error("")
+                logger.error("Or specify a provider manually: swarmdev assistant --llm-provider openai")
+            raise e
     
     elif provider_name == 'openai':
         api_key = os.environ.get('OPENAI_API_KEY')
@@ -302,7 +325,9 @@ def cmd_assistant(args):
             "enabled": True,
             "config_file": ".swarmdev/mcp_config.json"
         }
-        mcp_manager = MCPManager(mcp_config, getattr(args, 'project_dir', './demo_project'))
+        # Get project directory, defaulting to current working directory
+        project_dir = getattr(args, 'project_dir', None) or os.getcwd()
+        mcp_manager = MCPManager(mcp_config, project_dir)
         
         print("Initializing MCP tools...")
         mcp_manager.initialize_tools()
@@ -321,10 +346,13 @@ def cmd_assistant(args):
     
             print()
         
-        # Run MCP diagnostics in verbose mode
+        # Show MCP metrics in verbose mode
         if getattr(args, 'verbose', False):
-            print("Running MCP diagnostics...")
-            mcp_manager.diagnose_tools()
+            print("MCP Metrics:")
+            metrics = mcp_manager.get_metrics()
+            print(f"  Total calls: {metrics.get('total_calls', 0)}")
+            print(f"  Successful: {metrics.get('successful_calls', 0)}")
+            print(f"  Failed: {metrics.get('failed_calls', 0)}")
             print()
             
     except Exception as e:
@@ -341,7 +369,7 @@ def cmd_assistant(args):
         agent = CollaborativeAgent(
             llm_provider=llm_provider,
             mcp_manager=mcp_manager,
-            project_dir=getattr(args, 'project_dir', './demo_project'),
+            project_dir=getattr(args, 'project_dir', None),  # Use None to trigger current directory detection
             config={"verbose": getattr(args, 'verbose', False)}
         )
         
