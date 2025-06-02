@@ -240,13 +240,24 @@ sequenceDiagram
 
 ### Agent Responsibility Matrix
 
-| Agent | Primary Role | Inputs | Outputs | MCP Tools Used |
-|-------|-------------|---------|---------|---------------|
-| **ResearchAgent** | Information gathering & analysis | goal, context | research_plan, findings, synthesis | sequential-thinking, context7, fetch |
-| **PlanningAgent** | Project planning & task breakdown | goal, context, research_outputs | detailed_plan, task_breakdown, execution_strategy, project_context | sequential-thinking |
-| **DevelopmentAgent** | Code implementation | goal, context, planning_outputs | project_analysis, implementation_plan, implementation_results | **Full MCP access** (via BaseAgent) |
-| **AnalysisAgent** | State analysis & blueprints | goal, context, project_dir, iteration_count | project_state, improvement_analysis, should_continue, evolved_goal | **Full MCP access** (via BaseAgent) |
-| **DocumentationAgent** | Documentation creation | goal, context, implementation_outputs | project_analysis, documentation_content, documentation_structure | **Full MCP access** (via BaseAgent) |
+| Agent | Primary Role | Inputs | Outputs | MCP Tools - Architecture Pattern |
+|-------|-------------|---------|---------|-----------------------------------|
+| **ResearchAgent** | Information gathering & analysis | goal, context | research_plan, findings, synthesis | **❌ Hardcoded patterns**: Explicit calls to context7, sequential-thinking, fetch<br/>**Available**: All MCP tools via BaseAgent |
+| **PlanningAgent** | Project planning & task breakdown | goal, context, research_outputs | detailed_plan, task_breakdown, execution_strategy, project_context | **❌ Hardcoded patterns**: Explicit calls to sequential-thinking<br/>**Available**: All MCP tools via BaseAgent |
+| **DevelopmentAgent** | Code implementation | goal, context, planning_outputs | project_analysis, implementation_plan, implementation_results | **⚠️ Underutilized**: LLM-only, could benefit from tool integration<br/>**Available**: All MCP tools via BaseAgent |
+| **AnalysisAgent** | State analysis & blueprints | goal, context, project_dir, iteration_count | project_state, improvement_analysis, should_continue, evolved_goal | **⚠️ Underutilized**: LLM-only, could benefit from tool integration<br/>**Available**: All MCP tools via BaseAgent |
+| **DocumentationAgent** | Documentation creation | goal, context, implementation_outputs | project_analysis, documentation_content, documentation_structure | **⚠️ Underutilized**: LLM-only, could benefit from tool integration<br/>**Available**: All MCP tools via BaseAgent |
+
+### **Architectural Improvement Opportunity**
+**Current Issue**: Inconsistent MCP integration patterns across agents
+- **ResearchAgent/PlanningAgent**: Hardcoded tool usage (inflexible)
+- **Other Agents**: No tool integration (missed opportunities)
+
+**Better Approach** (as demonstrated in CollaborativeAgent):
+- **LLM-directed tool selection**: Let LLM decide which tools would enhance the response
+- **Contextual tool usage**: Tools chosen based on actual task requirements
+- **Flexible combinations**: LLM can intelligently combine tools
+- **No hardcoded patterns**: Adaptive to changing requirements
 
 ### Information Dependencies
 
@@ -441,9 +452,12 @@ sequenceDiagram
 ## Recommendations for Future Architecture
 
 ### Immediate Opportunities (No Disruption)
-1. **Enhance Context Enrichment**: Build rich context accumulation on top of existing BaseAgent standardization
-2. **Add Validation Gates**: Quality checks between workflow phases
-3. **Leverage Universal MCP Access**: Optimize tool usage across all agent types
+1. **Standardize LLM-Directed Tool Usage**: Adopt CollaborativeAgent's pattern across all agents
+   - Remove hardcoded tool calls from ResearchAgent/PlanningAgent
+   - Add intelligent tool selection to DevelopmentAgent/AnalysisAgent/DocumentationAgent
+   - Let LLM contextually decide which tools enhance each task
+2. **Enhance Context Enrichment**: Build rich context accumulation on top of existing BaseAgent standardization
+3. **Add Validation Gates**: Quality checks between workflow phases
 
 ### Strategic Enhancements (Minimal Disruption)
 1. **Insert ArchitectureAgent**: Between research and planning in StandardProjectWorkflow

@@ -1,52 +1,56 @@
 {
   "mcpServers": {
-    "sequential-thinking": {
-      "command": "node",
-      "args": ["src/swarmdev/bundled_mcp/sequential-thinking/dist/index.js"],
-      "capabilities": ["reasoning", "analysis", "planning"],
-      "timeout": 30,
-      "description": "Sequential thinking tool for complex reasoning"
-    },
-    "context7": {
-      "command": "node", 
-      "args": ["src/swarmdev/bundled_mcp/context7/dist/index.js"],
-      "capabilities": ["documentation", "library-info", "research"],
-      "timeout": 30,
-      "description": "Context7 tool for library documentation"
-    },
-    "memory": {
-      "command": "node",
-      "args": ["src/swarmdev/bundled_mcp/memory/dist/index.js"],
-      "capabilities": ["storage", "persistence", "memory"],
-      "timeout": 15,
-      "description": "Memory tool for persistent storage"
+    "git": {
+      "command": "docker",
+      "args": ["run", "--rm", "-i", "mcp/git"],
+      "capabilities": ["git", "version-control", "repository"],
+      "timeout": 45,
+      "description": "Git repository operations and analysis"
     },
     "time": {
-      "command": "python",
-      "args": ["-m", "mcp_server_time"],
+      "command": "docker", 
+      "args": ["run", "--rm", "-i", "mcp/time"],
       "capabilities": ["time", "datetime", "scheduling"],
-      "timeout": 10,
-      "description": "Time tool for date/time operations"
+      "timeout": 30,
+      "description": "System time and scheduling operations"
     },
     "fetch": {
-      "command": "python",
-      "args": ["-m", "mcp_server_fetch"],
+      "command": "docker",
+      "args": ["run", "--rm", "-i", "mcp/fetch"],
       "capabilities": ["web", "http", "api", "research"],
-      "timeout": 20,
-      "description": "Fetch tool for web requests and API calls"
+      "timeout": 60,
+      "description": "Web requests and online research"
     },
-    "git": {
-      "command": "python",
-      "args": ["-m", "mcp_server_git"],
-      "capabilities": ["git", "version-control", "repository"],
-      "timeout": 15,
-      "description": "Git tool for version control operations"
+    "sequentialthinking": {
+      "command": "docker",
+      "args": ["run", "--rm", "-i", "mcp/sequentialthinking"],
+      "capabilities": ["reasoning", "analysis", "planning"],
+      "timeout": 60,
+      "description": "Dynamic and reflective problem-solving through thoughts"
+    },
+    "memory": {
+      "command": "docker",
+      "args": ["run", "--rm", "-i", "mcp/memory"],
+      "capabilities": ["storage", "persistence", "memory"],
+      "timeout": 45,
+      "description": "Knowledge graph-based persistent memory system"
+    },
+    "filesystem": {
+      "command": "docker",
+      "args": ["run", "--rm", "-i", "mcp/filesystem"],
+      "capabilities": ["file", "directory", "filesystem"],
+      "timeout": 30,
+      "description": "File system operations and management"
     }
   },
   "mcpSettings": {
-    "globalTimeout": 30,
+    "globalTimeout": 60,
     "persistentConnections": true,
     "dockerNetwork": null,
-    "retryCount": 3
+    "retryCount": 3,
+    "maxConcurrentConnections": 10,
+    "connectionPoolSize": 5,
+    "enableMetrics": true,
+    "logLevel": "INFO"
   }
 } 

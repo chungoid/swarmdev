@@ -28,6 +28,7 @@ import argparse
 import logging
 from datetime import datetime
 from dotenv import load_dotenv
+from pathlib import Path
 
 from swarmdev.utils.llm_provider import OpenAIProvider, AnthropicProvider, GoogleProvider, ProviderRegistry
 from swarmdev.utils.blueprint_manager import BlueprintManager
@@ -139,6 +140,10 @@ def setup_parser():
     modify_bp.add_argument('--item', help='Item description to modify')
     modify_bp.add_argument('--status', choices=['complete', 'in_progress', 'not_started', 'removed', 'high_priority'], 
                           help='New status for the item')
+    
+    # MCP analysis command
+    mcp_analysis_parser = subparsers.add_parser('mcp-analysis', help='Analyze MCP system performance and health')
+    mcp_analysis_parser.add_argument('--project-dir', '-d', default='.', help='Project directory')
     
     return parser
  
@@ -1210,6 +1215,163 @@ Examples:
     """)
 
 
+def cmd_mcp_analysis(args):
+    """Analyze MCP system performance and health."""
+    try:
+        print("=== MCP SYSTEM ANALYSIS ===")
+        
+        # Initialize MCP manager to get metrics
+        config = {
+            "enabled": True,
+            "docker_enabled": True,
+            "global_timeout": 120,
+            "persistent_connections": True
+        }
+        
+        from swarmdev.utils.mcp_manager import MCPManager
+        from swarmdev.utils.mcp_metrics import get_mcp_logger, get_metrics_collector
+        
+        manager = MCPManager(config, args.project_dir)
+        
+        if not manager.is_enabled():
+            print("MCP system is disabled.")
+            return
+        
+        print(f"Project Directory: {args.project_dir}")
+        print(f"Available Tools: {len(manager.get_available_tools())}")
+        print(f"Tools: {', '.join(manager.get_available_tools())}")
+        print()
+        
+        # Get basic metrics
+        basic_metrics = manager.get_metrics()
+        print("BASIC METRICS:")
+        print(f"  Total Calls: {basic_metrics.get('total_calls', 0)}")
+        print(f"  Successful: {basic_metrics.get('successful_calls', 0)}")
+        print(f"  Failed: {basic_metrics.get('failed_calls', 0)}")
+        
+        if basic_metrics.get('total_calls', 0) > 0:
+            success_rate = basic_metrics.get('successful_calls', 0) / basic_metrics.get('total_calls', 1)
+            print(f"  Success Rate: {success_rate:.1%}")
+        
+        print(f"  Average Response Time: {basic_metrics.get('average_response_time', 0):.2f}s")
+        print()
+        
+        # Tool usage breakdown
+        tools_used = basic_metrics.get('tools_used', {})
+        if tools_used:
+            print("TOOL USAGE:")
+            for tool_id, count in sorted(tools_used.items(), key=lambda x: x[1], reverse=True):
+                print(f"  {tool_id}: {count} calls")
+            print()
+        
+        # Enhanced health report
+        try:
+            health_report = manager.get_health_report()
+            if "error" not in health_report:
+                print("ENHANCED HEALTH ANALYSIS:")
+                system_metrics = health_report.get("system_metrics", {})
+                print(f"  System Success Rate: {system_metrics.get('successful_calls', 0) / max(system_metrics.get('total_calls', 1), 1):.1%}")
+                print(f"  Tools Healthy: {system_metrics.get('tools_healthy', 0)}")
+                print(f"  Tools Degraded: {system_metrics.get('tools_degraded', 0)}")
+                print(f"  Tools Unhealthy: {system_metrics.get('tools_unhealthy', 0)}")
+                print()
+                
+                # Individual tool health
+                tool_health = health_report.get("tool_health", {})
+                if tool_health:
+                    print("INDIVIDUAL TOOL HEALTH:")
+                    for tool_id, health in tool_health.items():
+                        status_icon = {
+                            "healthy": "✅",
+                            "degraded": "⚠️", 
+                            "unhealthy": "❌",
+                            "unknown": "❓"
+                        }.get(health.get("connection_status", "unknown"), "❓")
+                        
+                        print(f"  {status_icon} {tool_id}:")
+                        print(f"    Health Score: {health.get('health_score', 0):.2f}")
+                        print(f"    Total Calls: {health.get('total_calls', 0)}")
+                        print(f"    Success Rate: {health.get('successful_calls', 0) / max(health.get('total_calls', 1), 1):.1%}")
+                        print(f"    Avg Response: {health.get('avg_response_time', 0):.2f}s")
+                        print(f"    Consecutive Failures: {health.get('consecutive_failures', 0)}")
+                        
+                        if health.get('last_failure_time'):
+                            print(f"    Last Failure: {health.get('last_failure_time', 'N/A')}")
+                    print()
+        except Exception as e:
+            print(f"Enhanced analysis unavailable: {e}")
+        
+        # Performance report
+        try:
+            performance_report = manager.generate_performance_report()
+            if performance_report and not performance_report.startswith("Performance report generation failed"):
+                print("PERFORMANCE REPORT:")
+                print(performance_report)
+        except Exception as e:
+            print(f"Performance report unavailable: {e}")
+        
+        # Log file analysis
+        logs_dir = Path(args.project_dir) / ".swarmdev" / "logs"
+        if logs_dir.exists():
+            print("LOG FILE ANALYSIS:")
+            
+            # Check for various log files
+            log_files = {
+                "mcp.log": "Main MCP log",
+                "mcp_detailed.log": "Detailed MCP operations",
+                "mcp_performance.log": "Performance metrics",
+                "mcp_errors.log": "Error tracking"
+            }
+            
+            for log_file, description in log_files.items():
+                log_path = logs_dir / log_file
+                if log_path.exists():
+                    size = log_path.stat().st_size
+                    print(f"  {log_file}: {size:,} bytes ({description})")
+                else:
+                    print(f"  {log_file}: Not found")
+            print()
+        
+        # Recent activity analysis (if logs exist)
+        mcp_log_path = logs_dir / "mcp.log" if logs_dir.exists() else None
+        if mcp_log_path and mcp_log_path.exists():
+            print("RECENT ACTIVITY (Last 10 calls):")
+            try:
+                import subprocess
+                result = subprocess.run(
+                    ["tail", "-n", "50", str(mcp_log_path)],
+                    capture_output=True,
+                    text=True
+                )
+                
+                if result.returncode == 0:
+                    lines = result.stdout.strip().split('\n')
+                    call_starts = [line for line in lines if "MCP CALL START" in line][-10:]
+                    
+                    for line in call_starts:
+                        # Extract basic info from log line
+                        if " Tool: " in line and " Method: " in line:
+                            try:
+                                tool_part = line.split(" Tool: ")[1].split(" | ")[0]
+                                method_part = line.split(" Method: ")[1].split(" | ")[0]
+                                timestamp = line.split(" | ")[0]
+                                print(f"  {timestamp} - {tool_part}.{method_part}")
+                            except:
+                                print(f"  {line}")
+                else:
+                    print("  Could not read recent activity from logs")
+            except Exception as e:
+                print(f"  Error reading recent activity: {e}")
+        
+        print("\n=== ANALYSIS COMPLETE ===")
+        
+    except Exception as e:
+        print(f"MCP analysis failed: {e}")
+        import traceback
+        if args.verbose:
+            traceback.print_exc()
+
+
 def main():
     """Main entry point for the SwarmDev CLI."""
     parser = setup_parser()
@@ -1238,6 +1400,8 @@ def main():
         cmd_analyze_logs(args)
     elif args.command == "blueprint":
         cmd_blueprint(args)
+    elif args.command == "mcp-analysis":
+        cmd_mcp_analysis(args)
     else:
         print(f"Unknown command: {args.command}")
         parser.print_help()

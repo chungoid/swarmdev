@@ -1,90 +1,48 @@
 {
   "mcpServers": {
     "git": {
-      "command": "python",
-      "args": [
-        "-m",
-        "mcp_server_git"
-      ],
-      "capabilities": [
-        "git_operations",
-        "repository_analysis"
-      ],
+      "command": "docker",
+      "args": ["run", "--rm", "-i", "mcp/git"],
+      "timeout": 45,
       "description": "Git repository operations and analysis"
     },
     "time": {
-      "command": "python",
-      "args": [
-        "-m",
-        "mcp_server_time"
-      ],
-      "capabilities": [
-        "time_operations",
-        "scheduling"
-      ],
+      "command": "docker",
+      "args": ["run", "--rm", "-i", "mcp/time"],
+      "timeout": 30,
       "description": "System time and scheduling operations"
     },
     "fetch": {
-      "command": "python",
-      "args": [
-        "-m",
-        "mcp_server_fetch"
-      ],
-      "capabilities": [
-        "web_requests",
-        "documentation_lookup"
-      ],
+      "command": "docker",
+      "args": ["run", "--rm", "-i", "mcp/fetch"],
+      "timeout": 60,
       "description": "Web requests and online research"
     },
-    "sequential-thinking": {
+    "sequentialthinking": {
       "command": "docker",
-      "args": [
-        "run",
-        "--rm",
-        "-i",
-        "swarmdev-mcp-sequential-thinking:latest"
-      ],
-      "capabilities": [
-        "reasoning",
-        "problem_solving"
-      ],
+      "args": ["run", "--rm", "-i", "mcp/sequentialthinking"],
+      "timeout": 45,
       "description": "Advanced reasoning and sequential thinking"
     },
     "memory": {
       "command": "docker",
-      "args": [
-        "run",
-        "--rm",
-        "-i",
-        "swarmdev-mcp-memory:latest"
-      ],
-      "capabilities": [
-        "memory",
-        "context_persistence"
-      ],
+      "args": ["run", "--rm", "-i", "mcp/memory"],
+      "timeout": 45,
       "description": "Persistent agent memory and context"
     },
-    "context7": {
+    "filesystem": {
       "command": "docker",
-      "args": [
-        "run",
-        "--rm",
-        "-i",
-        "context7-mcp:latest"
-      ],
-      "capabilities": [
-        "documentation",
-        "library_docs",
-        "api_reference"
-      ],
-      "description": "Up-to-date documentation for libraries and frameworks"
+      "args": ["run", "--rm", "-i", "mcp/filesystem"],
+      "timeout": 30,
+      "description": "File system operations and management"
     }
   },
-  "settings": {
-    "auto_install_pip_servers": true,
-    "enable_official_servers": true,
-    "docker_build_bundled": true,
-    "default_timeout": 30,
-    "retry_attempts": 3
+  "mcpSettings": {
+    "enabled": true,
+    "docker_enabled": true,
+    "docker_network": null,
+    "globalTimeout": 120,
+    "persistentConnections": true,
+    "optimisticInitialization": true
   }
 }

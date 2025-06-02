@@ -53,77 +53,95 @@ class ResearchAgent(BaseAgent):
             return self.handle_error(e, task)
         
     def _plan_research_approach(self, goal: str, context: Dict) -> Dict:
-        """Plan research approach, using reasoning tools if available."""
-        planning_problem = f"""
-        Plan a comprehensive research approach for this goal:
+        """Plan research approach using enhanced task execution."""
+        result = self.execute_enhanced_task(
+            task_description="Plan a comprehensive research approach for gathering relevant information",
+            context={"goal": goal, "context": context},
+            fallback_method=self._basic_research_planning
+        )
         
-        GOAL: {goal}
-        CONTEXT: {context}
+        # Extract plan from enhanced result for backward compatibility
+        if result.get("status") == "success":
+            plan_content = result.get("result", result)
+            return {"plan": plan_content, "method": result.get("method", "enhanced")}
+        else:
+            return {"plan": "Research planning failed", "method": "error"}
+    
+    def _basic_research_planning(self, task_description: str, context: Dict) -> Dict:
+        """Fallback research planning using LLM only."""
+        goal = context.get("goal", "")
+        research_context = context.get("context", {})
         
-        Consider:
-        1. What information needs to be gathered
-        2. What technologies/libraries should be researched
-        3. What documentation sources would be valuable
-        4. How to structure the research for maximum effectiveness
+        if not self.llm_provider:
+            return {
+                "status": "error",
+                "result": "Basic research planning requires LLM provider"
+            }
         
-        Develop a systematic research plan.
+        planning_prompt = f"""
+        Plan a research approach for: {goal}
+        
+        Context: {research_context}
+        
+        Create a structured research plan including:
+        1. Information gathering priorities
+        2. Technology research needs
+        3. Documentation sources to investigate
+        4. Research methodology
+        
+        Return as structured plan.
         """
         
-        # Try reasoning tool if available
-        if "sequential-thinking" in self.get_available_mcp_tools():
-            reasoning_result = self.call_mcp_tool(
-                "sequential-thinking",
-                "tools/call",
-                {
-                    "name": "sequential_thinking",
-                    "arguments": {
-                        "thought": planning_problem,
-                        "nextThoughtNeeded": True,
-                        "thoughtNumber": 1,
-                        "totalThoughts": 3
-                    }
-                },
-                timeout=20,
-                justification="Planning comprehensive research approach"
-            )
-            
-            if reasoning_result and not reasoning_result.get("error"):
-                return {"plan": reasoning_result, "method": "mcp_reasoning"}
-        
-        # LLM planning fallback
-        if self.llm_provider:
-            planning_prompt = f"""
-            Plan a research approach for: {goal}
-            
-            Context: {context}
-            
-            Create a structured research plan including:
-            1. Information gathering priorities
-            2. Technology research needs
-            3. Documentation sources to investigate
-            4. Research methodology
-            
-            Return as structured plan.
-            """
-            
+        try:
             plan_text = self.llm_provider.generate_text(planning_prompt, temperature=0.3)
-            return {"plan": plan_text, "method": "llm_planning"}
-        
-        return {"plan": "Basic research plan: investigate goal and gather relevant information", "method": "basic"}
+            return {
+                "status": "success",
+                "method": "llm_only",
+                "result": plan_text,
+                "tools_used": []
+            }
+        except Exception as e:
+            return {
+                "status": "error",
+                "result": f"Planning failed: {e}"
+            }
     
     def _conduct_research(self, research_plan: Dict, goal: str, context: Dict) -> Dict:
-        """
-        Conduct comprehensive research based on the research plan using all available tools.
-        """
-        results = {}
+        """Conduct comprehensive research using enhanced task execution."""
+        result = self.execute_enhanced_task(
+            task_description="Conduct comprehensive research based on the research plan",
+            context={"goal": goal, "research_plan": research_plan, "context": context},
+            fallback_method=self._basic_research_conduct
+        )
         
-        # Get LLM to do basic research  
+        # Return results in expected format
+        if result.get("status") == "success":
+            return {
+                "basic_research": result.get("result", "Research completed"),
+                "method": result.get("method", "enhanced"),
+                "tools_used": result.get("tools_used", [])
+            }
+        else:
+            return {"basic_research": "Research failed", "method": "error"}
+    
+    def _basic_research_conduct(self, task_description: str, context: Dict) -> Dict:
+        """Fallback research conduct using LLM only."""
+        goal = context.get("goal", "")
+        research_plan = context.get("research_plan", {})
+        research_context = context.get("context", {})
+        
+        if not self.llm_provider:
+            return {
+                "status": "error",
+                "result": "Basic research requires LLM provider"
+            }
+        
         research_prompt = f"""
         Conduct comprehensive research for this project:
         
         GOAL: {goal}
         RESEARCH PLAN: {json.dumps(research_plan, indent=2)}
-        CONTEXT: {json.dumps(context, indent=2)}
+        CONTEXT: {json.dumps(research_context, indent=2)}
         
         Provide detailed research findings covering:
         1. Technical requirements and considerations
@@ -135,140 +153,22 @@ class ResearchAgent(BaseAgent):
         Be thorough and provide actionable insights for implementation.
         """
         
-        basic_research = self.llm_provider.generate_text(research_prompt, temperature=0.3)
-        results["basic_research"] = basic_research
-        
-        # Use available MCP tools naturally if they would help
-        available_tools = self.get_available_mcp_tools()
-        if available_tools:
-            self.logger.info(f"Enhancing research with available MCP tools: {available_tools}")
-            
-            # Try documentation tools for frameworks mentioned
-            if "context7" in available_tools:
-                doc_result = self._try_documentation_lookup(goal, basic_research)
-                if doc_result:
-                    results["documentation_enhanced"] = doc_result
-            
-            # Try reasoning tools for complex problems
-            if "sequential-thinking" in available_tools:
-                reasoning_result = self._try_reasoning_enhancement(goal, research_plan)
-                if reasoning_result:
-                    results["reasoning_enhanced"] = reasoning_result
-            
-            # Try web research for latest information  
-            if "fetch" in available_tools:
-                web_result = self._try_web_research(goal, context)
-                if web_result:
-                    results["web_enhanced"] = web_result
-        
-        return results
-    
-    def _try_documentation_lookup(self, goal: str, basic_research: str) -> Optional[str]:
-        """Try to get documentation for technologies mentioned."""
         try:
-            # Let LLM identify what docs would be helpful
-            doc_prompt = f"""
-            Based on this goal and research, what specific technologies, frameworks, or libraries 
-            would benefit from up-to-date documentation lookup?
-            
-            GOAL: {goal}
-            RESEARCH: {basic_research[:500]}...
-            
-            List up to 3 specific technology names that would benefit from current documentation.
-            Return only the names, one per line. Examples:
-            FastAPI
-            React
-            SQLAlchemy
-            """
-            
-            tech_response = self.llm_provider.generate_text(doc_prompt, temperature=0.1)
-            technologies = [tech.strip() for tech in tech_response.split('\n') if tech.strip()]
-            
-            # Try to get docs for identified technologies
-            doc_results = []
-            for tech in technologies[:3]:  # Limit to 3
-                if len(tech) > 2 and len(tech) < 50:  # Basic validation
-                    result = self.call_mcp_tool(
-                        "context7", 
-                        "tools/call",
-                        {
-                            "name": "resolve-library-id",
-                            "arguments": {"libraryName": tech}
-                        },
-                        timeout=15,
-                        justification=f"Getting documentation for {tech}"
-                    )
-                    
-                    if result and not result.get("error"):
-                        doc_results.append(f"Documentation found for {tech}")
-                    
-            return f"Documentation lookup for: {', '.join(technologies)}" if doc_results else None
-            
+            research_result = self.llm_provider.generate_text(research_prompt, temperature=0.3)
+            return {
+                "status": "success",
+                "method": "llm_only",
+                "result": research_result,
+                "tools_used": []
+            }
         except Exception as e:
-            self.logger.warning(f"Documentation lookup failed: {e}")
-            return None
-    
-    def _try_reasoning_enhancement(self, goal: str, research_plan: Dict) -> Optional[str]:
-        """Try structured reasoning if it would help."""
-        try:
-            reasoning_prompt = f"""
-            Analyze this research goal systematically:
-            
-            GOAL: {goal}
-            RESEARCH PLAN: {json.dumps(research_plan, indent=2)}
-            
-            Break down the problem and identify key technical decisions needed.
-            """
-            
-            result = self.call_mcp_tool(
-                "sequential-thinking",
-                "tools/call", 
-                {
-                    "name": "sequential_thinking",
-                    "arguments": {
-                        "thought": reasoning_prompt,
-                        "nextThoughtNeeded": True,
-                        "thoughtNumber": 1,
-                        "totalThoughts": 3
-                    }
-                },
-                timeout=20,
-                justification="Using structured reasoning for research analysis"
-            )
-            
-            if result and not result.get("error"):
-                return "Structured reasoning analysis completed"
-            
-        except Exception as e:
-            self.logger.warning(f"Reasoning enhancement failed: {e}")
-            return None
-    
-    def _try_web_research(self, goal: str, context: Dict) -> Optional[str]:
-        """Try web research if helpful."""
-        try:
-            result = self.call_mcp_tool(
-                "fetch",
-                "tools/call",
-                {
-                    "name": "fetch", 
-                    "arguments": {
-                        "url": "https://docs.python.org/3/",
-                        "method": "GET"
-                    }
-                },
-                timeout=10,
-                justification="Testing web research capability"
-            )
-            
-            if result and not result.get("error"):
-                return "Web research capability verified"
-                
-        except Exception as e:
-            self.logger.warning(f"Web research failed: {e}")
-            return None
+            return {
+                "status": "error",
+                "result": f"Research failed: {e}"
+            }
     
 
-    
+     
     def _synthesize_research_findings(self, results: Dict, goal: str) -> str:
         """Synthesize research findings into actionable insights."""
         if not self.llm_provider:
@@ -376,68 +276,62 @@ class PlanningAgent(BaseAgent):
         return {"analysis": "No project context available", "project_dir": project_dir}
     
     def _create_detailed_plan(self, goal: str, context: Dict, project_context: Dict) -> Dict:
-        """Create detailed plan using dynamic MCP reasoning tools."""
-        planning_problem = f"""
-        Create a comprehensive plan for this development goal:
+        """Create detailed plan using enhanced task execution."""
+        result = self.execute_enhanced_task(
+            task_description="Create a comprehensive development plan",
+            context={"goal": goal, "context": context, "project_context": project_context},
+            fallback_method=self._basic_detailed_planning
+        )
+        
+        # Extract plan from enhanced result for backward compatibility
+        if result.get("status") == "success":
+            plan_content = result.get("result", result)
+            return {"plan": plan_content, "method": result.get("method", "enhanced")}
+        else:
+            return {"plan": "Planning failed", "method": "error"}
+    
+    def _basic_detailed_planning(self, task_description: str, context: Dict) -> Dict:
+        """Fallback detailed planning using LLM only."""
+        goal = context.get("goal", "")
+        planning_context = context.get("context", {})
+        project_context = context.get("project_context", {})
+        
+        if not self.llm_provider:
+            return {
+                "status": "error",
+                "result": "Basic planning requires LLM provider"
+            }
+        
+        planning_prompt = f"""
+        Create a detailed implementation plan:
         
         GOAL: {goal}
-        CONTEXT: {context}
+        CONTEXT: {planning_context}
         PROJECT CONTEXT: {project_context.get('analysis', 'None')}
         
-        Think through:
-        1. Understanding the requirements and scope
-        2. Analyzing the current project state
-        3. Identifying necessary components and architecture
-        4. Planning the implementation approach
-        5. Considering integration and testing strategies
+        Include:
+        1. Architecture and design considerations
+        2. Implementation phases
+        3. Component requirements
+        4. Integration approach
+        5. Testing and validation strategy
         
-        Develop a detailed, actionable plan.
+        Provide a structured, actionable plan.
         """
         
-        # Use sequential thinking for complex planning if available
-        if "sequential-thinking" in self.get_available_mcp_tools():
-            reasoning_result = self.call_mcp_tool(
-                "sequential-thinking",
-                "tools/call",
-                {
-                    "name": "sequential_thinking",
-                    "arguments": {
-                        "thought": planning_problem,
-                        "nextThoughtNeeded": True,
-                        "thoughtNumber": 1,
-                        "totalThoughts": 3
-                    }
-                },
-                timeout=20,
-                justification="Planning comprehensive implementation approach"
-            )
-            
-            if reasoning_result and not reasoning_result.get("error"):
-                return {"plan": reasoning_result, "method": "mcp_reasoning"}
-        
-        # Fallback to LLM planning
-        if self.llm_provider:
-            planning_prompt = f"""
-            Create a detailed implementation plan:
-            
-            GOAL: {goal}
-            CONTEXT: {context}
-            PROJECT CONTEXT: {project_context.get('analysis', 'None')}
-            
-            Include:
-            1. Architecture and design considerations
-            2. Implementation phases
-            3. Component requirements
-            4. Integration approach
-            5. Testing and validation strategy
-            
-            Provide a structured, actionable plan.
-            """
-            
+        try:
             plan_text = self.llm_provider.generate_text(planning_prompt, temperature=0.3)
-            return {"plan": plan_text, "method": "llm_fallback"}
-        
-        return {"plan": "Basic implementation plan required", "method": "basic"}
+            return {
+                "status": "success",
+                "method": "llm_only",
+                "result": plan_text,
+                "tools_used": []
+            }
+        except Exception as e:
+            return {
+                "status": "error",
+                "result": f"Planning failed: {e}"
+            }
     
     def _break_down_tasks(self, detailed_plan: Dict, goal: str) -> List[Dict]:
         """Break down the plan into specific, actionable tasks."""
@@ -592,15 +486,46 @@ class DevelopmentAgent(BaseAgent):
         return {"analysis": "No project analysis available", "project_dir": project_dir}
     
     def _plan_implementation(self, goal: str, context: Dict, project_analysis: Dict) -> Dict:
-        """Plan implementation approach using LLM analysis."""
+        """Plan implementation approach using enhanced task execution."""
+        result = self.execute_enhanced_task(
+            task_description="Plan implementation approach and architecture for the development goal",
+            context={"goal": goal, "context": context, "project_analysis": project_analysis},
+            fallback_method=self._basic_implementation_planning
+        )
+        
+        # Process result for backward compatibility
+        if result.get("status") == "success":
+            plan_content = result.get("result", "Implementation plan completed")
+            
+            # Extract file list from plan if needed
+            files = self._extract_files_from_plan(plan_content, goal)
+            
+            return {
+                "approach": plan_content, 
+                "files": files,
+                "method": result.get("method", "enhanced"),
+                "tools_used": result.get("tools_used", [])
+            }
+        else:
+            return {"approach": "Implementation planning failed", "files": ["main.py"]}
+    
+    def _basic_implementation_planning(self, task_description: str, context: Dict) -> Dict:
+        """Fallback implementation planning using LLM only."""
+        goal = context.get("goal", "")
+        dev_context = context.get("context", {})
+        project_analysis = context.get("project_analysis", {})
+        
         if not self.llm_provider:
-            return {"approach": "Basic implementation required", "files": []}
+            return {
+                "status": "error",
+                "result": "Basic implementation planning requires LLM provider"
+            }
         
         planning_prompt = f"""
         Plan the implementation for this development goal:
         
         GOAL: {goal}
-        CONTEXT: {context}
+        CONTEXT: {dev_context}
         PROJECT ANALYSIS: {project_analysis.get('analysis', 'None')}
         
         Plan:
@@ -615,25 +540,41 @@ class DevelopmentAgent(BaseAgent):
         
         try:
             plan = self.llm_provider.generate_text(planning_prompt, temperature=0.3)
-            
-            # Extract file list from plan
-            file_extraction_prompt = f"""
-            From this implementation plan, extract the specific files that need to be created or modified:
-            
-            PLAN: {plan}
-            
-            Return a simple list of file paths (one per line), relative to project root.
-            Include:
-            1. Main implementation files (.py, .js, etc.)
-            2. Configuration files (.json, .yaml, .env, etc.)
-            3. Documentation files (README.md, requirements.txt, etc.)
-            4. Package structure files (__init__.py for Python packages)
-            5. Test files if mentioned
-            
-            For Python projects, include __init__.py files for any new packages/directories.
-            Use proper file extensions and follow language conventions.
-            """
-            
+            return {
+                "status": "success",
+                "method": "llm_only",
+                "result": plan,
+                "tools_used": []
+            }
+        except Exception as e:
+            return {
+                "status": "error",
+                "result": f"Implementation planning failed: {e}"
+            }
+    
+    def _extract_files_from_plan(self, plan: str, goal: str) -> List[str]:
+        """Extract file list from implementation plan."""
+        if not self.llm_provider:
+            return ["main.py"]
+        
+        file_extraction_prompt = f"""
+        From this implementation plan, extract the specific files that need to be created or modified:
+        
+        PLAN: {plan}
+        
+        Return a simple list of file paths (one per line), relative to project root.
+        Include:
+        1. Main implementation files (.py, .js, etc.)
+        2. Configuration files (.json, .yaml, .env, etc.)
+        3. Documentation files (README.md, requirements.txt, etc.)
+        4. Package structure files (__init__.py for Python packages)
+        5. Test files if mentioned
+        
+        For Python projects, include __init__.py files for any new packages/directories.
+        Use proper file extensions and follow language conventions.
+        """
+        
+        try:
             files_response = self.llm_provider.generate_text(file_extraction_prompt, temperature=0.1)
             files = []
             for line in files_response.split('\n'):
@@ -649,14 +590,13 @@ class DevelopmentAgent(BaseAgent):
                     if any(line.endswith(ext) for ext in valid_extensions) or line == '__init__.py':
                         files.append(line)
             
-            
             # Intelligent file limiting - allow more files for complex projects
             max_files = min(len(files), 15 if len(goal) > 300 else 10)
-            return {"approach": plan, "files": files[:max_files]}
+            return files[:max_files]
             
         except Exception as e:
-            self.logger.error(f"Implementation planning failed: {e}")
-            return {"approach": "Direct implementation", "files": ["main.py"]}
+            self.logger.error(f"File extraction failed: {e}")
+            return ["main.py"]
     
     def _implement_solution(self, implementation_plan: Dict, project_dir: str) -> Dict:
         """Implement the solution by generating code for planned files."""
@@ -873,15 +813,47 @@ class AnalysisAgent(BaseAgent):
         return {"analysis": "Project state analysis not available", "project_dir": project_dir}
     
     def _analyze_improvements(self, goal: str, context: Dict, project_state: Dict) -> Dict:
-        """Analyze what improvements are needed based on the goal and current state."""
+        """Analyze what improvements are needed using enhanced task execution."""
+        result = self.execute_enhanced_task(
+            task_description="Analyze what improvements are needed to achieve the goal",
+            context={"goal": goal, "context": context, "project_state": project_state},
+            fallback_method=self._basic_improvement_analysis
+        )
+        
+        # Process result for backward compatibility
+        if result.get("status") == "success":
+            analysis_content = result.get("result", "Improvement analysis completed")
+            
+            # Extract improvements from analysis
+            improvements = self._extract_improvements_from_analysis(analysis_content)
+            
+            return {
+                "analysis": analysis_content,
+                "improvements": improvements,
+                "improvement_count": len(improvements),
+                "method": result.get("method", "enhanced"),
+                "tools_used": result.get("tools_used", [])
+            }
+        else:
+            return {"improvements": ["Analysis failed - manual review needed"], "improvement_count": 1}
+    
+    def _basic_improvement_analysis(self, task_description: str, context: Dict) -> Dict:
+        """Fallback improvement analysis using LLM only."""
+        goal = context.get("goal", "")
+        analysis_context = context.get("context", {})
+        project_state = context.get("project_state", {})
+        
         if not self.llm_provider:
-            return {"improvements": ["Basic analysis not available"], "improvement_count": 1}
+            return {
+                "status": "error",
+                "result": "Basic improvement analysis requires LLM provider"
+            }
         
         improvement_prompt = f"""
         Analyze what improvements are needed for this project:
         
         GOAL: {goal}
-        CONTEXT: {context}
+        CONTEXT: {analysis_context}
         PROJECT STATE: {project_state.get('analysis', 'None')}
         
         Identify:
@@ -891,35 +863,46 @@ class AnalysisAgent(BaseAgent):
         4. Architectural enhancements within scope of the goal
         5. Integration requirements
         6. Reorganization of file or code structure
-        6. Documentation needs
-        7. Testing requirements
+        7. Documentation needs
+        8. Testing requirements
         
         Provide specific, actionable improvement suggestions.
         """
         
         try:
             analysis = self.llm_provider.generate_text(improvement_prompt, temperature=0.3)
-            
-            # Extract specific improvements
-            improvements_prompt = f"""
-            From this analysis, extract specific improvement actions:
-            
-            ANALYSIS: {analysis}
-            
-            Return a numbered list of specific, actionable improvements.
-            """
-            
-            improvements_response = self.llm_provider.generate_text(improvements_prompt, temperature=0.2)
-            improvements = [imp.strip() for imp in improvements_response.split('\n') if imp.strip()]
-            
             return {
-                "analysis": analysis,
-                "improvements": improvements,
-                "improvement_count": len(improvements)
+                "status": "success",
+                "method": "llm_only",
+                "result": analysis,
+                "tools_used": []
             }
         except Exception as e:
-            self.logger.error(f"Improvement analysis failed: {e}")
-            return {"improvements": ["Analysis failed - manual review needed"], "improvement_count": 1}
+            return {
+                "status": "error",
+                "result": f"Improvement analysis failed: {e}"
+            }
+    
+    def _extract_improvements_from_analysis(self, analysis: str) -> List[str]:
+        """Extract specific improvements from analysis."""
+        if not self.llm_provider:
+            return ["Analysis completed - manual review needed"]
+        
+        improvements_prompt = f"""
+        From this analysis, extract specific improvement actions:
+        
+        ANALYSIS: {analysis}
+        
+        Return a numbered list of specific, actionable improvements.
+        """
+        
+        try:
+            improvements_response = self.llm_provider.generate_text(improvements_prompt, temperature=0.2)
+            improvements = [imp.strip() for imp in improvements_response.split('\n') if imp.strip()]
+            return improvements
+        except Exception as e:
+            self.logger.error(f"Improvement extraction failed: {e}")
+            return ["Analysis completed - manual review needed"]
     
     def _create_evolved_goal(self, original_goal: str, project_state: Dict, improvement_analysis: Dict, iteration_count: int) -> str:
         """Create an evolved goal for the next iteration based on current progress."""
@@ -1042,15 +1025,46 @@ class DocumentationAgent(BaseAgent):
         return {"analysis": "Documentation analysis not available", "project_dir": project_dir}
     
     def _generate_documentation(self, goal: str, context: Dict, project_analysis: Dict) -> Dict:
-        """Generate comprehensive documentation content."""
+        """Generate comprehensive documentation content using enhanced task execution."""
+        result = self.execute_enhanced_task(
+            task_description="Generate comprehensive project documentation",
+            context={"goal": goal, "context": context, "project_analysis": project_analysis},
+            fallback_method=self._basic_documentation_generation
+        )
+        
+        # Process result for backward compatibility
+        if result.get("status") == "success":
+            doc_content = result.get("result", "Documentation generated")
+            
+            # Generate README from documentation
+            readme_content = self._generate_readme_from_docs(doc_content, goal)
+            
+            return {
+                "full_documentation": doc_content,
+                "readme": readme_content,
+                "generation_method": result.get("method", "enhanced"),
+                "tools_used": result.get("tools_used", [])
+            }
+        else:
+            return {"content": f"Documentation for: {goal}", "generation_method": "error"}
+    
+    def _basic_documentation_generation(self, task_description: str, context: Dict) -> Dict:
+        """Fallback documentation generation using LLM only."""
+        goal = context.get("goal", "")
+        doc_context = context.get("context", {})
+        project_analysis = context.get("project_analysis", {})
+        
         if not self.llm_provider:
-            return {"content": "Documentation generation requires LLM provider"}
+            return {
+                "status": "error",
+                "result": "Basic documentation generation requires LLM provider"
+            }
         
         doc_generation_prompt = f"""
         Generate comprehensive documentation for this project goal:
         
         GOAL: {goal}
-        CONTEXT: {context}
+        CONTEXT: {doc_context}
         PROJECT ANALYSIS: {project_analysis.get('analysis', 'None')}
         
         Create documentation including:
@@ -1066,36 +1080,46 @@ class DocumentationAgent(BaseAgent):
         
         try:
             content = self.llm_provider.generate_text(doc_generation_prompt, temperature=0.3)
-            
-            # Generate specific README content
-            readme_prompt = f"""
-            Create a professional README.md file for this project:
-            
-            GOAL: {goal}
-            FULL DOCUMENTATION: {content[:1000]}...
-            
-            Include:
-            - Clear project title and description
-            - Installation instructions
-            - Quick start guide
-            - Basic usage examples
-            - Contributing guidelines
-            - License information
-            
-            Format as proper Markdown.
-            """
-            
-            readme_content = self.llm_provider.generate_text(readme_prompt, temperature=0.2)
-            
             return {
-                "full_documentation": content,
-                "readme": readme_content,
-                "generation_method": "llm"
+                "status": "success",
+                "method": "llm_only",
+                "result": content,
+                "tools_used": []
             }
-            
         except Exception as e:
-            self.logger.error(f"Documentation generation failed: {e}")
-            return {"content": f"Documentation for: {goal}", "generation_method": "basic"}
+            return {
+                "status": "error",
+                "result": f"Documentation generation failed: {e}"
+            }
+    
+    def _generate_readme_from_docs(self, doc_content: str, goal: str) -> str:
+        """Generate README.md from comprehensive documentation."""
+        if not self.llm_provider:
+            return f"# {goal}\n\nProject documentation will be available soon."
+        
+        readme_prompt = f"""
+        Create a professional README.md file for this project:
+        
+        GOAL: {goal}
+        FULL DOCUMENTATION: {doc_content[:1000]}...
+        
+        Include:
+        - Clear project title and description
+        - Installation instructions
+        - Quick start guide
+        - Basic usage examples
+        - Contributing guidelines
+        - License information
+        
+        Format as proper Markdown.
+        """
+        
+        try:
+            readme_content = self.llm_provider.generate_text(readme_prompt, temperature=0.2)
+            return readme_content
+        except Exception as e:
+            self.logger.error(f"README generation failed: {e}")
+            return f"# {goal}\n\nProject documentation will be available soon."
     
     def _plan_documentation_structure(self, documentation_content: Dict) -> Dict:
         """Plan the organization and structure of documentation files."""
