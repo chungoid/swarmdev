@@ -8,6 +8,9 @@
 /logs
 /agent_work
 /tests
+/.swarmdev/logs
+/.swarmdev/mcp_test_results.json
+/.swarmdev
 
 # Python cache directories at any level
 __pycache__/

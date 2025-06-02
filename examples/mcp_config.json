@@ -1,23 +1,53 @@
 {
-  "enabled": true,
-  "docker_enabled": true,
-  "docker_network": null,
-  "global_timeout": 120,
-  "persistent_connections": true,
   "servers": {
-    "sequentialthinking": {
-      "command": "docker",
-      "args": ["run", "--rm", "-i", "mcp/sequentialthinking"],
-      "capabilities": ["reasoning"],
+    "git": {
+      "command": ["docker", "run", "--rm", "-i", "mcp/git"],
+      "timeout": 30,
+      "enabled": true,
+      "description": "Git operations and repository management"
+    },
+    "time": {
+      "command": ["docker", "run", "--rm", "-i", "mcp/time"],
+      "timeout": 30,
+      "enabled": true,
+      "description": "Time zone operations and conversions"
+    },
+    "fetch": {
+      "command": ["docker", "run", "--rm", "-i", "mcp/fetch"],
+      "timeout": 30,
+      "enabled": true,
+      "description": "Web content fetching and processing"
+    },
+    "filesystem": {
+      "command": ["docker", "run", "--rm", "-i", "-v", "$(pwd):/workspace", "mcp/filesystem", "/workspace"],
+      "timeout": 30,
+      "enabled": true,
+      "description": "File system operations with current directory access"
+    },
+    "memory": {
+      "command": ["docker", "run", "--rm", "-i", "mcp/memory"],
+      "timeout": 30,
+      "enabled": true,
+      "description": "Persistent memory storage for context"
+    },
+    "sequential-thinking": {
+      "command": ["docker", "run", "--rm", "-i", "mcp/sequentialthinking"],
       "timeout": 60,
-      "name": "sequentialthinking"
+      "enabled": true,
+      "description": "Advanced reasoning through sequential thoughts"
     },
     "context7": {
-      "command": "docker",
-      "args": ["run", "-i", "--rm", "context7-mcp"],
-      "capabilities": ["documentation"],
-      "timeout": 60,
-      "name": "context7"
+      "command": ["docker", "run", "--rm", "-i", "-e", "MCP_TRANSPORT=stdio", "context7-mcp"],
+      "timeout": 30,
+      "enabled": true,
+      "description": "Up-to-date documentation and code examples"
     }
+  },
+  "settings": {
+    "defaultTimeout": 30,
+    "persistentConnections": true,
+    "autoDiscovery": true,
+    "retryCount": 3,
+    "retryDelay": 1.0
   }
-}
+} 

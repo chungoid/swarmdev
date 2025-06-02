@@ -9,7 +9,7 @@ This directory contains practical examples and configuration files to help you g
 - **`swarmdev_config.json`** - Example main configuration file with model-aware settings
 
 ### MCP (Model Context Protocol) Setup
-- **`mcp_config.json`** - Example MCP server configuration
+- **`mcp_config.json`** - **CORRECT** MCP server configuration for all 7 bundled servers
 - **`mcp_setup_guide.md`** - Complete guide for setting up external MCP servers
 
 ## Model-Aware Configuration System
@@ -21,6 +21,20 @@ SwarmDev now uses an intelligent **model-aware configuration system** that autom
 - **Automatic Parameter Translation**: `max_tokens` becomes `max_completion_tokens` for o1, `max_output_tokens` for Gemini
 - **Smart Constraints**: Temperature restrictions for reasoning models (o1, o3, o4 series) handled automatically
 - **Optimal Defaults**: Each model family gets appropriate token limits and parameters
+
+## Built-in MCP Servers
+
+SwarmDev includes **7 bundled Docker-based MCP servers** that work out of the box:
+
+1. **git** - Git operations and repository management
+2. **time** - Time zone operations and conversions  
+3. **fetch** - Web content fetching and processing
+4. **filesystem** - File system operations with current directory access
+5. **memory** - Persistent memory storage for context
+6. **sequential-thinking** - Advanced reasoning through sequential thoughts
+7. **context7** - Up-to-date documentation and code examples
+
+**Important**: The `mcp_config.json` file shows the correct configuration format. SwarmDev works without any MCP configuration files (uses built-in defaults), but you can customize server settings using this format.
 
 ## Quick Start
 
@@ -42,11 +56,11 @@ swarmdev assistant
 # Create a goal file
 echo "Create a React todo app with CRUD operations" > goal.txt
 
-# Build with default settings (model-aware optimization)
+# Build with default settings (uses built-in MCP servers automatically)
 swarmdev build --goal goal.txt --project-dir ./my_project
 ```
 
-### 3. Advanced Setup with MCP Tools
+### 3. Advanced Setup with Custom MCP Configuration
 
 ```bash
 # Copy both configuration files to project
@@ -54,7 +68,7 @@ mkdir -p my_project/.swarmdev
 cp examples/swarmdev_config.json my_project/.swarmdev/
 cp examples/mcp_config.json my_project/.swarmdev/
 
-# Start building with enhanced MCP capabilities
+# Start building with customized MCP settings
 swarmdev build --goal goal.txt --project-dir ./my_project
 ```
 
@@ -82,24 +96,41 @@ The model-aware configuration automatically handles differences between provider
 
 ### MCP Configuration (`.swarmdev/mcp_config.json`)
 
-Enables powerful external reasoning and documentation tools:
+Configure the 7 bundled MCP servers (all Docker-based):
 
 ```json
 {
   "servers": {
-    "sequential_thinking": {
-      "command": "docker",
-      "args": ["run", "--rm", "-p", "8000:8000", "sequential-thinking:latest"],
-      "capabilities": ["reasoning", "planning"]
+    "git": {
+      "command": ["docker", "run", "--rm", "-i", "mcp/git"],
+      "timeout": 30,
+      "enabled": true,
+      "description": "Git operations and repository management"
+    },
+    "sequential-thinking": {
+      "command": ["docker", "run", "--rm", "-i", "mcp/sequentialthinking"],
+      "timeout": 60,
+      "enabled": true,
+      "description": "Advanced reasoning through sequential thoughts"
     },
     "context7": {
-      "command": "mcp-context7",
-      "args": ["--api-key", "${CONTEXT7_API_KEY}"],
-      "capabilities": ["documentation", "reasoning"]
+      "command": ["docker", "run", "--rm", "-i", "-e", "MCP_TRANSPORT=stdio", "context7-mcp"],
+      "timeout": 30,
+      "enabled": true,
+      "description": "Up-to-date documentation and code examples"
     }
+  },
+  "settings": {
+    "defaultTimeout": 30,
+    "persistentConnections": true,
+    "autoDiscovery": true,
+    "retryCount": 3,
+    "retryDelay": 1.0
   }
 }
 ```
+
+**Note**: This is just a partial example. The complete file includes all 7 servers (git, time, fetch, filesystem, memory, sequential-thinking, context7).
 
 ## Provider Examples
 

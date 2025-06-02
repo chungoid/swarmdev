@@ -12,7 +12,7 @@ SwarmDev is a comprehensive multi-agent swarm platform that enables autonomous p
 - **Multiple Workflow Types**: 7 specialized workflows for different development scenarios  
 - **Autonomous Swarm Intelligence**: Specialized agents collaborate on research, planning, development, and documentation
 - **Real-time Monitoring**: Live progress tracking with detailed status information
-- **Enhanced MCP Integration**: 5 built-in MCP servers for git operations, web research, advanced reasoning, and persistent memory
+- **Enhanced MCP Integration**: 7 built-in Docker-based MCP servers for git operations, web research, advanced reasoning, and persistent memory
 - **Flexible LLM Support**: Auto-detection and support for OpenAI, Anthropic, and Google providers
 - **Background Processing**: Run long projects in the background with monitoring capabilities
 
@@ -27,7 +27,30 @@ SwarmDev is a comprehensive multi-agent swarm platform that enables autonomous p
 ```bash
 git clone https://github.com/chungoid/swarmdev.git
 cd swarmdev
+python3 -m venv .venv
 pip install -e .
+cd scripts
+python3 test_mcp_installation.py
+
+============================================================
+FINAL TEST REPORT
+============================================================
+
+Overall Score: 100.0% (6/6 tests passed)
+
+Configuration Loading: PASSED
+   Servers found: 7
+
+Server Initialization: PASSED
+
+Functionality Tests:
+   memory: PASSED (0.48s)
+   time: PASSED (0.79s)
+   git: PASSED (0.88s)
+
+Performance Test: PASSED
+
+EXCELLENT! Your MCP installation is working great!
 
 # Set up API keys
 export OPENAI_API_KEY="your-key"
@@ -37,20 +60,21 @@ export ANTHROPIC_API_KEY="your-key"
 
 ## Built-in MCP Integration
 
-SwarmDev automatically sets up 6 MCP servers during installation:
+SwarmDev automatically sets up 7 Docker-based MCP servers during installation:
 
 | Server | Type | Capabilities | Description |
 |--------|------|-------------|-------------|
-| **git** | Python | Repository operations | Git analysis, file operations, version control |
-| **time** | Python | Temporal operations | System time, scheduling, time-aware reasoning |
-| **fetch** | Python | Web requests | Online research, documentation lookup |
-| **sequential-thinking** | Docker | Advanced reasoning | Sequential thoughts, branching logic, problem solving |
-| **memory** | Docker | Persistent storage | Agent memory, context persistence across sessions |
-| **context7** | Docker | Documentation access | Up-to-date library and framework documentation |
+| **git** | Docker (Python) | Repository operations | Git analysis, file operations, version control |
+| **time** | Docker (Python) | Temporal operations | System time, scheduling, time-aware reasoning |
+| **fetch** | Docker (Python) | Web requests | Online research, documentation lookup |
+| **filesystem** | Docker (Node.js) | Filesystem commands | Agentic usage of filesystem operations |
+| **sequential-thinking** | Docker (Node.js) | Advanced reasoning | Sequential thoughts, branching logic, problem solving |
+| **memory** | Docker (Node.js) | Persistent storage | Agent memory, context persistence across sessions |
+| **context7** | Docker (Node.js) | Documentation access | Up-to-date library and framework documentation |
 
 ### Adding Additional MCP Servers
 
-To add more MCP servers beyond the built-in 6, edit your configuration:
+To add more MCP servers beyond the built-in 7, edit your configuration:
 
 **Global config** (affects all projects): `~/.swarmdev/mcp_config.json`
 **Project config** (project-specific): `./project/.swarmdev/mcp_config.json`
@@ -59,8 +83,7 @@ To add more MCP servers beyond the built-in 6, edit your configuration:
 {
   "mcpServers": {
     "your-server": {
-      "command": "python",
-      "args": ["-m", "your_mcp_server"],
+      "command": ["docker", "run", "-i", "--rm", "your-server-image"],
       "capabilities": ["your_capabilities"],
       "description": "Your server description"
     }
@@ -132,6 +155,8 @@ swarmdev build --goal GOAL_FILE [OPTIONS]
                             [standard_project, research_only, development_only, 
                              indefinite, iteration, refactor, versioned]
 --max-iterations N           Max iterations for iteration workflow (default: 3)
+--target-version VERSION     Target version for versioned workflow (e.g., "2.0", "1.5")
+--current-version VERSION    Current version for versioned workflow (auto-detected if not provided)
 
 # Execution Options
 --project-dir, -d PATH       Project directory (default: ./project)
@@ -163,6 +188,40 @@ swarmdev workflows
 
 # Detailed descriptions and usage examples  
 swarmdev workflows --verbose
+```
+
+### Analyze Logs
+```bash
+swarmdev analyze-logs [OPTIONS]
+
+# Options
+--logs-dir DIR              Directory containing log files (default: .swarmdev/logs)
+--output, -o FILE           Output file for analysis report (default: workflow_analysis.md)
+--workflow-id ID            Filter analysis by specific workflow ID
+--show-report               Display report summary in terminal
+```
+
+### Blueprint Management
+```bash
+# Show blueprint status
+swarmdev blueprint status [--project-dir DIR]
+
+# Display detailed blueprint
+swarmdev blueprint show [--project-dir DIR] [--format markdown|json]
+
+# Add user feedback
+swarmdev blueprint feedback "Your feedback text" [--project-dir DIR] [--run-number N]
+
+# Modify blueprint items
+swarmdev blueprint modify [--project-dir DIR] [--phase PHASE] [--item ITEM] [--status STATUS]
+```
+
+### MCP Analysis
+```bash
+swarmdev mcp-analysis [--project-dir DIR]
+
+# Analyzes MCP system performance and health
+# Shows tool usage, success rates, and performance metrics
 ```
 
 ## Usage Examples
@@ -198,6 +257,19 @@ swarmdev build --goal refactor_goal.txt --workflow refactor --project-dir ./exis
 
 # Version-driven development
 swarmdev build --goal goal.txt --workflow versioned --target-version 2.0 --max-iterations 15
+```
+
+### Advanced Usage
+```bash
+# Analyze workflow performance
+swarmdev analyze-logs --show-report
+
+# Manage project blueprints
+swarmdev blueprint status
+swarmdev blueprint feedback "Add better error handling to the authentication module"
+
+# Check MCP system health
+swarmdev mcp-analysis
 ```
 
 ### Background Processing

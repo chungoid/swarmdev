@@ -17,10 +17,16 @@ import json
 import time
 from typing import Dict, List, Tuple
 
-# Add SwarmDev source to path
+# Add SwarmDev source to path and ensure we're running from project root
 script_dir = os.path.dirname(os.path.abspath(__file__))
-swarmdev_src = os.path.join(os.path.dirname(script_dir), 'src')
+project_root = os.path.dirname(script_dir)  # Parent of scripts/ directory
+swarmdev_src = os.path.join(project_root, 'src')
 sys.path.insert(0, swarmdev_src)
+
+# Change to project root directory to ensure .swarmdev is created in the right place
+original_cwd = os.getcwd()
+os.chdir(project_root)
+print(f"Running MCP tests from project root: {project_root}")
 
 from swarmdev.utils.mcp_manager import MCPManager
 
@@ -80,10 +86,12 @@ class MCPInstallationTester:
                 print("FAILED: MCP not enabled")
                 return False
             
-            # Check available servers
-            available_tools = self.mcp_manager.get_available_tools()
+            # Check configured servers (before initialization)
+            # get_available_tools() only returns "ready" or "connected" servers
+            # At this stage, servers are still "configured", so we check the servers dict directly
+            configured_servers = list(self.mcp_manager.servers.keys())
             
-            if not available_tools:
+            if not configured_servers:
                 self.results['config_test'] = {
                     'status': 'failed', 
                     'details': 'No MCP servers found in configuration'
@@ -94,13 +102,13 @@ class MCPInstallationTester:
             self.results['config_test'] = {
                 'status': 'passed',
                 'details': {
-                    'servers_found': len(available_tools),
-                    'server_list': available_tools
+                    'servers_found': len(configured_servers),
+                    'server_list': configured_servers
                 }
             }
             
             print(f"PASSED: Configuration loaded successfully")
-            print(f"   Found {len(available_tools)} servers: {', '.join(available_tools)}")
+            print(f"   Found {len(configured_servers)} servers: {', '.join(configured_servers)}")
             return True
             
         except Exception as e:
@@ -508,15 +516,20 @@ class MCPInstallationTester:
 
 def main():
     """Main test function."""
-    tester = MCPInstallationTester()
-    success = tester.run_all_tests()
-    
-    # Return appropriate exit code
-    overall_score = tester.results.get('overall_score', 0)
-    if overall_score >= 60:  # 60% threshold for "success"
-        return True
-    else:
-        return False
+    try:
+        tester = MCPInstallationTester()
+        success = tester.run_all_tests()
+        
+        # Return appropriate exit code
+        overall_score = tester.results.get('overall_score', 0)
+        if overall_score >= 60:  # 60% threshold for "success"
+            return True
+        else:
+            return False
+    finally:
+        # Always restore original working directory
+        if 'original_cwd' in globals():
+            os.chdir(original_cwd)
 
 
 if __name__ == "__main__":
@@ -525,7 +538,13 @@ if __name__ == "__main__":
         sys.exit(0 if success else 1)
     except KeyboardInterrupt:
         print("\n\nTest interrupted by user")
+        # Restore working directory on interrupt
+        if 'original_cwd' in globals():
+            os.chdir(original_cwd)
         sys.exit(1)
     except Exception as e:
         print(f"\nTest suite crashed: {e}")
+        # Restore working directory on crash
+        if 'original_cwd' in globals():
+            os.chdir(original_cwd)
         sys.exit(1) 
