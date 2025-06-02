@@ -53,17 +53,17 @@ class WorkflowState:
     human_input_requested: Optional[str] = None
 
 
+
+
+
 @dataclass
-class AgentMemory:
-    """Persistent memory for the collaborative agent."""
-    session_id: str
-    user_preferences: Dict
-    project_context: Dict
-    conversation_history: List[ConversationMessage]
-    workflow_history: List[WorkflowState]
-    learned_patterns: Dict
-    created_at: str
-    updated_at: str
+class ToolRetryState:
+    """Track retry attempts for tools."""
+    tool_id: str
+    last_attempt: float
+    consecutive_failures: int
+    last_error: str
+    cooldown_until: float = 0.0
 
 
 class CollaborativeAgent:
@@ -77,6 +77,7 @@ class CollaborativeAgent:
     - Natural MCP tool usage for enhanced capabilities
     - Learning user preferences and adapting behavior
     - Memory persistence across sessions
+    - Enhanced tool retry logic and error recovery
     """
     
     def __init__(self, 
@@ -91,6 +92,10 @@ class CollaborativeAgent:
         self.config = config or {}
         self.verbose = self.config.get("verbose", False)
         
+        # Recursion guard to prevent infinite loops
+        self._recursion_depth = 0
+        self._max_recursion_depth = 3
+        
         # Set up logging
         self.logger = logging.getLogger(f"swarmdev.collaborative_agent")
         if self.verbose:
@@ -98,28 +103,25 @@ class CollaborativeAgent:
         
         # Session state
         self.session_id = f"session_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-        self.memory: Optional[AgentMemory] = None
         self.current_workflow: Optional[WorkflowState] = None
         self.is_active = False
         
         # Communication state
         self.conversation_history: List[ConversationMessage] = []
         
-        # Initialize memory
-        self._initialize_memory()
+        # Tool retry management
+        self.tool_retry_states: Dict[str, ToolRetryState] = {}
+        self.max_retries = 3
+        self.base_cooldown = 30.0  # 30 seconds base cooldown
         
-        # Log MCP tool availability on startup if verbose
-        if self.verbose and self.mcp_manager:
-            self.logger.info(f"COLLABORATIVE AGENT: Initializing with MCP tools")
-            available_tools = self.mcp_manager.get_available_tools()
-            self.logger.info(f"COLLABORATIVE AGENT: Available MCP tools: {available_tools}")
-            for tool_id in available_tools:
-                tool_info = self.mcp_manager.get_tool_info(tool_id)
-                self.logger.debug(f"COLLABORATIVE AGENT: Tool {tool_id} - {tool_info}")
-        elif not self.mcp_manager:
-            self.logger.info(f"COLLABORATIVE AGENT: No MCP manager provided")
+        # Build MCP tool catalog (stolen from BaseAgent)
+        if self.mcp_manager:
+            self.mcp_tool_catalog = self._build_tool_catalog()
         else:
-            self.logger.info(f"COLLABORATIVE AGENT: Initialized with {len(self.mcp_manager.get_available_tools()) if self.mcp_manager else 0} MCP tools")
+            self.mcp_tool_catalog = {}
+        
+        # Log MCP tool availability on startup
+        self._log_mcp_initialization()
         
         # Core agent state
         self.workflow_builder: Optional[SwarmBuilder] = None
@@ -138,12 +140,365 @@ class CollaborativeAgent:
         
         self.logger.info(f"Collaborative Agent initialized - Session: {self.session_id}")
     
+    def _build_tool_catalog(self) -> Dict:
+        """Build tool catalog for MCP tools (stolen from BaseAgent)."""
+        catalog = {}
+        
+        if not self.mcp_manager:
+            return catalog
+        
+        available_tools = self.mcp_manager.get_available_tools()
+        for tool_id in available_tools:
+            try:
+                tool_info = self.mcp_manager.get_tool_info(tool_id)
+                capabilities = self.mcp_manager.get_server_capabilities(tool_id)
+                
+                catalog[tool_id] = {
+                    "status": "available", 
+                    "description": f"MCP tool: {tool_id}",
+                    "capabilities": capabilities,
+                    "tools": capabilities.get("tools", []) if capabilities else []
+                }
+            except Exception as e:
+                catalog[tool_id] = {
+                    "status": "error",
+                    "description": f"MCP tool: {tool_id} (failed to load)",
+                    "error": str(e)
+                }
+        
+        return catalog
+    
+    def call_mcp_tool(self, tool_id: str, method_name: str, parameters: Dict, timeout: Optional[int] = None) -> Dict:
+        """Call any MCP tool with standard interface (stolen from BaseAgent)."""
+        if self.verbose:
+            self.logger.info(f"COLLAB DEBUG: call_mcp_tool({tool_id}, {method_name}, {parameters})")
+        
+        if not self.mcp_manager:
+            error = "No MCP manager available"
+            if self.verbose:
+                self.logger.error(f"COLLAB DEBUG: {error}")
+            return {"error": error}
+        
+        if tool_id not in self.mcp_tool_catalog:
+            available = list(self.mcp_tool_catalog.keys())
+            error = f"Tool '{tool_id}' not available. Available: {available}"
+            if self.verbose:
+                self.logger.error(f"COLLAB DEBUG: {error}")
+            return {"error": error}
+        
+        try:
+            call_params = {
+                "name": method_name,
+                "arguments": parameters
+            }
+            if self.verbose:
+                self.logger.info(f"COLLAB DEBUG: Calling mcp_manager.call_tool({tool_id}, 'tools/call', {call_params})")
+            
+            result = self.mcp_manager.call_tool(
+                tool_id, 
+                "tools/call", 
+                call_params, 
+                timeout,
+                agent_id="collaborative_agent"
+            )
+            
+            if self.verbose:
+                success = result and not result.get("error")
+                self.logger.info(f"COLLAB DEBUG: call_mcp_tool result - Success: {success}, Result: {str(result)[:200]}...")
+            
+            return result
+        except Exception as e:
+            error = str(e)
+            if self.verbose:
+                self.logger.error(f"COLLAB DEBUG: Exception in call_mcp_tool: {error}")
+            return {"error": error}
+    
+    def _get_simple_tool_call(self, tool_id: str, message: str) -> tuple:
+        """Get simple method name and params for a tool (much simpler than the complex logic)."""
+        # Basic tool name and parameter mappings
+        tool_mappings = {
+            "sequential-thinking": ("sequentialthinking", {
+                "thought": f"Help analyze: {message[:200]}",
+                "nextThoughtNeeded": False,
+                "thoughtNumber": 1,
+                "totalThoughts": 1
+            }),
+            "memory": ("read_graph", {}),
+            "time": ("get_current_time", {"timezone": "UTC"}),
+            "git": ("git_status", {"repo_path": "."}),
+            "fetch": ("fetch", {
+                "url": "https://httpbin.org/json",
+                "max_length": 1000
+            }),
+            "filesystem": ("list_directory", {"path": "."}),
+            "context7": ("resolve-library-id", {"libraryName": "python"})
+        }
+        
+        if tool_id in tool_mappings:
+            return tool_mappings[tool_id]
+        else:
+            # Generic fallback
+            return ("process", {"query": message[:100]})
+    
+    def _log_mcp_initialization(self):
+        """Enhanced MCP initialization logging."""
+        if self.verbose and self.mcp_manager:
+            self.logger.info(f"COLLABORATIVE AGENT: Initializing with MCP tools")
+            available_tools = self.mcp_manager.get_available_tools()
+            self.logger.info(f"COLLABORATIVE AGENT: Available MCP tools: {available_tools}")
+            
+            # Check tool health on startup
+            self._check_tool_health()
+            
+        elif not self.mcp_manager:
+            self.logger.info(f"COLLABORATIVE AGENT: No MCP manager provided")
+        else:
+            available_count = len(self.mcp_manager.get_available_tools()) if self.mcp_manager else 0
+            self.logger.info(f"COLLABORATIVE AGENT: Initialized with {available_count} MCP tools")
+    
+    def _check_tool_health(self):
+        """Check the health status of all available tools."""
+        if not self.mcp_manager:
+            return
+            
+        available_tools = self.mcp_manager.get_available_tools()
+        for tool_id in available_tools:
+            try:
+                # Quick health check with minimal timeout
+                result = self._quick_tool_test(tool_id)
+                if result.get("error"):
+                    error_msg = result["error"]
+                    
+                    # Don't immediately penalize tools with known initialization issues
+                    if self._is_recoverable_error(error_msg):
+                        # Mark as degraded but still usable
+                        self._record_degraded_tool(tool_id, error_msg)
+                        if self.verbose:
+                            self.logger.info(f"Tool {tool_id} has connectivity issues but marked as recoverable: {error_msg}")
+                    else:
+                        self._record_tool_failure(tool_id, error_msg)
+                        if self.verbose:
+                            self.logger.warning(f"Tool {tool_id} initial health check failed: {error_msg}")
+            except Exception as e:
+                error_msg = str(e)
+                if self._is_recoverable_error(error_msg):
+                    self._record_degraded_tool(tool_id, error_msg)
+                else:
+                    self._record_tool_failure(tool_id, error_msg)
+                if self.verbose:
+                    self.logger.warning(f"Tool {tool_id} initial health check exception: {e}")
+    
+    def _is_recoverable_error(self, error_msg: str) -> bool:
+        """Determine if an error is likely recoverable and the tool should remain available."""
+        error_lower = error_msg.lower()
+        
+        # These are typically Docker/container startup issues that may resolve
+        recoverable_patterns = [
+            "initialization timeout",
+            "empty response",
+            "connection timeout", 
+            "connection refused",
+            "container not ready",
+            "startup timeout",
+            "failed to connect",
+            "no response"
+        ]
+        
+        return any(pattern in error_lower for pattern in recoverable_patterns)
+    
+    def _record_degraded_tool(self, tool_id: str, error: str):
+        """Record a tool as degraded but still potentially usable."""
+        # Don't put in cooldown, but track the issue
+        if tool_id not in self.tool_retry_states:
+            self.tool_retry_states[tool_id] = ToolRetryState(
+                tool_id=tool_id,
+                last_attempt=time.time(),
+                consecutive_failures=0,  # Don't count as failure yet
+                last_error=error,
+                cooldown_until=0.0  # No cooldown for degraded tools
+            )
+    
+    def _quick_tool_test(self, tool_id: str) -> Dict:
+        """Perform a quick connectivity test for a tool."""
+        simple_tests = {
+            "time": {"name": "get_current_time", "arguments": {"timezone": "UTC"}},
+            "memory": {"name": "read_graph", "arguments": {}},
+            "sequential-thinking": {
+                "name": "sequentialthinking",
+                "arguments": {
+                    "thought": "Quick test",
+                    "nextThoughtNeeded": False,
+                    "thoughtNumber": 1,
+                    "totalThoughts": 1
+                }
+            },
+            "git": {"name": "git_status", "arguments": {"repo_path": "."}},
+            "fetch": {"name": "fetch", "arguments": {"url": "https://httpbin.org/json", "max_length": 100}},
+            "filesystem": {"name": "list_directory", "arguments": {"path": "."}},
+            "context7": {"name": "resolve-library-id", "arguments": {"libraryName": "python"}}
+        }
+        
+        test_params = simple_tests.get(tool_id)
+        if not test_params:
+            return {"error": "No test available"}
+        
+        try:
+            return self.mcp_manager.call_tool(
+                tool_id,
+                "tools/call",
+                test_params,
+                timeout=3
+            )
+        except Exception as e:
+            return {"error": str(e)}
+    
+    def _record_tool_failure(self, tool_id: str, error: str):
+        """Record a tool failure for retry logic."""
+        current_time = time.time()
+        
+        if tool_id not in self.tool_retry_states:
+            self.tool_retry_states[tool_id] = ToolRetryState(
+                tool_id=tool_id,
+                last_attempt=current_time,
+                consecutive_failures=1,
+                last_error=error
+            )
+        else:
+            state = self.tool_retry_states[tool_id]
+            state.consecutive_failures += 1
+            state.last_attempt = current_time
+            state.last_error = error
+            
+            # Exponential backoff with jitter
+            backoff_time = min(self.base_cooldown * (2 ** (state.consecutive_failures - 1)), 300)  # Cap at 5 minutes
+            state.cooldown_until = current_time + backoff_time
+    
+    def _record_tool_success(self, tool_id: str):
+        """Record a tool success, resetting failure count."""
+        if tool_id in self.tool_retry_states:
+            self.tool_retry_states[tool_id].consecutive_failures = 0
+            self.tool_retry_states[tool_id].cooldown_until = 0.0
+    
+    def _is_tool_in_cooldown(self, tool_id: str) -> bool:
+        """Check if a tool is currently in cooldown."""
+        if tool_id not in self.tool_retry_states:
+            return False
+        
+        state = self.tool_retry_states[tool_id]
+        return time.time() < state.cooldown_until
+    
+    def _get_available_tools_with_fallbacks(self) -> List[str]:
+        """Get available tools, excluding those in cooldown, with fallback suggestions."""
+        if not self.mcp_manager:
+            return []
+        
+        all_tools = self.mcp_manager.get_available_tools()
+        available_now = []
+        
+        for tool_id in all_tools:
+            if not self._is_tool_in_cooldown(tool_id):
+                available_now.append(tool_id)
+            elif self.verbose:
+                state = self.tool_retry_states.get(tool_id)
+                if state:
+                    cooldown_remaining = state.cooldown_until - time.time()
+                    self.logger.debug(f"Tool {tool_id} in cooldown for {cooldown_remaining:.1f}s more")
+        
+        return available_now
+    
+    def _generate_tool_status_fallback(self, attempted_tools: List[str]) -> str:
+        """Generate an informative fallback message based on tool status."""
+        if not self.mcp_manager:
+            return "My external tools aren't available right now. Let me answer based on what I know..."
+        
+        all_tools = self.mcp_manager.get_available_tools()
+        available_tools = self._get_available_tools_with_fallbacks()
+        
+        # Count different tool states
+        working_count = len(available_tools)
+        cooldown_count = sum(1 for tool in all_tools if self._is_tool_in_cooldown(tool))
+        failed_count = len(all_tools) - working_count
+        
+        if self.verbose:
+            print(f"[DEBUG] Tool status: {working_count} working, {cooldown_count} cooling down, {failed_count} failed")
+        
+        # Generate appropriate message
+        if working_count == 0:
+            if cooldown_count > 0:
+                return f"My tools are temporarily cooling down after connection issues. I'll retry them automatically in a bit. For now, let me answer based on what I know..."
+            else:
+                return f"My external tools are having connection issues right now. This usually resolves quickly. Let me answer based on what I know..."
+        elif cooldown_count > 0:
+            return f"Some of my tools are temporarily unavailable after connection issues, but {working_count} are working. I tried using the best available tools but they had issues. Let me answer based on what I know..."
+        else:
+            return f"I tried using my tools to help with that, but they're having temporary connection issues. This usually resolves after a moment. Let me answer based on what I know..."
+    
+    def _get_tool_retry_summary(self) -> str:
+        """Get a summary of tool retry states for debugging."""
+        if not self.tool_retry_states:
+            return "No tool retry history"
+        
+        summary = []
+        current_time = time.time()
+        
+        for tool_id, state in self.tool_retry_states.items():
+            if state.consecutive_failures > 0:
+                if state.cooldown_until > current_time:
+                    cooldown_remaining = state.cooldown_until - current_time
+                    summary.append(f"{tool_id}: {state.consecutive_failures} failures, cooling down for {cooldown_remaining:.1f}s")
+                else:
+                    summary.append(f"{tool_id}: {state.consecutive_failures} failures, ready to retry")
+        
+        return "; ".join(summary) if summary else "All tools healthy"
+    
+    def refresh_tool_health(self) -> str:
+        """Manually refresh tool health status and reset cooldowns for recovered tools."""
+        if not self.mcp_manager:
+            return "No MCP manager available"
+        
+        print("Refreshing tool health status...")
+        
+        # Test all tools that are currently in cooldown or have failed
+        recovery_results = {}
+        tested_count = 0
+        recovered_count = 0
+        
+        for tool_id in self.mcp_manager.get_available_tools():
+            state = self.tool_retry_states.get(tool_id)
+            
+            # Test tools that have had failures or are in cooldown
+            if state and (state.consecutive_failures > 0 or self._is_tool_in_cooldown(tool_id)):
+                tested_count += 1
+                print(f"  → Testing {tool_id}...", end=" ", flush=True)
+                
+                result = self._quick_tool_test(tool_id)
+                if not result.get("error"):
+                    print("Recovered!", flush=True)
+                    self._record_tool_success(tool_id)
+                    recovery_results[tool_id] = "recovered"
+                    recovered_count += 1
+                else:
+                    print("Still failing", flush=True)
+                    recovery_results[tool_id] = result["error"]
+        
+        if tested_count == 0:
+            return "All tools are healthy - no refresh needed!"
+        
+        # Generate summary
+        summary = f"Tested {tested_count} tools, {recovered_count} recovered"
+        if recovered_count > 0:
+            recovered_tools = [tool for tool, status in recovery_results.items() if status == "recovered"]
+            summary += f"\nRecovered: {', '.join(recovered_tools)}"
+        
+        still_failing = [tool for tool, status in recovery_results.items() if status != "recovered"]
+        if still_failing:
+            summary += f"\nStill having issues: {', '.join(still_failing)}"
+        
+        return summary
+    
     def start_session(self) -> str:
         """Start a new collaborative session."""
         self.is_active = True
-        
-        # Load or create session memory
-        self._load_session_memory()
         
         # Start monitoring thread for real-time updates
         self.monitor_thread = threading.Thread(target=self._monitor_loop, daemon=True)
@@ -179,9 +534,6 @@ class CollaborativeAgent:
         
         # Add agent response to conversation
         self._add_conversation_message("agent", response, "chat")
-        
-        # Update memory and learn from interaction
-        self._update_memory_from_interaction(human_message, response)
         
         return response
     
@@ -254,16 +606,23 @@ class CollaborativeAgent:
     
     def get_status(self) -> Dict:
         """Get comprehensive status of the agent and any running workflows."""
+        # Enhanced tool status with retry information
+        all_tools = self.mcp_manager.get_available_tools() if self.mcp_manager else []
+        available_tools = self._get_available_tools_with_fallbacks()
+        cooldown_tools = [tool for tool in all_tools if self._is_tool_in_cooldown(tool)]
+        
         status = {
             "session_id": self.session_id,
             "is_active": self.is_active,
             "current_workflow": asdict(self.current_workflow) if self.current_workflow else None,
             "conversation_length": len(self.conversation_context),
-            "mcp_tools_available": self.mcp_manager.get_available_tools() if self.mcp_manager else [],
-            "memory_summary": {
-                "preferences": len(self.memory.user_preferences) if self.memory else 0,
-                "learned_patterns": len(self.memory.learned_patterns) if self.memory else 0
-            }
+            "mcp_tools": {
+                "total_available": all_tools,
+                "currently_working": available_tools,
+                "in_cooldown": cooldown_tools,
+                "retry_summary": self._get_tool_retry_summary()
+            },
+            "conversation_length": len(self.conversation_context)
         }
         
         if self.workflow_builder:
@@ -277,15 +636,6 @@ class CollaborativeAgent:
     
     def add_feedback(self, feedback: str) -> str:
         """Add user feedback that can influence current or future workflows."""
-        # Store feedback in memory
-        if self.memory:
-            self.memory.user_preferences["feedback_history"] = self.memory.user_preferences.get("feedback_history", [])
-            self.memory.user_preferences["feedback_history"].append({
-                "feedback": feedback,
-                "timestamp": datetime.now().isoformat(),
-                "context": "general"
-            })
-        
         # Use MCP reasoning to analyze feedback impact
         feedback_analysis = self._analyze_feedback_with_reasoning(feedback)
         
@@ -304,31 +654,14 @@ class CollaborativeAgent:
         if self.current_workflow and self.current_workflow.status == "running":
             self.current_workflow.status = "paused"
         
-        # Save memory state
-        self._save_session_memory()
-        
-        return "Session ended. I've saved our conversation and any work in progress. See you next time!"
+        return "Session ended. See you next time!"
     
     # Private implementation methods
     
-    def _initialize_memory(self):
-        """Initialize agent memory system."""
-        self.memory = AgentMemory(
-            session_id=self.session_id,
-            user_preferences={},
-            project_context={},
-            conversation_history=[],
-            workflow_history=[],
-            learned_patterns={},
-            created_at=datetime.now().isoformat(),
-            updated_at=datetime.now().isoformat()
-        )
+
     
     def _generate_contextual_welcome(self) -> str:
         """Generate a contextual welcome message based on session history and current state."""
-        
-        # Check if we have previous session data
-        has_history = self.memory and len(self.memory.conversation_history) > 0
         
         base_welcome = """Hello! I'm your SwarmDev Collaborative Agent - your intelligent development partner.
 
@@ -340,9 +673,6 @@ I can help you with:
 • **Progress Tracking** - Keep you updated every step of the way
 
 """
-        
-        if has_history:
-            base_welcome += f"Welcome back! I remember our previous conversations and your preferences. "
         
         # Check for MCP tools
         if self.mcp_manager:
@@ -403,15 +733,28 @@ I can help you with:
         if not self.llm_provider:
             return "I understand your message, but I need an LLM provider to give you a detailed response."
         
-        # Check if this might benefit from MCP tool usage
-        should_use_tools = self._should_use_mcp_tools(message, strategy)
-        if self.verbose:
-            print(f"[DEBUG] _generate_intelligent_response: should_use_tools = {should_use_tools}", flush=True)
-        
-        if should_use_tools:
+        # Recursion guard
+        self._recursion_depth += 1
+        if self._recursion_depth > self._max_recursion_depth:
+            self._recursion_depth = 0
             if self.verbose:
-                print(f"[DEBUG] Calling _generate_response_with_tools", flush=True)
-            return self._generate_response_with_tools(message, strategy)
+                print(f"[DEBUG] Recursion limit reached, using fallback response", flush=True)
+            return "I understand your request, but I'm experiencing some processing issues. Let me give you a basic response."
+        
+        try:
+            # Check if this might benefit from MCP tool usage
+            should_use_tools = self._should_use_mcp_tools(message, strategy)
+            if self.verbose:
+                print(f"[DEBUG] _generate_intelligent_response: should_use_tools = {should_use_tools}", flush=True)
+            
+            if should_use_tools:
+                if self.verbose:
+                    print(f"[DEBUG] Calling _generate_response_with_tools", flush=True)
+                result = self._generate_response_with_tools(message, strategy)
+                self._recursion_depth = 0  # Reset on success
+                return result
+        finally:
+            self._recursion_depth -= 1
         
         if self.verbose:
             print(f"[DEBUG] Using standard LLM response (no tools)", flush=True)
@@ -475,11 +818,7 @@ I can help you with:
             context_parts.append(f"Available tools for enhanced responses: {', '.join(tools)}")
             context_parts.append("Tool usage philosophy: Be proactive - use tools to provide better, more comprehensive answers")
         
-        # User preferences
-        if self.memory and self.memory.user_preferences:
-            prefs = list(self.memory.user_preferences.keys())[:3]  # Top 3 preferences
-            if prefs:
-                context_parts.append(f"Known preferences: {', '.join(prefs)}")
+
         
         return "\n".join(context_parts)
     
@@ -739,57 +1078,13 @@ What would you like to do next?"""
         
         self.conversation_context.append(message)
         
-        if self.memory:
-            self.memory.conversation_history.append(message)
-            self.memory.updated_at = datetime.now().isoformat()
+
     
-    def _update_memory_from_interaction(self, human_message: str, agent_response: str):
-        """Update agent memory based on interaction."""
-        if not self.memory:
-            return
-        
-        # Simple learning - track topics and preferences
-        # In full implementation, this would use NLP to extract preferences
-        message_lower = human_message.lower()
-        
-        # Track topic interests
-        topics = ["api", "web", "database", "testing", "docker", "auth", "frontend", "backend"]
-        for topic in topics:
-            if topic in message_lower:
-                self.memory.learned_patterns[f"interested_in_{topic}"] = self.memory.learned_patterns.get(f"interested_in_{topic}", 0) + 1
-        
-        # Track communication style preferences
-        if "please" in message_lower or "thank" in message_lower:
-            self.memory.user_preferences["polite_communication"] = True
-        
-        self.memory.updated_at = datetime.now().isoformat()
+
     
-    def _load_session_memory(self):
-        """Load session memory (placeholder for persistent storage)."""
-        # In full implementation, this would load from MCP memory tool or database
-        pass
+
     
-    def _save_session_memory(self):
-        """Save session memory (placeholder for persistent storage)."""
-        # In full implementation, this would save to MCP memory tool or database
-        if self.mcp_manager and "memory" in self.mcp_manager.get_available_tools():
-            try:
-                memory_data = asdict(self.memory) if self.memory else {}
-                self.mcp_manager.call_tool(
-                    "memory",
-                    "tools/call",
-                    {
-                        "name": "store_memory",
-                        "arguments": {
-                            "key": f"session_{self.session_id}",
-                            "value": memory_data,
-                            "metadata": {"type": "session_memory", "timestamp": datetime.now().isoformat()}
-                        }
-                    },
-                    timeout=10
-                )
-            except Exception as e:
-                self.logger.warning(f"Failed to save session memory: {e}")
+
     
     def _should_use_mcp_tools(self, message: str, strategy: Dict) -> bool:
         """Determine if this message would benefit from MCP tool usage."""
@@ -799,11 +1094,17 @@ What would you like to do next?"""
             return False
         
         message_lower = message.lower()
-        available_tools = self.mcp_manager.get_available_tools()
+        available_tools = self._get_available_tools_with_fallbacks()
         
         if self.verbose:
             print(f"[DEBUG] _should_use_mcp_tools called with message: {message[:50]}...")
-            print(f"[DEBUG] Available tools: {available_tools}")
+            print(f"[DEBUG] Available tools (not in cooldown): {available_tools}")
+        
+        # If no tools available due to cooldowns, skip tool usage
+        if not available_tools:
+            if self.verbose:
+                print(f"[DEBUG] No tools available (all in cooldown)")
+            return False
         
         # PROACTIVE APPROACH: Default to using tools unless it's clearly simple chat
         
@@ -907,8 +1208,25 @@ What would you like to do next?"""
                     print(f"[DEBUG] No explicit tools requested, letting LLM decide")
                 return self._generate_response_with_llm_tool_selection(message, strategy)
             
+            # Filter tools to only those actually available and not in cooldown
+            available_tools = self._get_available_tools_with_fallbacks()
+            working_tools = [tool for tool in tools_to_use if tool in available_tools]
+            cooldown_tools = [tool for tool in tools_to_use if tool in self.mcp_manager.get_available_tools() and self._is_tool_in_cooldown(tool)]
+            unavailable_tools = [tool for tool in tools_to_use if tool not in self.mcp_manager.get_available_tools()]
+            
+            if unavailable_tools:
+                print(f"Note: These tools are not available: {', '.join(unavailable_tools)}")
+            if cooldown_tools:
+                print(f"Note: These tools are temporarily cooling down: {', '.join(cooldown_tools)}")
+            
+            if not working_tools:
+                if cooldown_tools:
+                    return f"The tools I wanted to use are temporarily cooling down after recent issues. Let me answer based on what I know, or you can wait a moment and try again."
+                else:
+                    return f"The tools I wanted to use are currently unavailable. Let me answer based on what I know..."
+            
             results = {}
-            for tool_id in tools_to_use:
+            for tool_id in working_tools:
                 # Show clean, Cursor-style tool usage indicator with immediate flush
                 action_description = self._get_tool_action_description(tool_id, message)
                 print(f"Using {tool_id} to {action_description}", flush=True)
@@ -945,8 +1263,11 @@ What would you like to do next?"""
                 # Immediate feedback on connection result
                 if result and not result.get("error"):
                     print("✓", flush=True)
+                    self._record_tool_success(tool_id)
                 else:
                     print("✗", flush=True)
+                    error_msg = result.get("error", "unknown error") if result else "no response"
+                    self._record_tool_failure(tool_id, error_msg)
                 
                 if self.verbose:
                     print(f"[DEBUG] Tool {tool_id} returned: {type(result)} with keys: {list(result.keys()) if isinstance(result, dict) else 'not dict'}")
@@ -969,14 +1290,22 @@ What would you like to do next?"""
                     # Show brief error indicator (always visible)
                     error_msg = result.get("error", "unknown error") if result else "no response"
                     if "timeout" in error_msg.lower():
-                        print(f"   Warning: Connection timeout - will retry next time")
+                        print(f"   Warning: Connection timeout - will auto-retry later")
                     elif "retry" in error_msg.lower():
                         print(f"   Warning: Initialization in progress")
+                    elif "empty response" in error_msg.lower():
+                        print(f"   Warning: Tool not responding - will retry later")
                     else:
                         print(f"   Error: {error_msg[:50]}...")
                         
                     if self.verbose:
                         print(f"[DEBUG] Full error details: {error_msg}")
+                        state = self.tool_retry_states.get(tool_id)
+                        if state:
+                            print(f"[DEBUG] Tool failure count: {state.consecutive_failures}")
+                            if state.cooldown_until > time.time():
+                                cooldown_remaining = state.cooldown_until - time.time()
+                                print(f"[DEBUG] Cooldown period: {cooldown_remaining:.1f}s")
             
             if self.verbose:
                 print(f"[DEBUG] Final results: {list(results.keys())}")
@@ -988,18 +1317,8 @@ What would you like to do next?"""
                 print("✓", flush=True)
                 return response
             else:
-                # Check if this is an initialization issue
-                available_tools = self.mcp_manager.get_available_tools() if self.mcp_manager else []
-                if available_tools:
-                    fallback_msg = "I tried using my tools to help with that, but they're having connection issues during startup. This usually resolves after a few tries. Let me answer based on what I know..."
-                    if self.verbose:
-                        print(f"[DEBUG] Fallback response due to tool connection issues")
-                    return fallback_msg
-                else:
-                    fallback_msg = "My external tools aren't available right now. Let me answer based on what I know..."
-                    if self.verbose:
-                        print(f"[DEBUG] Fallback response - no tools available")
-                    return fallback_msg
+                # Generate informative fallback message based on tool status
+                return self._generate_tool_status_fallback(working_tools)
                 
         except Exception as e:
             if self.verbose:
@@ -1011,9 +1330,9 @@ What would you like to do next?"""
     def _determine_tools_for_message(self, message: str) -> List[str]:
         """Determine which tools are most relevant for this message."""
         message_lower = message.lower()
-        available_tools = self.mcp_manager.get_available_tools()
+        available_tools = self.mcp_manager.get_available_tools() if self.mcp_manager else []
         
-        # ONLY explicit tool name detection - no hardcoded keyword bullshit
+        # Only detect explicit tool name mentions by user
         tools_to_use = []
         for tool in available_tools:
             tool_name_variations = [
@@ -1029,156 +1348,193 @@ What would you like to do next?"""
                         print(f"[DEBUG] User explicitly requested tool: {tool}")
                     break
         
-        # If user explicitly mentioned tools, use only those
+        # If user explicitly mentioned tools, use only those (limit to 2 for performance)
         if tools_to_use:
             return tools_to_use[:2]
         
-        # Otherwise, let the LLM decide - return empty list to trigger LLM-based tool selection
+        # Otherwise, let the LLM decide which tools to use
         return []
     
     def _call_tool_safely(self, tool_id: str, message: str) -> Dict:
-        """Call an MCP tool safely with appropriate parameters."""
-        import time  # Import at method level so it's available in all code paths
+        """Call tool with retry logic using standard MCP interface."""
+        if self.verbose:
+            self.logger.info(f"COLLAB DEBUG: _call_tool_safely({tool_id}, '{message[:50]}...')")
         
+        if tool_id in self.tool_retry_states:
+            retry_state = self.tool_retry_states[tool_id]
+            
+            # Check if tool is in cooldown
+            if self._is_tool_in_cooldown(tool_id):
+                error = f"Tool {tool_id} is in cooldown"
+                if self.verbose:
+                    self.logger.warning(f"COLLAB DEBUG: {error}")
+                return {"error": error}
+        
+        # Use simple standard interface with basic tool name mapping
+        method_name, params = self._get_simple_tool_call(tool_id, message)
+        if self.verbose:
+            self.logger.info(f"COLLAB DEBUG: Using method='{method_name}', params={params}")
+        
+        result = self.call_mcp_tool(tool_id, method_name, params, timeout=15)
+        
+        if self.verbose:
+            success = result and not result.get("error")
+            self.logger.info(f"COLLAB DEBUG: _call_tool_safely result - Success: {success}")
+            if not success:
+                self.logger.error(f"COLLAB DEBUG: Tool call failed: {result.get('error') if result else 'No result'}")
+        
+        return result
+    
+    def _call_tool_with_recovery_strategy(self, tool_id: str, message: str, retry_state: ToolRetryState) -> Dict:
+        """Call a tool with special recovery strategy for known problematic tools."""
+        max_retries = 2  # Try twice for problematic tools
+        base_timeout = 15
+        
+        for attempt in range(max_retries + 1):
+            if attempt > 0:
+                if self.verbose:
+                    print(f"  → Retry {attempt}/{max_retries}...", end=" ", flush=True)
+                time.sleep(1)  # Brief pause between retries
+            
+            # Increase timeout for problematic tools
+            timeout = base_timeout + (attempt * 5)  # 15, 20, 25 seconds
+            
+            try:
+                result = self._call_tool_standard(tool_id, message, timeout=timeout)
+                
+                if result and not result.get("error"):
+                    # Success! Reset any failure state
+                    if self.verbose and attempt > 0:
+                        print(f"✓ (recovered on attempt {attempt + 1})", flush=True)
+                    return result
+                elif attempt < max_retries:
+                    # Failed but we have more retries
+                    error = result.get("error", "unknown") if result else "no response"
+                    if self.verbose:
+                        print(f"✗ {error[:30]}...", end=" ", flush=True)
+                else:
+                    # Final attempt failed
+                    return result
+                    
+            except Exception as e:
+                if attempt < max_retries:
+                    if self.verbose:
+                        print(f"✗ {str(e)[:30]}...", end=" ", flush=True)
+                else:
+                    return {"error": str(e)}
+        
+        return {"error": "All retry attempts failed"}
+    
+    def _call_tool_standard(self, tool_id: str, message: str, timeout: int = 15) -> Dict:
+        """Generic tool calling logic that works with any MCP tool."""
         try:
             if self.verbose:
-                self.logger.info(f"COLLABORATIVE: _call_tool_safely called for {tool_id}")
-                print(f"  → Preparing {tool_id} request...", flush=True)
-                
-            if tool_id == "sequential-thinking":
-                # Analyze message complexity to determine thought count
-                thought_count = self._estimate_thought_complexity(message)
-                
-                # Log what we're about to call
-                self.logger.info(f"COLLABORATIVE: Calling sequential-thinking with {thought_count} thoughts for: {message[:50]}...")
-                
-                if self.verbose:
-                    print(f"[DEBUG] Sequential thinking params: thoughts={thought_count}", flush=True)
-                
-                print(f"  → Processing with {thought_count} reasoning steps...", end=" ", flush=True)
-                
-                # Add a brief delay indicator for better UX
-                start_time = time.time()
-                
-                result = self.mcp_manager.call_tool(
-                    tool_id,
-                    "tools/call",
-                    {
-                        "name": "sequential_thinking",
-                        "arguments": {
-                            "thought": f"Analyze this request step by step:\n\n{message}\n\nBreak down the problem and provide comprehensive analysis.",
-                            "nextThoughtNeeded": thought_count > 1,
-                            "thoughtNumber": 1,
-                            "totalThoughts": thought_count
-                        }
-                    },
-                    timeout=15
-                )
-                
-                elapsed = time.time() - start_time
-                if elapsed > 0.5:  # Only show timing for longer operations
-                    print(f"({elapsed:.1f}s)", end=" ", flush=True)
-                
-                # Log the result structure
-                self.logger.info(f"COLLABORATIVE: Sequential thinking returned: {type(result)} with keys: {list(result.keys()) if isinstance(result, dict) else 'not dict'}")
-                if isinstance(result, dict) and "result" in result:
-                    self.logger.info(f"COLLABORATIVE: Result content: {str(result['result'])[:200]}...")
-                
-                return result
-                
-            elif tool_id == "context7":
-                # Try to extract library/framework name from message
-                lib_name = self._extract_library_name(message)
-                
-                self.logger.info(f"COLLABORATIVE: Calling context7 to resolve library: {lib_name}")
-                
-                if self.verbose:
-                    print(f"[DEBUG] Context7 params: library={lib_name}", flush=True)
-                
-                print(f"  → Looking up {lib_name} documentation...", end=" ", flush=True)
-                
-                start_time = time.time()
-                result = self.mcp_manager.call_tool(
-                    tool_id,
-                    "tools/call",
-                    {
-                        "name": "resolve-library-id",
-                        "arguments": {"libraryName": lib_name}
-                    },
-                    timeout=10
-                )
-                
-                elapsed = time.time() - start_time
-                if elapsed > 0.5:
-                    print(f"({elapsed:.1f}s)", end=" ", flush=True)
-                
-                if self.verbose:
-                    print(f"[DEBUG] Context7 result type: {type(result)}")
-                
-                return result
-                
-            elif tool_id == "fetch":
-                # Try to construct a meaningful web search based on the message
-                search_query = self._construct_search_query(message)
-                
-                self.logger.info(f"COLLABORATIVE: Calling fetch for research query: {search_query}")
-                
-                if self.verbose:
-                    print(f"[DEBUG] Fetch params: query={search_query}", flush=True)
-                
-                print(f"  → Researching: {search_query[:30]}...", end=" ", flush=True)
-                # Try a simple test first to see if fetch is working
-                result = self.mcp_manager.call_tool(
-                    tool_id,
-                    "tools/call",
-                    {
-                        "name": "fetch",
-                        "arguments": {
-                            "url": f"https://httpbin.org/json",
-                            "method": "GET"
-                        }
-                    },
-                    timeout=10
-                )
-                
-                if self.verbose:
-                    print(f"[DEBUG] Fetch result type: {type(result)}")
-                
-                return result
-                
-            elif tool_id == "time":
-                self.logger.info(f"COLLABORATIVE: Calling time tool")
-                
-                if self.verbose:
-                    print(f"[DEBUG] Time tool - no params needed")
-                
-                result = self.mcp_manager.call_tool(
-                    tool_id,
-                    "tools/call",
-                    {"name": "get_current_time", "arguments": {}},
-                    timeout=5
-                )
-                
-                if self.verbose:
-                    print(f"[DEBUG] Time result type: {type(result)}")
-                
-                return result
+                self.logger.info(f"COLLABORATIVE: Generic tool call for {tool_id}")
             
-            else:
-                if self.verbose:
-                    print(f"[DEBUG] Tool {tool_id} not implemented in _call_tool_safely")
-                self.logger.warning(f"COLLABORATIVE: Tool {tool_id} not implemented")
-                return {"error": f"Tool {tool_id} not implemented"}
+            # Get tool info dynamically from MCP manager
+            tool_info = self.mcp_manager.get_tool_info(tool_id) if self.mcp_manager else {}
+            
+            # Generate tool call parameters dynamically
+            tool_params = self._generate_tool_params(tool_id, message, tool_info)
+            
+            if not tool_params:
+                return {"error": f"Could not generate parameters for tool {tool_id}"}
+            
+            # Make the generic tool call
+            start_time = time.time()
+            result = self.mcp_manager.call_tool(
+                tool_id,
+                "tools/call", 
+                tool_params,
+                timeout=timeout
+            )
+            
+            elapsed = time.time() - start_time
+            if elapsed > 0.5:
+                print(f"({elapsed:.1f}s)", end=" ", flush=True)
+            
+            if self.verbose:
+                self.logger.info(f"COLLABORATIVE: Tool {tool_id} returned: {type(result)}")
+            
+            return result
             
         except Exception as e:
             self.logger.error(f"COLLABORATIVE: Tool call failed for {tool_id}: {e}")
             if self.verbose:
-                print(f"[DEBUG] Exception in _call_tool_safely for {tool_id}: {e}")
-                import traceback
-                traceback.print_exc()
+                print(f"[DEBUG] Exception in tool call for {tool_id}: {e}")
             return {"error": str(e)}
-        
-        return {"error": "Tool not implemented"}
+    
+    def _generate_tool_params(self, tool_id: str, message: str, tool_info: Dict) -> Optional[Dict]:
+        """Generate appropriate parameters for any MCP tool dynamically."""
+        try:
+            # Get the first available tool method name from the tool info
+            tool_capabilities = tool_info.get("capabilities", {})
+            available_tools = tool_capabilities.get("tools", [])
+            
+            if not available_tools:
+                # Fallback: use common tool names based on tool_id
+                tool_name = self._guess_tool_name(tool_id)
+                if not tool_name:
+                    return None
+            else:
+                # Use the first available tool
+                tool_name = available_tools[0].get("name", tool_id)
+            
+            # Generate basic arguments based on the tool and message
+            arguments = self._generate_tool_arguments(tool_id, tool_name, message)
+            
+            return {
+                "name": tool_name,
+                "arguments": arguments
+            }
+            
+        except Exception as e:
+            if self.verbose:
+                print(f"[DEBUG] Failed to generate params for {tool_id}: {e}")
+            return None
+    
+    def _guess_tool_name(self, tool_id: str) -> Optional[str]:
+        """Guess appropriate tool name when tool info is not available."""
+        # Common patterns for tool names
+        name_mappings = {
+            "sequential-thinking": "sequential_thinking",
+            "time": "get_current_time", 
+            "git": "git_status",
+            "memory": "read_graph",
+            "fetch": "fetch",
+            "filesystem": "list_directory",
+            "context7": "resolve-library-id"
+        }
+        return name_mappings.get(tool_id)
+    
+    def _generate_tool_arguments(self, tool_id: str, tool_name: str, message: str) -> Dict:
+        """Generate appropriate arguments for a tool based on context."""
+        # Very basic argument generation - can be enhanced
+        if "thinking" in tool_name.lower():
+            return {
+                "thought": f"Help with: {message}",
+                "nextThoughtNeeded": False,
+                "thoughtNumber": 1,
+                "totalThoughts": 1
+            }
+        elif "time" in tool_name.lower():
+            return {}
+        elif "git" in tool_name.lower():
+            return {"repo_path": "."}
+        elif "fetch" in tool_name.lower():
+            return {
+                "url": "https://httpbin.org/json",
+                "max_length": 1000
+            }
+        elif "list" in tool_name.lower() or "directory" in tool_name.lower():
+            return {"path": "."}
+        elif "resolve" in tool_name.lower() or "library" in tool_name.lower():
+            return {"libraryName": "python"}
+        elif "read" in tool_name.lower() and "graph" in tool_name.lower():
+            return {}
+        else:
+            # Generic fallback
+            return {"query": message[:100]}
     
     def _estimate_thought_complexity(self, message: str) -> int:
         """Estimate how many thoughts are needed based on message complexity."""
@@ -1213,66 +1569,37 @@ What would you like to do next?"""
             
         return min(max_thoughts, 5)  # Cap at 5 thoughts
     
-    def _extract_library_name(self, message: str) -> str:
-        """Extract potential library name from message."""
-        message_lower = message.lower()
-        
-        # Common libraries mentioned in the context
-        libraries = ["python", "fastapi", "django", "flask", "react", "vue", "angular", "nodejs", "express"]
-        
-        for lib in libraries:
-            if lib in message_lower:
-                return lib
-                
-        # Default fallback
-        if "python" in message_lower or "library" in message_lower:
-            return "python"
-        if "javascript" in message_lower or "js" in message_lower:
-            return "javascript"
-        if "web" in message_lower:
-            return "web-development"
-            
-        return "python"  # Default
-    
-    def _construct_search_query(self, message: str) -> str:
-        """Construct a meaningful search query from the user message."""
-        # For now, just clean up the message
-        # In a real implementation, this would extract key terms
-        return message.replace("can you", "").replace("please", "").strip()
+
     
     def _get_tool_action_description(self, tool_id: str, message: str) -> str:
         """Get clean action description for Cursor-style tool usage display."""
-        if tool_id == "sequential-thinking":
-            return "analyze this request step by step"
-        elif tool_id == "fetch":
-            return "research information online"
-        elif tool_id == "context7":
-            return "look up library documentation"
-        elif tool_id == "memory":
-            return "store conversation context"
-        elif tool_id == "git":
-            return "analyze repository"
-        elif tool_id == "time":
-            return "get current time"
-        else:
-            return "process your request"
+        # Generic descriptions based on tool_id patterns
+        descriptions = {
+            "sequential-thinking": "analyze this request step by step",
+            "fetch": "research information online",
+            "context7": "look up documentation",
+            "memory": "store conversation context", 
+            "git": "analyze repository",
+            "time": "get current time",
+            "filesystem": "read filesystem"
+        }
+        
+        return descriptions.get(tool_id, f"use {tool_id} tool")
     
     def _get_tool_status_info(self, tool_id: str, message: str) -> str:
         """Get contextual status information for a tool."""
-        if tool_id == "sequential-thinking":
-            return "analyzing request step by step"
-        elif tool_id == "fetch":
-            return "researching online information"
-        elif tool_id == "context7":
-            return "looking up library documentation"
-        elif tool_id == "memory":
-            return "storing conversation context"
-        elif tool_id == "git":
-            return "analyzing repository"
-        elif tool_id == "time":
-            return "getting current time"
-        else:
-            return "processing"
+        # Generic status descriptions
+        status_info = {
+            "sequential-thinking": "analyzing request step by step",
+            "fetch": "researching online information", 
+            "context7": "looking up documentation",
+            "memory": "storing conversation context",
+            "git": "analyzing repository",
+            "time": "getting current time",
+            "filesystem": "reading filesystem"
+        }
+        
+        return status_info.get(tool_id, f"processing with {tool_id}")
     
     def _get_success_info(self, tool_id: str, result: Dict) -> str:
         """Get success information from tool results."""
@@ -1308,10 +1635,33 @@ What would you like to do next?"""
                 return "documentation retrieved"
             
             elif tool_id == "memory":
+                # Look for entity creation information
+                if "result" in result:
+                    memory_result = result["result"]
+                    if isinstance(memory_result, dict) and "entities" in memory_result:
+                        return f"conversation context saved to memory"
+                    elif isinstance(memory_result, list) and len(memory_result) > 0:
+                        return f"created {len(memory_result)} memory entities"
                 return "context saved"
             
             elif tool_id == "git":
+                # Look for git status information
+                if "result" in result:
+                    git_result = result["result"]
+                    if "status" in str(git_result).lower():
+                        return "repository status analyzed"
                 return "repository analyzed"
+            
+            elif tool_id == "filesystem":
+                # Look for file listing information
+                if "result" in result:
+                    fs_result = result["result"]
+                    if isinstance(fs_result, dict) and "files" in fs_result:
+                        file_count = len(fs_result.get("files", []))
+                        return f"listed {file_count} files"
+                    elif isinstance(fs_result, list):
+                        return f"listed {len(fs_result)} items"
+                return "filesystem analyzed"
             
             elif tool_id == "time":
                 return "timestamp retrieved"
@@ -1396,20 +1746,25 @@ What would you like to do next?"""
         if not self.llm_provider:
             return "I need an LLM provider to help decide which tools to use."
         
-        # Get all available tools
-        available_tools = self.mcp_manager.get_available_tools() if self.mcp_manager else []
-        if not available_tools:
-            return "No tools are available right now. Let me answer based on what I know..."
+        # Additional recursion check for LLM tool selection
+        if self._recursion_depth > 2:
+            if self.verbose:
+                print(f"[DEBUG] LLM tool selection recursion limit, falling back to simple response", flush=True)
+            return "I understand your request and will help based on what I know."
         
-        # Create tool selection prompt
-        tool_descriptions = {
-            "sequential-thinking": "Advanced step-by-step reasoning and analysis for complex problems",
-            "context7": "Up-to-date documentation and code examples for libraries/frameworks", 
-            "fetch": "Web research and current information retrieval",
-            "memory": "Store and recall conversation context and user preferences",
-            "time": "Current time and date information",
-            "git": "Repository analysis and version control operations"
-        }
+        # Get all available tools (excluding those in cooldown)
+        available_tools = self._get_available_tools_with_fallbacks()
+        if not available_tools:
+            # Check if tools are in cooldown vs unavailable
+            all_tools = self.mcp_manager.get_available_tools() if self.mcp_manager else []
+            cooldown_count = sum(1 for tool in all_tools if self._is_tool_in_cooldown(tool))
+            if cooldown_count > 0:
+                return f"My tools are temporarily cooling down after connection issues. Let me answer based on what I know for now..."
+            else:
+                return "No tools are available right now. Let me answer based on what I know..."
+        
+        # Create tool selection prompt with dynamic descriptions
+        tool_descriptions = self._get_dynamic_tool_descriptions(available_tools)
         
         tool_info = []
         for tool in available_tools:
@@ -1475,9 +1830,20 @@ What would you like to do next?"""
             if self.verbose:
                 print(f"[DEBUG] LLM selected valid tools: {valid_tools}")
             
-            # Use the selected tools
+            # Filter tools to only those actually available
+            available_tools = self.mcp_manager.get_available_tools() if self.mcp_manager else []
+            working_tools = [tool for tool in valid_tools[:2] if tool in available_tools]
+            
+            if not working_tools:
+                unavailable_tools = [tool for tool in valid_tools[:2] if tool not in available_tools]
+                if unavailable_tools:
+                    return f"The tools I wanted to use ({', '.join(unavailable_tools)}) are currently unavailable. Let me answer based on what I know..."
+                else:
+                    return "No tools are currently available. Let me answer based on what I know..."
+            
+            # Use the available tools
             results = {}
-            for tool_id in valid_tools[:2]:  # Limit to 2 tools
+            for tool_id in working_tools:
                 action_description = self._get_tool_action_description(tool_id, message)
                 print(f"Using {tool_id} to {action_description}", flush=True)
                 
@@ -1536,3 +1902,20 @@ What would you like to do next?"""
             if self.verbose:
                 print(f"[DEBUG] Exception in LLM tool selection: {e}")
             return self._generate_intelligent_response(message, strategy) 
+    
+    def _get_dynamic_tool_descriptions(self, available_tools: List[str]) -> Dict[str, str]:
+        """Generate tool descriptions dynamically based on available tools."""
+        # Basic descriptions that can be enhanced
+        base_descriptions = {
+            "sequential-thinking": "Advanced step-by-step reasoning and analysis",
+            "context7": "Documentation and code examples lookup", 
+            "fetch": "Web research and information retrieval",
+            "memory": "Conversation context and preferences storage",
+            "time": "Current time and date information",
+            "git": "Repository analysis and version control",
+            "filesystem": "File and directory operations"
+        }
+        
+        # Only return descriptions for available tools
+        return {tool: base_descriptions.get(tool, f"{tool} operations") 
+                for tool in available_tools}

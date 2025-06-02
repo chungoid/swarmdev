@@ -11,7 +11,7 @@
 /.swarmdev/logs
 /.swarmdev/mcp_test_results.json
 /.swarmdev
-
+/.cursor
 # Python cache directories at any level
 __pycache__/
 *.py[cod]

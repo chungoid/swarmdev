@@ -36,14 +36,6 @@ SwarmDev includes **7 bundled Docker-based MCP servers** that work out of the bo
 
 **Important**: The `mcp_config.json` file shows the correct configuration format. SwarmDev works without any MCP configuration files (uses built-in defaults), but you can customize server settings using this format.
 
-## Quick Start
-
-### 1. Simple Project Setup
-
-```bash
-# Create project directory and copy configuration
-mkdir my_project && cd my_project
-mkdir -p .swarmdev
 cp examples/swarmdev_config.json .swarmdev/swarmdev_config.json
 
 # Start the interactive assistant

@@ -315,6 +315,16 @@ class MCPManager:
                 else:
                     command.append(args)
             
+            # Handle shell expansions in command
+            for i, arg in enumerate(command):
+                if isinstance(arg, str):
+                    # Replace $(pwd) with actual current directory
+                    if "$(pwd)" in arg:
+                        command[i] = arg.replace("$(pwd)", self.project_dir)
+                    # Replace ${pwd} variant
+                    elif "${pwd}" in arg:
+                        command[i] = arg.replace("${pwd}", self.project_dir)
+            
             timeout = server_config.get("timeout", self.default_timeout)
             
             self.servers[server_id] = {

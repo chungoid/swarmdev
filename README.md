@@ -29,9 +29,10 @@ git clone https://github.com/chungoid/swarmdev.git
 cd swarmdev
 python3 -m venv .venv
 pip install -e .
+
+# Test MCP Install & Connections
 cd scripts
 python3 test_mcp_installation.py
-
 ============================================================
 FINAL TEST REPORT
 ============================================================
@@ -51,6 +52,43 @@ Functionality Tests:
 Performance Test: PASSED
 
 EXCELLENT! Your MCP installation is working great!
+
+# Test Agent MCP tool usage
+python3 test_collaborative_agent.py
+============================================================
+COLLABORATIVE AGENT TEST REPORT
+============================================================
+
+Docker Infrastructure Status:
+  memory: Container running
+  sequential-thinking: Container running
+  context7: Container running
+  git: Container running
+  time: Container running
+  fetch: Container running
+  filesystem: Container running
+
+Infrastructure Score: 7/7 containers working
+
+Agent Integration Status:
+  memory: PASS
+  sequential-thinking: PASS
+  context7: PASS
+  git: PASS
+  time: PASS
+  fetch: PASS
+  filesystem: PASS
+
+Agent Integration Score: 7/7 tools working
+Success Rate: 100.0%
+
+Overall Assessment:
+PASS: All MCP tools and agent integration working perfectly!
+
+Critical Issues to Fix:
+  • No issues found - system ready for production use!
+
+TEST SUITE: PASS - All systems operational
 
 # Set up API keys
 export OPENAI_API_KEY="your-key"
