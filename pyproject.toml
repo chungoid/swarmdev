@@ -45,10 +45,7 @@ dependencies = [
     "setuptools==80.9.0",
     "simplejson==3.20.1",
     "Sphinx==8.2.3",
-    "thread==2.0.5",
     "tomlkit==0.13.2",
-    "urllib3_secure_extra==0.1.0",
-    "xmlrpclib==1.0.1",
     "zstandard==0.23.0"
 ]
 
