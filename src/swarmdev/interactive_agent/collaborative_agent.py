@@ -364,30 +364,45 @@ You then used the tool '{tool_id}' with method '{method_name}'.
 The tool execution resulted in:
 {tool_output_for_prompt}
 
-CRITICAL REQUIREMENTS:
-1. NEVER return an empty or blank response - your response must contain substantive content
-2. If the tool was sequential-thinking or any analysis tool, you MUST present the final conclusion/answer to the user
-3. Don't just acknowledge you used the tool - ACTUALLY OUTPUT THE RESULTS/CONCLUSIONS
-4. Extract the final thoughts/recommendations and present them clearly to the user
+MANDATORY REQUIREMENTS - NO EXCEPTIONS:
+1. You MUST provide a substantive response with actual content - NEVER return empty/blank responses
+2. You MUST extract and present the final conclusions from the tool output
+3. If the tool was sequential-thinking, you MUST find the final thought/conclusion and output it completely
+4. If you cannot find clear results in the tool output, you MUST provide a helpful response based on what information is available
+5. Your response MUST directly answer the user's original question using the tool results
 
-Based on the original request, your initial response, and the tool's result, formulate a concise and helpful final response to the user.
-- If the tool was successful, integrate its findings naturally and PRESENT THE ACTUAL RESULTS/CONCLUSIONS.
-- For sequential-thinking: Extract and present the final conclusions/recommendations from the thinking process.
-- If the tool failed, acknowledge the specific error transparently and suggest alternatives.
-- Do not explicitly say "The tool returned...". Instead, incorporate the information naturally.
-- Be conversational and helpful.
-- Your response MUST contain actual content that answers the user's question.
+STRICT INSTRUCTION: Your response must contain actual recommendations, findings, or conclusions that help the user. You cannot respond with just acknowledgments or meta-commentary about using tools.
 
-Final response to user:
+Extract the key findings from the tool output above and present them as your substantive response to the user's question: "{original_human_message}"
+
+Your substantive response with actual findings:
 """
         
         try:
             final_response = self.llm_provider.generate_text(synthesis_prompt, temperature=0.3, max_tokens=700)
-            return final_response.strip()
+            final_response = final_response.strip()
+            
+            # Prevent empty responses entirely
+            if not final_response or len(final_response) < 10:
+                self.logger.warning(f"LLM returned empty/minimal response, using fallback")
+                # Extract any content from tool result as fallback
+                if tool_result and not tool_result.get("error"):
+                    result_text = str(tool_result)
+                    if len(result_text) > 50:
+                        return f"Here's what I found:\n\n{result_text[:500]}..."
+                    else:
+                        return f"{agent_initial_utterance}\n\nI've analyzed this using {tool_id} and have information available. Could you be more specific about what you'd like to know?"
+                else:
+                    return f"{agent_initial_utterance}\n\nI encountered an issue with the {tool_id} tool: {tool_result.get('error', 'Unknown error')}. Let me know how else I can help!"
+            
+            return final_response
         except Exception as e:
             self.logger.error(f"Final response synthesis failed: {e}")
-            # Standard fallback for all tools
-            return f"{agent_initial_utterance}\nI've processed the information from the {tool_id} tool. {str(tool_result)[:200]}..."
+            # Enhanced fallback with more detail
+            if tool_result and not tool_result.get("error"):
+                return f"{agent_initial_utterance}\n\nI've processed the information from the {tool_id} tool. Here's what I found:\n{str(tool_result)[:300]}..."
+            else:
+                return f"{agent_initial_utterance}\n\nI tried using the {tool_id} tool but encountered an issue: {tool_result.get('error', str(e))}. Let me know how else I can help!"
     
     def _get_recent_context(self) -> str:
         """Get recent conversation context."""
