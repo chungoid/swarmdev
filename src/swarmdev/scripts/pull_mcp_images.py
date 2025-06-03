@@ -162,7 +162,45 @@ def attempt_docker_install(os_type):
                               capture_output=True, text=True, check=True)
         print("Docker installed successfully")
         
-        # Start and enable docker
+        # Create docker group if it doesn't exist (do this FIRST)
+        print("Ensuring docker group exists...")
+        try:
+            result = subprocess.run(["sudo", "groupadd", "docker"], 
+                                  capture_output=True, text=True, check=False)
+            if result.returncode == 0:
+                print("Docker group created")
+            else:
+                print("Docker group already exists (this is normal)")
+        except Exception as e:
+            print(f"Note: Could not create docker group: {e}")
+        
+        # Add user to docker group BEFORE starting Docker service
+        import getpass
+        username = getpass.getuser()
+        print(f"Adding user '{username}' to docker group...")
+        try:
+            result = subprocess.run(["sudo", "usermod", "-aG", "docker", username], 
+                                  capture_output=True, text=True, check=True)
+            print("User added to docker group successfully")
+            
+            # Verify the user was actually added
+            verify_result = subprocess.run(["groups", username], capture_output=True, text=True)
+            if verify_result.returncode == 0:
+                groups_output = verify_result.stdout.strip()
+                if "docker" in groups_output:
+                    print(f"✓ Verified: User is now in docker group")
+                    print(f"  Groups: {groups_output}")
+                else:
+                    print(f"✗ Warning: User not showing in docker group after adding")
+                    print(f"  Groups: {groups_output}")
+            
+        except subprocess.CalledProcessError as e:
+            print(f"Failed to add user to docker group: {e}")
+            if e.stderr:
+                print(f"Error details: {e.stderr.strip()}")
+            raise e
+        
+        # Start and enable docker service AFTER adding user to group
         print("Starting Docker service...")
         subprocess.run(["sudo", "systemctl", "start", "docker"], 
                       capture_output=True, text=True, check=True)
@@ -170,23 +208,41 @@ def attempt_docker_install(os_type):
                       capture_output=True, text=True, check=True)
         print("Docker service started and enabled")
         
-        # Add user to docker group
-        import getpass
-        username = getpass.getuser()
-        print(f"Adding user '{username}' to docker group...")
-        subprocess.run(["sudo", "usermod", "-aG", "docker", username], 
-                      capture_output=True, text=True, check=True)
-        print("User added to docker group successfully")
-        
-        # Create docker group if it doesn't exist (edge case)
-        try:
-            subprocess.run(["sudo", "groupadd", "docker"], 
-                          capture_output=True, text=True, check=False)
-        except:
-            pass  # Group already exists, which is fine
-        
         print("\nDocker installation completed successfully!")
         print("=" * 50)
+        
+        # Final verification that everything is set up correctly
+        print("\nFinal verification:")
+        try:
+            # Check Docker service status
+            service_result = subprocess.run(["sudo", "systemctl", "is-active", "docker"], capture_output=True, text=True)
+            if service_result.returncode == 0 and service_result.stdout.strip() == "active":
+                print("✓ Docker service is running")
+            else:
+                print("✗ Docker service is not running")
+                
+            # Check Docker group exists
+            group_check = subprocess.run(["getent", "group", "docker"], capture_output=True, text=True)
+            if group_check.returncode == 0:
+                print("✓ Docker group exists")
+                # Show group members
+                group_info = group_check.stdout.strip()
+                print(f"  Group info: {group_info}")
+            else:
+                print("✗ Docker group does not exist")
+                
+            # Final user group check
+            final_groups = subprocess.run(["groups", username], capture_output=True, text=True)
+            if final_groups.returncode == 0:
+                groups_list = final_groups.stdout.strip()
+                if "docker" in groups_list:
+                    print(f"✓ User '{username}' is in docker group")
+                else:
+                    print(f"✗ User '{username}' is NOT in docker group")
+                print(f"  All groups: {groups_list}")
+        except Exception as e:
+            print(f"Could not perform final verification: {e}")
+        
         print("\nIMPORTANT: Group membership changes require a new login session.")
         print("Options to activate Docker group membership:")
         print("  1. Log out and log back in")
@@ -308,11 +364,16 @@ def run_docker_command_with_group(cmd_args, username):
 
 def check_docker():
     """Checks if Docker is installed and running, with installation guidance."""
+    print("Checking Docker installation and access...")
+    
     try:
-        # Use a DEVNULL to prevent 'docker info' from printing to console on success
-        with open(os.devnull, 'w') as devnull:
-            subprocess.run(["docker", "info"], stdout=devnull, stderr=devnull, check=True)
-        print("Docker is installed and seems to be running.")
+        # First check if docker command exists
+        docker_version_result = subprocess.run(["docker", "--version"], capture_output=True, text=True, check=True)
+        print(f"Docker command found: {docker_version_result.stdout.strip()}")
+        
+        # Then check if we can access Docker daemon
+        docker_info_result = subprocess.run(["docker", "info"], capture_output=True, text=True, check=True)
+        print("Docker daemon is accessible and running.")
         return True
     except FileNotFoundError:
         print("Error: Docker command not found. Docker needs to be installed.")
@@ -323,9 +384,12 @@ def check_docker():
         
         # Ask user if they want automatic installation (only for supported systems)
         if os_type in ["ubuntu", "debian"]:
+            print(f"\nAutomatic Docker installation is available for {os_type}.")
             try:
-                response = input("\nWould you like to attempt automatic Docker installation? (y/N): ").strip().lower()
-                if response in ['y', 'yes']:
+                response = input("Would you like to attempt automatic Docker installation? (Y/n): ").strip().lower()
+                # Default to 'yes' if user just presses enter
+                if response in ['y', 'yes', '']:
+                    print("Starting automatic Docker installation...")
                     if attempt_docker_install(os_type):
                         # Test Docker with new group membership
                         import getpass
@@ -343,10 +407,19 @@ def check_docker():
                             return "docker_installed_limited"  # Try to continue with limited access
                     else:
                         print("\nAutomatic installation failed. Please install manually.")
+                        return False
+                else:
+                    print("Skipping automatic installation.")
             except KeyboardInterrupt:
                 print("\nInstallation cancelled.")
-            except:
-                print("\nCould not get user input. Showing manual instructions.")
+                return False
+            except Exception as e:
+                print(f"\nCould not get user input: {e}. Attempting automatic installation...")
+                # If we can't get input, try to install automatically
+                if attempt_docker_install(os_type):
+                    return "docker_installed_continue"
+                else:
+                    print("Automatic installation failed.")
         
         # Show manual installation instructions
         instructions = get_docker_install_instructions(os_type)
