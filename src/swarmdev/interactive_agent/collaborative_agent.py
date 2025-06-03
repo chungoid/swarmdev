@@ -315,7 +315,7 @@ AVAILABLE TOOLS (with methods and input schemas):
 {tool_catalog_str}
 
 TOOL USAGE EXAMPLES:
-- sequential-thinking: Use method "sequentialthinking". Set thought to text string, nextThoughtNeeded to true or false, thoughtNumber to number like 1, totalThoughts to number like 5
+- sequential-thinking: Use method "sequentialthinking". Parameters must be: "thought" (string), "nextThoughtNeeded" (boolean), "thoughtNumber" (integer), "totalThoughts" (integer). No other parameters.
 - filesystem: Use for file operations
 - memory: Use for knowledge storage
 - fetch: Use for web content
