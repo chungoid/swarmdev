@@ -402,28 +402,28 @@ def test_docker_with_group(username):
 def activate_docker_group_and_continue():
     """Provide seamless docker group activation for users."""
     username = get_real_username()
-    print(f"\n🔄 Docker group activation needed for user '{username}'")
+    print(f"\nDocker group activation needed for user '{username}'")
     print("=" * 60)
     
     print("Your user was successfully added to the docker group, but your current")
     print("session needs to be refreshed to use the new group membership.")
     print()
-    print("🎯 SIMPLE SOLUTION - Run this command:")
+    print("SIMPLE SOLUTION - Run this command:")
     print(f"   su - {username}")
     print()
     print("Then re-run:")
     print("   swarmdev pull-images")
     print()
-    print("📋 Alternative options:")
+    print("Alternative options:")
     print("   • newgrp docker          (activate group in current session)")
     print("   • exit && ssh back in    (start fresh SSH session)")
     print("   • logout and login       (if using console)")
     print()
     
     try:
-        response = input("🤖 Auto-run 'su - {0}' for you? (Y/n): ".format(username)).strip().lower()
+        response = input("Auto-run 'su - {0}' for you? (Y/n): ".format(username)).strip().lower()
         if response in ['y', 'yes', '']:
-            print(f"\n🚀 Running: su - {username}")
+            print(f"\nRunning: su - {username}")
             print("=" * 60)
             print("After running 'su', your docker group will be active.")
             print("Then run: swarmdev pull-images")
@@ -433,15 +433,15 @@ def activate_docker_group_and_continue():
             os.system(f"su - {username}")
             return True
         else:
-            print(f"\n💡 Manual activation: Run 'su - {username}' then 'swarmdev pull-images'")
+            print(f"\nManual activation: Run 'su - {username}' then 'swarmdev pull-images'")
             return False
             
     except KeyboardInterrupt:
-        print(f"\n💡 Manual activation: Run 'su - {username}' then 'swarmdev pull-images'")
+        print(f"\nManual activation: Run 'su - {username}' then 'swarmdev pull-images'")
         return False
     except Exception as e:
         print(f"Error: {e}")
-        print(f"💡 Manual activation: Run 'su - {username}' then 'swarmdev pull-images'")
+        print(f"Manual activation: Run 'su - {username}' then 'swarmdev pull-images'")
         return False
 
 
