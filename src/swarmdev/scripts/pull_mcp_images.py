@@ -421,16 +421,25 @@ def activate_docker_group_and_continue():
     print()
     
     try:
-        response = input("Auto-run 'su - {0}' for you? (Y/n): ".format(username)).strip().lower()
+        response = input("Auto-activate docker group and continue setup? (Y/n): ").strip().lower()
         if response in ['y', 'yes', '']:
-            print(f"\nRunning: su - {username}")
-            print("=" * 60)
-            print("After running 'su', your docker group will be active.")
-            print("Then run: swarmdev pull-images")
+            print(f"\nActivating docker group and continuing setup...")
+            print("You may be prompted for your password.")
             print("=" * 60)
             
-            # Execute su command 
-            os.system(f"su - {username}")
+            # Execute su command with swarmdev pull-images automatically
+            exit_code = os.system(f"su - {username} -c 'swarmdev pull-images'")
+            
+            if exit_code == 0:
+                print("=" * 60)
+                print("DOCKER SETUP SUCCESSFUL!")
+                print("All MCP images have been downloaded.")
+                print("SwarmDev is ready to use!")
+            else:
+                print("=" * 60)
+                print("Setup completed but there may have been issues.")
+                print("Try running: swarmdev pull-images")
+            
             return True
         else:
             print(f"\nManual activation: Run 'su - {username}' then 'swarmdev pull-images'")
