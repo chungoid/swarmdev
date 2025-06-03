@@ -139,15 +139,13 @@ I can help you with:
             self._add_message("agent", final_response)
             return final_response
 
-        # Add agent's initial response (or action intent) to history
-        # This makes the conversation flow more naturally
-        self._add_message("agent", initial_response_to_user) 
-        print(f"Agent: {initial_response_to_user}") # Also print to console for immediate feedback
-
         if agent_action.get("use_tool"):
             tool_id = agent_action.get("tool_id")
             method_name = agent_action.get("method_name")
             parameters = agent_action.get("parameters", {})
+            
+            # Show brief initial response
+            print(f"Agent: {initial_response_to_user}", flush=True)
             
             if not tool_id or not method_name:
                 self.logger.error(f"LLM decided to use a tool but didn't specify tool_id or method_name. Decision: {agent_action}")
@@ -166,18 +164,15 @@ I can help you with:
                 except Exception as e:
                     self.logger.error(f"Error calling tool {tool_id}->{method_name}: {e}", exc_info=True)
                     final_response = f"I tried to use the {tool_id} tool, but encountered an error: {e}. I can still try to answer based on what I know."
+            
+            # Add the substantive final response to conversation and display it
+            self._add_message("agent", final_response)
+            print(f"Agent: {final_response}")
         else:
             # No tool needed, the initial_response_to_user is the final response
             final_response = initial_response_to_user
-            
-        # If the final response differs from the initial one (e.g., after tool use),
-        # it might be good to add it as a new message or update the last one.
-        # For simplicity now, we'll assume the initial response was a placeholder if a tool was used.
-        # If no tool was used, initial_response_to_user IS the final_response.
-        # If a tool was used, the last message added was the "I'm using tool X" type message.
-        # So, we add the actual final response now.
-        if agent_action.get("use_tool"):
-             self._add_message("agent", final_response)
+            self._add_message("agent", final_response)
+            print(f"Agent: {final_response}")
         
         return final_response
     
@@ -311,7 +306,7 @@ Respond with a single, valid JSON object and NOTHING ELSE. The JSON object must 
 The value of "action" should be an object with the following fields:
 - "thought": (String) Your brief reasoning for the chosen action.
 - "use_tool": (Boolean) true if you decide to use a tool, false otherwise.
-- "initial_response_to_user": (String) A message to show to the user immediately. If using a tool, this could be "Okay, I'll use [tool_name] to [action_description]." If not using a tool, this will be your direct answer to the user.
+- "initial_response_to_user": (String) A message to show to the user immediately. If using a tool, keep this brief like "Analyzing..." or "Working on this..." If not using a tool, this will be your direct answer to the user.
 - "tool_id": (String, Optional) If use_tool is true, the ID of the tool to use (e.g., "filesystem").
 - "method_name": (String, Optional) If use_tool is true, the specific method of the tool to call (e.g., "list_directory"). Choose from the methods listed in AVAILABLE TOOLS.
 - "parameters": (Object, Optional) If use_tool is true, a JSON object of parameters for the chosen method, conforming to its input_schema. Use the TOOL USAGE EXAMPLES above for proper parameter formats.
@@ -357,25 +352,20 @@ Response (JSON only):
         tool_output_for_prompt = json.dumps(tool_result, indent=2)
 
         synthesis_prompt = f"""You are SwarmDev's Collaborative Agent.
-The user originally said: "{original_human_message}"
-You initially responded: "{agent_initial_utterance}" (indicating you might use a tool).
-You then used the tool '{tool_id}' with method '{method_name}'.
+The user asked: "{original_human_message}"
+You used the tool '{tool_id}' with method '{method_name}' to help answer this question.
 
 The tool execution resulted in:
 {tool_output_for_prompt}
 
-MANDATORY REQUIREMENTS - NO EXCEPTIONS:
-1. You MUST provide a substantive response with actual content - NEVER return empty/blank responses
-2. You MUST extract and present the final conclusions from the tool output
-3. For sequential-thinking: When nextThoughtNeeded is false, the complete thought chain has finished - extract and present the final conclusions from all thoughts in the chain
-4. If you cannot find clear results in the tool output, you MUST provide a helpful response based on what information is available
-5. Your response MUST directly answer the user's original question using the tool results
+CRITICAL INSTRUCTIONS:
+1. EXTRACT the key findings, recommendations, or conclusions from the tool output above
+2. PRESENT them as your direct answer to the user's question
+3. For sequential-thinking: The tool has completed its full reasoning chain - now present the final conclusions
+4. DO NOT acknowledge tool usage or provide meta-commentary
+5. FOCUS on giving the user the substantive answer they need
 
-STRICT INSTRUCTION: Your response must contain actual recommendations, findings, or conclusions that help the user. You cannot respond with just acknowledgments or meta-commentary about using tools.
-
-Extract the key findings from the tool output above and present them as your substantive response to the user's question: "{original_human_message}"
-
-Your substantive response with actual findings:
+Provide your direct answer based on the tool results:
 """
         
         try:
