@@ -140,7 +140,6 @@ class BaseAgent(ABC):
             catalog_text += "\n"
         
         catalog_text += "\nTo use any tool, call: call_mcp_tool(tool_id, method_name, parameters)\n"
-        catalog_text += "Example: call_mcp_tool('sequential-thinking', 'sequential_thinking', {'thought': 'analyze this', 'nextThoughtNeeded': False, 'thoughtNumber': 1, 'totalThoughts': 1})\n"
         
         return catalog_text
     
