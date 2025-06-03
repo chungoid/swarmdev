@@ -152,6 +152,8 @@ I can help you with:
                 final_response = "I wanted to use one of my tools, but I'm not sure which one or how. Can you clarify?"
             else:
                 print(f"{tool_id} call", flush=True)
+                # Debug: Log the exact parameters being sent
+                self.logger.info(f"DEBUG: Calling {tool_id} with method {method_name} and parameters: {parameters}")
                 try:
                     # Standard tool calling - multi-call support handled in MCP Manager
                     tool_result = self.mcp_manager.call_tool(
@@ -174,10 +176,11 @@ I can help you with:
                             final_response = str(content)
                     else:
                         # Tool failed - just answer the question directly with LLM
-                        self.logger.warning(f"Tool {tool_id} failed, falling back to direct LLM response")
+                        self.logger.warning(f"Tool {tool_id} failed with result: {tool_result}, falling back to direct LLM response")
                         fallback_prompt = f"Answer this question directly: {human_message}"
                         try:
                             final_response = self.llm_provider.generate_text(fallback_prompt, temperature=0.3, max_tokens=500)
+                            self.logger.info(f"Fallback response generated: {final_response[:100]}...")
                         except Exception as e:
                             final_response = f"I had trouble using my tools and generating a response. Could you try rephrasing your question?"
                         
@@ -185,14 +188,12 @@ I can help you with:
                     self.logger.error(f"Error calling tool {tool_id}->{method_name}: {e}", exc_info=True)
                     final_response = f"I tried to use the {tool_id} tool, but encountered an error: {e}. I can still try to answer based on what I know."
             
-            # Add the substantive final response to conversation and display it
+            # Add the substantive final response to conversation
             self._add_message("agent", final_response)
-            print(f"Agent: {final_response}")
         else:
             # No tool needed, the initial_response_to_user is the final response
             final_response = initial_response_to_user
             self._add_message("agent", final_response)
-            print(f"Agent: {final_response}")
         
         return final_response
     
@@ -314,7 +315,7 @@ AVAILABLE TOOLS (with methods and input schemas):
 {tool_catalog_str}
 
 TOOL USAGE EXAMPLES:
-- sequential-thinking: Use method "sequentialthinking" with parameters where thought is string, nextThoughtNeeded is boolean, thoughtNumber is integer, totalThoughts is integer
+- sequential-thinking: Use method "sequentialthinking". Set thought to text string, nextThoughtNeeded to true or false, thoughtNumber to number like 1, totalThoughts to number like 5
 - filesystem: Use for file operations
 - memory: Use for knowledge storage
 - fetch: Use for web content
