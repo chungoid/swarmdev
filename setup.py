@@ -96,7 +96,7 @@ setup(
         "Topic :: Artificial Intelligence",
         "Topic :: Scientific/Engineering :: Artificial Intelligence",
     ],
-    python_requires=">=3.8, <=3.11",
+    python_requires=">=3.8",
     install_requires=[],
     extras_require={
         "dev": [

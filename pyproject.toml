@@ -7,7 +7,7 @@ name = "swarmdev"
 version = "0.1.0"
 description = "A project for Swarm Development"
 readme = "README.md"
-requires-python = ">=3.8, <=3.11"
+requires-python = ">=3.8"
 classifiers = [
     "Programming Language :: Python :: 3",
     "License :: OSI Approved :: MIT License",  # Assuming MIT, please change if not
@@ -30,7 +30,6 @@ dependencies = [
     "httpx==0.28.1",
     "ipython==9.3.0",
     "ipywidgets==8.1.7",
-    "jnius>=1.5.0",
     "keyring==25.6.0",
     "markdownify==1.1.0",
     "mcp==1.9.2",
