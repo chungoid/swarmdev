@@ -155,41 +155,13 @@ I can help you with:
             else:
                 print(f"Using {tool_id}->{method_name} with params: {json.dumps(parameters, indent=2)}", flush=True)
                 try:
-                    # Standard tool calling with multi-call support
+                    # Standard tool calling - multi-call support handled in MCP Manager
                     tool_result = self.mcp_manager.call_tool(
                         tool_id,
                         "tools/call",
                         {"name": method_name, "arguments": parameters},
                         timeout=60 
                     )
-                    
-                    # Handle multi-call tools naturally
-                    if tool_result and not tool_result.get("error"):
-                        result_content = tool_result.get("result", {})
-                        if isinstance(result_content, dict) and result_content.get("content"):
-                            try:
-                                content_text = result_content["content"][0].get("text", "{}")
-                                parsed_content = json.loads(content_text)
-                                
-                                # If tool wants more calls, continue naturally
-                                while parsed_content.get("nextThoughtNeeded"):
-                                    next_params = parameters.copy()
-                                    next_params["thoughtNumber"] = parsed_content.get("thoughtNumber", 1) + 1
-                                    
-                                    next_result = self.mcp_manager.call_tool(
-                                        tool_id, "tools/call", 
-                                        {"name": method_name, "arguments": next_params},
-                                        timeout=60
-                                    )
-                                    
-                                    if next_result and not next_result.get("error"):
-                                        next_content = next_result.get("result", {}).get("content", [{}])[0].get("text", "{}")
-                                        parsed_content = json.loads(next_content)
-                                        tool_result = next_result  # Use latest result
-                                    else:
-                                        break
-                            except (json.JSONDecodeError, KeyError, IndexError):
-                                pass  # Not a multi-call tool, use original result
                     print(f"Tool {tool_id} result (or final accumulated): {json.dumps(tool_result, indent=2)}", flush=True) # Ensure this prints the final result
                     final_response = self._synthesize_final_response(human_message, initial_response_to_user, tool_id, method_name, tool_result)
                 except Exception as e:
@@ -327,6 +299,12 @@ USER MESSAGE: {human_message}
 AVAILABLE TOOLS (with methods and input schemas):
 {tool_catalog_str}
 
+TOOL USAGE EXAMPLES:
+- sequential-thinking: Use for step-by-step analysis. Always provide: {{"thought": "Starting thought...", "thoughtNumber": 1, "totalThoughts": 3, "nextThoughtNeeded": true}}
+- filesystem: Use to read/write files. Example: {{"path": "/workspace/file.txt"}}
+- memory: Use to store/recall information. Example: {{"entities": [...]}} for create_entities
+- fetch: Use to get web content. Example: {{"url": "https://example.com"}}
+
 YOUR TASK:
 IMPORTANT: Your entire response MUST be a single, valid JSON object. No other text, greetings, or explanations are allowed.
 
@@ -337,7 +315,7 @@ The value of "action" should be an object with the following fields:
 - "initial_response_to_user": (String) A message to show to the user immediately. If using a tool, this could be "Okay, I'll use [tool_name] to [action_description]." If not using a tool, this will be your direct answer to the user.
 - "tool_id": (String, Optional) If use_tool is true, the ID of the tool to use (e.g., "filesystem").
 - "method_name": (String, Optional) If use_tool is true, the specific method of the tool to call (e.g., "list_directory"). Choose from the methods listed in AVAILABLE TOOLS.
-- "parameters": (Object, Optional) If use_tool is true, a JSON object of parameters for the chosen method, conforming to its input_schema.
+- "parameters": (Object, Optional) If use_tool is true, a JSON object of parameters for the chosen method, conforming to its input_schema. Use the TOOL USAGE EXAMPLES above for proper parameter formats.
 
 Ensure your entire output is ONLY the JSON object described. Do not include any other text, greeting, or explanation before or after the JSON.
 Response (JSON only):
@@ -387,8 +365,11 @@ You then used the tool '{tool_id}' with method '{method_name}'.
 The tool execution resulted in:
 {tool_output_for_prompt}
 
+CRITICAL: If the tool was sequential-thinking or any analysis tool, you MUST present the final conclusion/answer to the user. Don't just acknowledge you used the tool - ACTUALLY OUTPUT THE RESULTS.
+
 Based on the original request, your initial response, and the tool's result, formulate a concise and helpful final response to the user.
-- If the tool was successful, integrate its findings naturally.
+- If the tool was successful, integrate its findings naturally and PRESENT THE ACTUAL RESULTS/CONCLUSIONS.
+- For sequential-thinking: Extract and present the final conclusions/recommendations from the thinking process.
 - If the tool failed, acknowledge the specific error transparently and suggest alternatives.
 - Do not explicitly say "The tool returned...". Instead, incorporate the information naturally.
 - Be conversational and helpful.

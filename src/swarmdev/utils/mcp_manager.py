@@ -661,6 +661,10 @@ class MCPManager:
             # Call the method
             result = self._call_server_method(tool_id, method, params, timeout)
             
+            # Handle multi-call tools naturally
+            if not result.get("error") and method == "tools/call":
+                result = self._handle_multi_call_tool(tool_id, params, result, timeout)
+            
             # Determine call status
             response_time = time.time() - start_time
             if result.get("error"):
@@ -763,6 +767,51 @@ class MCPManager:
         except Exception as stderr_e:
             self.mcp_logger.error(f"Error setting up non-blocking stderr read for PID {process.pid}: {stderr_e}")
         return stderr_output
+
+    def _handle_multi_call_tool(self, tool_id: str, original_params: Dict, initial_result: Dict, timeout: Optional[int] = None) -> Dict:
+        """Handle tools that require multiple calls to complete (e.g., sequential-thinking)."""
+        try:
+            result = initial_result
+            
+            # Check if this is a multi-call tool by examining the response structure
+            result_content = result.get("result", {})
+            if isinstance(result_content, dict) and result_content.get("content"):
+                try:
+                    content_text = result_content["content"][0].get("text", "{}")
+                    parsed_content = json.loads(content_text)
+                    
+                    # If tool indicates it needs more calls, continue automatically
+                    while parsed_content.get("nextThoughtNeeded"):
+                        # Prepare next call parameters
+                        next_params = original_params.copy()
+                        if "arguments" in next_params:
+                            next_params["arguments"]["thoughtNumber"] = parsed_content.get("thoughtNumber", 1) + 1
+                        
+                        self.mcp_logger.info(f"Multi-call tool {tool_id}: continuing to thought {next_params['arguments']['thoughtNumber']}")
+                        
+                        # Make the next call
+                        next_result = self._call_server_method(tool_id, "tools/call", next_params, timeout)
+                        
+                        if next_result and not next_result.get("error"):
+                            # Parse the new result
+                            next_content = next_result.get("result", {}).get("content", [{}])[0].get("text", "{}")
+                            parsed_content = json.loads(next_content)
+                            result = next_result  # Use latest result as final
+                        else:
+                            self.mcp_logger.warning(f"Multi-call tool {tool_id}: next call failed, stopping")
+                            break
+                    
+                    self.mcp_logger.info(f"Multi-call tool {tool_id}: completed after {parsed_content.get('thoughtNumber', 1)} thoughts")
+                    
+                except (json.JSONDecodeError, KeyError, IndexError):
+                    # Not a multi-call tool or unexpected format, return original result
+                    pass
+                    
+            return result
+            
+        except Exception as e:
+            self.mcp_logger.error(f"Error in multi-call handler for {tool_id}: {e}")
+            return initial_result  # Return original result on error
 
     def _call_server_method(self, server_id: str, method: str, params: Dict, timeout: Optional[int] = None) -> Dict:
         """Internal method to call a server method via JSON-RPC."""
