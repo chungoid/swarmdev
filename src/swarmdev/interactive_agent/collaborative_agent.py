@@ -502,14 +502,17 @@ Response (JSON only):
 
                     # Robust fallback: if LLM returned blank, answer directly without chain history
                     if not final_ans:
+                        # Secondary attempt: ask LLM to answer directly without history.
                         try:
                             final_ans = self.llm_provider.generate_text(
-                                f"Answer the question directly: {human_message}",
+                                f"Answer the question directly (sequential-thinking summary failed): {human_message}",
                                 temperature=0.3,
                                 max_tokens=2000
                             ).strip()
-                        except Exception:
-                            final_ans = "I completed the analysis but couldn't generate a detailed summary. In short: Scapy, python-nmap, PyMasscan, and Impacket are the top Python libraries for secure network scanning."  # guaranteed non-blank fallback
+                        except Exception as e:
+                            self.logger.error(f"Direct answer generation after sequential-thinking failed: {e}")
+                            # Fail LOUD: return explicit error message so issue is visible to user.
+                            raise RuntimeError("Sequential-thinking completed but summary generation failed. Check logs for details.")
 
                     return final_ans
 
