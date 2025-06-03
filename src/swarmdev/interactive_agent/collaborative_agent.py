@@ -144,6 +144,9 @@ I can help you with:
             method_name = agent_action.get("method_name")
             parameters = agent_action.get("parameters", {})
             
+            # Normalize keys (convert snake_case to camelCase) for better MCP compatibility
+            parameters = self._normalize_param_keys(parameters)
+            
             # Show brief initial response
             print(f"Agent: {initial_response_to_user}", flush=True)
             
@@ -400,3 +403,26 @@ Response (JSON only):
             self._add_message("agent", error_msg)
             
             self.logger.error(f"Workflow execution failed: {e}")
+
+    def _normalize_param_keys(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Convert snake_case keys to camelCase recursively for MCP tools that expect camelCase."""
+        if not isinstance(params, dict):
+            return params
+
+        def to_camel(key: str) -> str:
+            if '_' not in key:
+                return key
+            parts = key.split('_')
+            return parts[0] + ''.join(p.capitalize() for p in parts[1:])
+
+        normalized = {}
+        for k, v in params.items():
+            new_key = to_camel(k)
+            if isinstance(v, dict):
+                v = self._normalize_param_keys(v)  # recurse
+            # Convert numeric strings to int when safe
+            if isinstance(v, str) and v.isdigit():
+                v_converted = int(v)
+                v = v_converted
+            normalized[new_key] = v
+        return normalized
