@@ -315,7 +315,7 @@ AVAILABLE TOOLS (with methods and input schemas):
 {tool_catalog_str}
 
 TOOL USAGE EXAMPLES:
-- sequential-thinking: Use method "sequentialthinking". Provide parameters according to its input_schema (e.g., {"thought": "step 1", "nextThoughtNeeded": true, "thoughtNumber": 1, "totalThoughts": 10}).
+- sequential-thinking: Use method "sequentialthinking". Provide parameters according to its input_schema (e.g., {{"thought": "step 1", "nextThoughtNeeded": true, "thoughtNumber": 1, "totalThoughts": 10}}).
 - filesystem: Use for file operations
 - memory: Use for knowledge storage
 - fetch: Use for web content
