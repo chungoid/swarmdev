@@ -380,29 +380,10 @@ Your substantive response with actual findings:
         
         try:
             final_response = self.llm_provider.generate_text(synthesis_prompt, temperature=0.3, max_tokens=700)
-            final_response = final_response.strip()
-            
-            # Prevent empty responses entirely
-            if not final_response or len(final_response) < 10:
-                self.logger.warning(f"LLM returned empty/minimal response, using fallback")
-                # Extract any content from tool result as fallback
-                if tool_result and not tool_result.get("error"):
-                    result_text = str(tool_result)
-                    if len(result_text) > 50:
-                        return f"Here's what I found:\n\n{result_text[:500]}..."
-                    else:
-                        return f"{agent_initial_utterance}\n\nI've analyzed this using {tool_id} and have information available. Could you be more specific about what you'd like to know?"
-                else:
-                    return f"{agent_initial_utterance}\n\nI encountered an issue with the {tool_id} tool: {tool_result.get('error', 'Unknown error')}. Let me know how else I can help!"
-            
-            return final_response
+            return final_response.strip()
         except Exception as e:
             self.logger.error(f"Final response synthesis failed: {e}")
-            # Enhanced fallback with more detail
-            if tool_result and not tool_result.get("error"):
-                return f"{agent_initial_utterance}\n\nI've processed the information from the {tool_id} tool. Here's what I found:\n{str(tool_result)[:300]}..."
-            else:
-                return f"{agent_initial_utterance}\n\nI tried using the {tool_id} tool but encountered an issue: {tool_result.get('error', str(e))}. Let me know how else I can help!"
+            return f"{agent_initial_utterance}\nI've processed the information from the {tool_id} tool. {str(tool_result)[:200]}..."
     
 
     def _get_recent_context(self) -> str:
