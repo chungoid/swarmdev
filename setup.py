@@ -64,9 +64,9 @@ setup(
     package_dir={"": "src"},
     packages=find_packages(where="src"),
     # package_data no longer includes the bundled MCP source.
-    # It now needs to include the MCP image manifest file.
+    # It now needs to include the MCP image manifest file and scripts directory.
     package_data={
-        'swarmdev': ['mcp_image_manifest.json'], # Assuming manifest is in src/swarmdev/
+        'swarmdev': ['mcp_image_manifest.json', 'scripts/*.py'], # Assuming manifest is in src/swarmdev/
     },
     include_package_data=True, # Ensure manifest and other package data are included
     classifiers=[
