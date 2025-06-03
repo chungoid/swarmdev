@@ -2,6 +2,8 @@
 import subprocess
 import sys
 import os
+import platform
+import shutil
 
 MCP_IMAGES = [
     "ghcr.io/chungoid/context7:v0.1.1-context7",
@@ -13,8 +15,169 @@ MCP_IMAGES = [
     "ghcr.io/chungoid/time:v0.3.6",
 ]
 
+def detect_os():
+    """Detect the operating system and distribution."""
+    system = platform.system().lower()
+    
+    if system == "linux":
+        # Try to detect Linux distribution
+        try:
+            with open('/etc/os-release', 'r') as f:
+                os_release = f.read().lower()
+                if 'ubuntu' in os_release:
+                    return "ubuntu"
+                elif 'debian' in os_release:
+                    return "debian"
+                elif 'fedora' in os_release:
+                    return "fedora"
+                elif 'centos' in os_release or 'rhel' in os_release:
+                    return "centos"
+                elif 'arch' in os_release:
+                    return "arch"
+                else:
+                    return "linux"
+        except:
+            return "linux"
+    elif system == "darwin":
+        return "macos"
+    elif system == "windows":
+        return "windows"
+    else:
+        return "unknown"
+
+
+def get_docker_install_instructions(os_type):
+    """Get Docker installation instructions for the detected OS."""
+    instructions = {
+        "ubuntu": """
+Docker Installation for Ubuntu/Debian:
+
+Option 1 - Quick Install (Recommended for test servers):
+  sudo apt update
+  sudo apt install docker.io
+  sudo systemctl start docker
+  sudo systemctl enable docker
+  sudo usermod -aG docker $USER
+  newgrp docker
+
+Option 2 - Latest Docker CE:
+  # Remove old packages
+  sudo apt remove docker docker-engine docker.io containerd runc
+  
+  # Install prerequisites
+  sudo apt update
+  sudo apt install ca-certificates curl gnupg lsb-release
+  
+  # Add Docker repository
+  sudo mkdir -p /etc/apt/keyrings
+  curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+  echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+  
+  # Install Docker
+  sudo apt update
+  sudo apt install docker-ce docker-ce-cli containerd.io docker-compose-plugin
+  sudo usermod -aG docker $USER
+  newgrp docker
+""",
+        "debian": """
+Docker Installation for Debian:
+  sudo apt update
+  sudo apt install docker.io
+  sudo systemctl start docker
+  sudo systemctl enable docker
+  sudo usermod -aG docker $USER
+  newgrp docker
+""",
+        "fedora": """
+Docker Installation for Fedora:
+  sudo dnf install docker
+  sudo systemctl start docker
+  sudo systemctl enable docker
+  sudo usermod -aG docker $USER
+  newgrp docker
+""",
+        "centos": """
+Docker Installation for CentOS/RHEL:
+  sudo yum install docker
+  sudo systemctl start docker
+  sudo systemctl enable docker
+  sudo usermod -aG docker $USER
+  newgrp docker
+""",
+        "arch": """
+Docker Installation for Arch Linux:
+  sudo pacman -S docker
+  sudo systemctl start docker
+  sudo systemctl enable docker
+  sudo usermod -aG docker $USER
+  newgrp docker
+""",
+        "macos": """
+Docker Installation for macOS:
+  1. Download Docker Desktop from: https://www.docker.com/products/docker-desktop
+  2. Install the .dmg file
+  3. Start Docker Desktop from Applications
+""",
+        "windows": """
+Docker Installation for Windows:
+  1. Download Docker Desktop from: https://www.docker.com/products/docker-desktop
+  2. Install the installer
+  3. Start Docker Desktop
+""",
+        "linux": """
+Docker Installation (Generic Linux):
+  Please check your distribution's package manager:
+  - For apt-based (Ubuntu/Debian): sudo apt install docker.io
+  - For yum-based (CentOS/RHEL): sudo yum install docker
+  - For dnf-based (Fedora): sudo dnf install docker
+  - For pacman-based (Arch): sudo pacman -S docker
+""",
+        "unknown": """
+Docker Installation:
+  Please visit https://docs.docker.com/get-docker/ for installation instructions
+  specific to your operating system.
+"""
+    }
+    return instructions.get(os_type, instructions["unknown"])
+
+
+def attempt_docker_install(os_type):
+    """Attempt to automatically install Docker on supported systems."""
+    if os_type not in ["ubuntu", "debian"]:
+        return False
+    
+    print("Attempting to install Docker automatically...")
+    try:
+        # Update package list
+        subprocess.run(["sudo", "apt", "update"], check=True)
+        
+        # Install docker.io
+        subprocess.run(["sudo", "apt", "install", "-y", "docker.io"], check=True)
+        
+        # Start and enable docker
+        subprocess.run(["sudo", "systemctl", "start", "docker"], check=True)
+        subprocess.run(["sudo", "systemctl", "enable", "docker"], check=True)
+        
+        # Add user to docker group
+        import getpass
+        username = getpass.getuser()
+        subprocess.run(["sudo", "usermod", "-aG", "docker", username], check=True)
+        
+        print("Docker installed successfully!")
+        print("Note: You may need to log out and back in for group changes to take effect.")
+        print("For now, trying to continue...")
+        
+        return True
+    except subprocess.CalledProcessError as e:
+        print(f"Failed to install Docker automatically: {e}")
+        return False
+    except Exception as e:
+        print(f"Error during Docker installation: {e}")
+        return False
+
+
 def check_docker():
-    """Checks if Docker is installed and running."""
+    """Checks if Docker is installed and running, with installation guidance."""
     try:
         # Use a DEVNULL to prevent 'docker info' from printing to console on success
         with open(os.devnull, 'w') as devnull:
@@ -22,7 +185,32 @@ def check_docker():
         print("Docker is installed and seems to be running.")
         return True
     except FileNotFoundError:
-        print("Error: Docker command not found. Please install Docker.")
+        print("Error: Docker command not found. Docker needs to be installed.")
+        
+        # Detect OS and provide installation guidance
+        os_type = detect_os()
+        print(f"\nDetected OS: {os_type}")
+        
+        # Ask user if they want automatic installation (only for supported systems)
+        if os_type in ["ubuntu", "debian"]:
+            try:
+                response = input("\nWould you like to attempt automatic Docker installation? (y/N): ").strip().lower()
+                if response in ['y', 'yes']:
+                    if attempt_docker_install(os_type):
+                        # Try Docker check again after installation
+                        print("\nRechecking Docker status...")
+                        return check_docker()
+                    else:
+                        print("\nAutomatic installation failed. Please install manually.")
+            except KeyboardInterrupt:
+                print("\nInstallation cancelled.")
+            except:
+                print("\nCould not get user input. Showing manual instructions.")
+        
+        # Show manual installation instructions
+        instructions = get_docker_install_instructions(os_type)
+        print(instructions)
+        
         return False
     except subprocess.CalledProcessError as e:
         print("Error: Docker command found, but Docker daemon might not be running or accessible.")
@@ -34,8 +222,10 @@ def check_docker():
                 # Try to find common error messages
                 if "permission denied" in result.stderr.lower():
                     print("   Hint: You might need to run Docker commands with sudo or add your user to the 'docker' group.")
+                    print("   Try: sudo usermod -aG docker $USER && newgrp docker")
                 elif "cannot connect to the docker daemon" in result.stderr.lower():
                     print("   Hint: The Docker daemon does not seem to be running.")
+                    print("   Try: sudo systemctl start docker")
                 else:
                     # Print a snippet if not a common known one, to avoid too much spam
                     error_snippet = result.stderr.strip().split('\\n')[0]
@@ -100,7 +290,8 @@ def main():
 
 
     if not check_docker():
-        print("\\nPlease resolve Docker issues and try again.")
+        print("\\nDocker setup required. Please follow the instructions above and try again.")
+        print("After installing Docker, run: swarmdev pull-images")
         sys.exit(1)
 
     print(f"\\nFound {len(MCP_IMAGES)} MCP images to pull.")
