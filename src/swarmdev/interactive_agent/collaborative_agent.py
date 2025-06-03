@@ -154,39 +154,35 @@ I can help you with:
                 print(f"{tool_id} call", flush=True)
                 
                 try:
-                    # Handle sequential-thinking with automatic parameter management
-                    if tool_id == "sequential-thinking" and method_name == "sequentialthinking":
-                        final_response = self._handle_sequential_thinking(parameters, human_message)
-                    else:
-                        # Standard tool calling for other tools
-                        self.logger.info(f"DEBUG: Calling {tool_id} with method {method_name} and parameters: {parameters}")
-                        tool_result = self.mcp_manager.call_tool(
-                            tool_id,
-                            "tools/call",
-                            {"name": method_name, "arguments": parameters},
-                            timeout=60 
-                        )
-                        
-                        # Process tool result for non-sequential-thinking tools
-                        if tool_result and not tool_result.get("error"):
-                            # Extract the actual content from the tool result
-                            content = tool_result.get("content", tool_result.get("result", str(tool_result)))
-                            if isinstance(content, list) and content:
-                                # If it's a list, take the first item's text
-                                final_response = content[0].get("text", str(content[0])) if isinstance(content[0], dict) else str(content[0])
-                            elif isinstance(content, dict):
-                                final_response = content.get("text", str(content))
-                            else:
-                                final_response = str(content)
+                    # Generic tool invocation (no hard-coded branches)
+                    self.logger.info(f"DEBUG: Calling {tool_id} with method {method_name} and parameters: {parameters}")
+                    tool_result = self.mcp_manager.call_tool(
+                        tool_id,
+                        "tools/call",
+                        {"name": method_name, "arguments": parameters},
+                        timeout=60 
+                    )
+                    
+                    # Process tool result
+                    if tool_result and not tool_result.get("error"):
+                        # Extract the actual content from the tool result
+                        content = tool_result.get("content", tool_result.get("result", str(tool_result)))
+                        if isinstance(content, list) and content:
+                            # If it's a list, take the first item's text
+                            final_response = content[0].get("text", str(content[0])) if isinstance(content[0], dict) else str(content[0])
+                        elif isinstance(content, dict):
+                            final_response = content.get("text", str(content))
                         else:
-                            # Tool failed - just answer the question directly with LLM
-                            self.logger.warning(f"Tool {tool_id} failed with result: {tool_result}, falling back to direct LLM response")
-                            fallback_prompt = f"Answer this question directly: {human_message}"
-                            try:
-                                final_response = self.llm_provider.generate_text(fallback_prompt, temperature=0.3, max_tokens=500)
-                                self.logger.info(f"Fallback response generated: {final_response[:100]}...")
-                            except Exception as e:
-                                final_response = f"I had trouble using my tools and generating a response. Could you try rephrasing your question?"
+                            final_response = str(content)
+                    else:
+                        # Tool failed - just answer the question directly with LLM
+                        self.logger.warning(f"Tool {tool_id} failed with result: {tool_result}, falling back to direct LLM response")
+                        fallback_prompt = f"Answer this question directly: {human_message}"
+                        try:
+                            final_response = self.llm_provider.generate_text(fallback_prompt, temperature=0.3, max_tokens=500)
+                            self.logger.info(f"Fallback response generated: {final_response[:100]}...")
+                        except Exception as e:
+                            final_response = f"I had trouble using my tools and generating a response. Could you try rephrasing your question?"
                         
                 except Exception as e:
                     self.logger.error(f"Error calling tool {tool_id}->{method_name}: {e}", exc_info=True)
@@ -260,93 +256,6 @@ I can help you with:
     
     # Private methods
     
-    def _handle_sequential_thinking(self, parameters: dict, human_message: str) -> str:
-        """
-        Handle sequential-thinking with automatic parameter management.
-        The LLM just provides initial_thought, we handle all the mechanics.
-        """
-        initial_thought = parameters.get("initial_thought", "Let me think about this step by step.")
-        
-        # Start with the initial thought
-        thought_number = 1
-        total_thoughts = 50  # High initial estimate, tool will adjust as needed
-        current_thought = initial_thought
-        next_thought_needed = True
-        
-        self.logger.info(f"Starting sequential-thinking chain with: {initial_thought[:100]}...")
-        
-        thinking_chain = []
-        
-        # Continue the thinking loop until we're done - no artificial limits
-        while next_thought_needed:
-            try:
-                # Call the actual sequential-thinking tool with proper parameters
-                tool_params = {
-                    "thought": current_thought,
-                    "nextThoughtNeeded": next_thought_needed, 
-                    "thoughtNumber": thought_number,
-                    "totalThoughts": total_thoughts
-                }
-                
-                self.logger.info(f"Sequential-thinking step {thought_number}: {current_thought[:50]}...")
-                
-                tool_result = self.mcp_manager.call_tool(
-                    "sequential-thinking",
-                    "tools/call", 
-                    {"name": "sequentialthinking", "arguments": tool_params},
-                    timeout=60
-                )
-                
-                if not tool_result or tool_result.get("error"):
-                    self.logger.error(f"Sequential-thinking failed at step {thought_number}: {tool_result}")
-                    break
-                
-                # Extract result and update for next iteration
-                content = tool_result.get("content", tool_result.get("result", {}))
-                if isinstance(content, list) and content:
-                    result_data = content[0].get("text", {}) if isinstance(content[0], dict) else content[0]
-                elif isinstance(content, dict):
-                    result_data = content.get("text", content)
-                else:
-                    result_data = content
-                
-                # Parse the result to get next parameters
-                if isinstance(result_data, str):
-                    try:
-                        result_data = json.loads(result_data)
-                    except:
-                        # If can't parse as JSON, just use as final answer
-                        return result_data
-                
-                thinking_chain.append(f"Step {thought_number}: {current_thought}")
-                
-                # Check if we should continue
-                next_thought_needed = result_data.get("nextThoughtNeeded", False)
-                if next_thought_needed:
-                    current_thought = result_data.get("thought", "Continuing analysis...")
-                    thought_number += 1
-                    total_thoughts = result_data.get("totalThoughts", total_thoughts)
-                else:
-                    # We're done - extract final answer
-                    final_answer = result_data.get("thought", result_data.get("answer", str(result_data)))
-                    thinking_chain.append(f"Final: {final_answer}")
-                    return final_answer
-                    
-            except Exception as e:
-                self.logger.error(f"Error in sequential-thinking step {thought_number}: {e}")
-                break
-        
-        # If we get here, either we hit the limit or had an error
-        if thinking_chain:
-            return f"Completed analysis with {len(thinking_chain)} steps. Final conclusion: {thinking_chain[-1] if thinking_chain else 'Analysis incomplete.'}"
-        else:
-            # Fallback to direct LLM response
-            fallback_prompt = f"Answer this question directly: {human_message}"
-            try:
-                return self.llm_provider.generate_text(fallback_prompt, temperature=0.3, max_tokens=500)
-            except Exception as e:
-                return f"I had trouble with my reasoning process. Could you try rephrasing your question?"
-    
     def _add_message(self, sender: str, content: str):
         """Add message to conversation history."""
         message = ConversationMessage(
@@ -406,7 +315,7 @@ AVAILABLE TOOLS (with methods and input schemas):
 {tool_catalog_str}
 
 TOOL USAGE EXAMPLES:
-- sequential-thinking: Use method "sequentialthinking" with just {{"initial_thought": "your starting thought here"}}. The system will automatically handle the thinking chain.
+- sequential-thinking: Use method "sequentialthinking". Provide parameters according to its input_schema (e.g., {"thought": "step 1", "nextThoughtNeeded": true, "thoughtNumber": 1, "totalThoughts": 10}).
 - filesystem: Use for file operations
 - memory: Use for knowledge storage
 - fetch: Use for web content
@@ -452,9 +361,6 @@ Response (JSON only):
                 }
             })
     
-
-    
-
     def _get_recent_context(self) -> str:
         """Get recent conversation context."""
         if not self.conversation_history:
