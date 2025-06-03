@@ -269,7 +269,7 @@ I can help you with:
         
         # Start with the initial thought
         thought_number = 1
-        total_thoughts = 1  # Let the tool determine this dynamically
+        total_thoughts = 50  # High initial estimate, tool will adjust as needed
         current_thought = initial_thought
         next_thought_needed = True
         
