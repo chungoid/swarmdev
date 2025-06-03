@@ -160,7 +160,22 @@ I can help you with:
                         {"name": method_name, "arguments": parameters},
                         timeout=60 
                     )
-                    final_response = self._synthesize_final_response(human_message, initial_response_to_user, tool_id, method_name, tool_result)
+                    
+                    # Just use the tool result directly - no synthesis needed
+                    if tool_result and not tool_result.get("error"):
+                        # Extract the actual content from the tool result
+                        content = tool_result.get("content", tool_result.get("result", str(tool_result)))
+                        if isinstance(content, list) and content:
+                            # If it's a list, take the first item's text
+                            final_response = content[0].get("text", str(content[0])) if isinstance(content[0], dict) else str(content[0])
+                        elif isinstance(content, dict):
+                            final_response = content.get("text", str(content))
+                        else:
+                            final_response = str(content)
+                    else:
+                        error_msg = tool_result.get("error", "Unknown error") if tool_result else "No response"
+                        final_response = f"The {tool_id} tool encountered an issue: {error_msg}"
+                        
                 except Exception as e:
                     self.logger.error(f"Error calling tool {tool_id}->{method_name}: {e}", exc_info=True)
                     final_response = f"I tried to use the {tool_id} tool, but encountered an error: {e}. I can still try to answer based on what I know."
@@ -340,40 +355,7 @@ Response (JSON only):
                 }
             })
     
-    def _synthesize_final_response(self, original_human_message: str, agent_initial_utterance: str, tool_id: str, method_name: str, tool_result: Dict) -> str:
-        """Create final response incorporating tool results."""
-        if not self.llm_provider:
-            # Simple fallback if no LLM
-            if tool_result and not tool_result.get("error"):
-                return f"{agent_initial_utterance}\nTool {tool_id} ({method_name}) completed. Result: {str(tool_result)[:300]}..."
-            else:
-                return f"{agent_initial_utterance}\nTool {tool_id} ({method_name}) encountered an issue: {tool_result.get('error', 'Unknown error')}."
 
-        tool_output_for_prompt = json.dumps(tool_result, indent=2)
-
-        synthesis_prompt = f"""You are SwarmDev's Collaborative Agent.
-The user asked: "{original_human_message}"
-You used the tool '{tool_id}' with method '{method_name}' to help answer this question.
-
-The tool execution resulted in:
-{tool_output_for_prompt}
-
-CRITICAL INSTRUCTIONS:
-1. EXTRACT the key findings, recommendations, or conclusions from the tool output above
-2. PRESENT them as your direct answer to the user's question
-3. For sequential-thinking: The tool has completed its full reasoning chain - now present the final conclusions
-4. DO NOT acknowledge tool usage or provide meta-commentary
-5. FOCUS on giving the user the substantive answer they need
-
-Provide your direct answer based on the tool results:
-"""
-        
-        try:
-            final_response = self.llm_provider.generate_text(synthesis_prompt, temperature=0.3, max_tokens=700)
-            return final_response.strip()
-        except Exception as e:
-            self.logger.error(f"Final response synthesis failed: {e}")
-            return f"{agent_initial_utterance}\nI've processed the information from the {tool_id} tool. {str(tool_result)[:200]}..."
     
 
     def _get_recent_context(self) -> str:
