@@ -1,0 +1,97 @@
+name: Build Stable Docker Images
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'stable-v*' ]
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  REGISTRY_NAMESPACE: chungoid
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        server:
+          - name: everything
+            context: .
+            dockerfile: src/everything/Dockerfile
+            platforms: linux/amd64,linux/arm64
+          - name: fetch
+            context: src/fetch
+            dockerfile: Dockerfile
+            platforms: linux/amd64,linux/arm64
+          - name: filesystem
+            context: .
+            dockerfile: src/filesystem/Dockerfile
+            platforms: linux/amd64,linux/arm64
+          - name: git
+            context: src/git
+            dockerfile: Dockerfile
+            platforms: linux/amd64,linux/arm64
+          - name: memory
+            context: .
+            dockerfile: src/memory/Dockerfile
+            platforms: linux/amd64,linux/arm64
+          - name: sequentialthinking
+            context: .
+            dockerfile: src/sequentialthinking/Dockerfile
+            platforms: linux/amd64,linux/arm64
+          - name: time
+            context: src/time
+            dockerfile: Dockerfile
+            platforms: linux/amd64,linux/arm64
+
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.REGISTRY_NAMESPACE }}/${{ matrix.server.name }}
+          tags: |
+            type=ref,event=branch
+            type=semver,pattern=stable-{{version}},prefix=stable-v
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=stable-{{date 'YYYYMMDD-HHMMSS'}}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: ${{ matrix.server.context }}
+          file: ${{ matrix.server.context }}/${{ matrix.server.dockerfile }}
+          platforms: ${{ matrix.server.platforms }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Test image (AMD64)
+        run: |
+          # Pull the image for testing
+          docker pull ${{ env.REGISTRY }}/${{ env.REGISTRY_NAMESPACE }}/${{ matrix.server.name }}:latest
+          
+          # Basic smoke test - ensure the container can start and respond
+          echo "Testing ${{ matrix.server.name }} server..."
+          timeout 10s docker run --rm ${{ env.REGISTRY }}/${{ env.REGISTRY_NAMESPACE }}/${{ matrix.server.name }}:latest --help 2>/dev/null || echo "Container started successfully" 

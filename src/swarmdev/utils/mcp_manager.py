@@ -222,72 +222,55 @@ class MCPManager:
     
     def _get_default_mcp_config(self) -> Dict:
         """Return the default MCP configuration if no file is found or is invalid."""
-        project_root_placeholder = "/tmp" 
-        # Commands for Python servers are now simple docker run, using image's entrypoint.
-
-        return {
-            "mcpSettings": {
-                "defaultTimeout": 30,
-                "persistentConnections": True,
-                "autoDiscovery": True,
-                "retryCount": 3,
-                "retryDelay": 1.0
-            },
-            "mcpServers": {
+        default_config = {
+            "servers": {
                 "git": {
-                    "command": ["docker", "run", "-i", "--rm", 
-                                "-v", f"{project_root_placeholder}:/workspace", # Git needs mount
-                                "ghcr.io/chungoid/git:v0.3.6"],
+                    "command": ["docker", "run", "-i", "--rm", "-v", "$(pwd):/workspace", 
+                               "ghcr.io/chungoid/git:latest"],
                     "timeout": 30,
                     "enabled": True,
                     "description": "Git operations and repository management"
                 },
                 "time": {
-                    "command": ["docker", "run", "-i", "--rm", "ghcr.io/chungoid/time:v0.3.6"],
+                    "command": ["docker", "run", "-i", "--rm", "ghcr.io/chungoid/time:latest"],
                     "timeout": 30,
                     "enabled": True,
                     "description": "Time zone operations and conversions"
                 },
                 "fetch": {
-                    "command": ["docker", "run", "-i", "--rm", "ghcr.io/chungoid/fetch:v0.3.6"],
+                    "command": ["docker", "run", "-i", "--rm", "ghcr.io/chungoid/fetch:latest"],
                     "timeout": 30,
                     "enabled": True,
                     "description": "Web content fetching and processing"
                 },
                 "filesystem": {
-                    "command": ["docker", "run", "-i", "--rm", 
-                                "-v", f"{project_root_placeholder}:/workspace", 
-                                "ghcr.io/chungoid/filesystem:v0.3.6", "/workspace"],
+                    "command": ["docker", "run", "-i", "--rm", "-v", "$(pwd):/workspace", 
+                               "ghcr.io/chungoid/filesystem:latest", "/workspace"],
                     "timeout": 30,
                     "enabled": True,
                     "description": "File system operations with current directory access"
                 },
                 "memory": {
-                    "command": ["docker", "run", "-i", "--rm", "ghcr.io/chungoid/memory:v0.3.6"],
+                    "command": ["docker", "run", "-i", "--rm", "ghcr.io/chungoid/memory:latest"],
                     "timeout": 30,
                     "enabled": True,
                     "description": "Persistent memory storage for context"
                 },
                 "sequential-thinking": {
-                    "command": ["docker", "run", "-i", "--rm", "ghcr.io/chungoid/sequentialthinking:v0.3.6"],
+                    "command": ["docker", "run", "-i", "--rm", "ghcr.io/chungoid/sequentialthinking:latest"],
                     "timeout": 60,
                     "enabled": True,
                     "description": "Advanced reasoning through sequential thoughts"
                 },
-                "context7": {
-                    "command": ["docker", "run", "-i", "--rm", "-e", "MCP_TRANSPORT=stdio", "ghcr.io/chungoid/context7:v0.1.1-context7"],
+                "everything": {
+                    "command": ["docker", "run", "-i", "--rm", "ghcr.io/chungoid/everything:latest"],
                     "timeout": 30,
                     "enabled": True,
-                    "description": "Up-to-date documentation and code examples"
-                },
-                # "everything": {
-                #     "command": ["docker", "run", "-i", "--rm", "mcp/everything"],
-                #     "timeout": 30,
-                #     "enabled": True,
-                #     "description": "Node.js MCP server for everything" 
-                # }
+                    "description": "Reference MCP server with comprehensive tools"
+                }
             }
         }
+        return default_config
     
     def _merge_mcp_configs(self, global_config: Dict, project_config: Dict) -> Dict:
         """

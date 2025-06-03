@@ -98,7 +98,7 @@ def get_default_build_config():
                 "server_src_path": str(direct_src_path / "sequentialthinking"),
                 "docker_build_dir": str(base_server_src_path),
                 "dockerfile_path": str(Path("src") / "sequentialthinking" / "Dockerfile"),
-                "docker_tag": "ghcr.io/chungoid/sequentialthinking:v0.3.7-fixed",
+                "docker_tag": "ghcr.io/chungoid/sequentialthinking:latest",
                 "build_enabled": True,
                 "language": "nodejs"
             },
@@ -134,7 +134,7 @@ def get_default_build_config():
                 "server_src_path": str(direct_src_path / "time"),
                 "docker_build_dir": str(direct_src_path / "time"),
                 "dockerfile_path": "Dockerfile",
-                "docker_tag": "ghcr.io/chungoid/time:v0.3.7-fixed",
+                "docker_tag": "ghcr.io/chungoid/time:latest",
                 "build_enabled": True,
                 "language": "python"
             },
@@ -143,7 +143,7 @@ def get_default_build_config():
                 "server_src_path": str(direct_src_path / "git"),
                 "docker_build_dir": str(direct_src_path / "git"),
                 "dockerfile_path": "Dockerfile",
-                "docker_tag": "ghcr.io/chungoid/git:v0.3.7-fixed",
+                "docker_tag": "ghcr.io/chungoid/git:latest",
                 "build_enabled": True,
                 "language": "python"
             },
@@ -152,7 +152,7 @@ def get_default_build_config():
                 "server_src_path": str(direct_src_path / "fetch"),
                 "docker_build_dir": str(direct_src_path / "fetch"),
                 "dockerfile_path": "Dockerfile",
-                "docker_tag": "ghcr.io/chungoid/fetch:v0.3.7-fixed",
+                "docker_tag": "ghcr.io/chungoid/fetch:latest",
                 "build_enabled": True,
                 "language": "python"
             }

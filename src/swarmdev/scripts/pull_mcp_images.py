@@ -6,13 +6,13 @@ import platform
 import shutil
 
 MCP_IMAGES = [
-    "ghcr.io/chungoid/context7:v0.1.1-context7",
-    "ghcr.io/chungoid/fetch:v0.3.7-fixed",
-    "ghcr.io/chungoid/memory:v0.3.6",
-    "ghcr.io/chungoid/git:v0.3.7-fixed",
-    "ghcr.io/chungoid/filesystem:v0.3.6",
-    "ghcr.io/chungoid/sequentialthinking:v0.3.7-fixed",
-    "ghcr.io/chungoid/time:v0.3.7-fixed",
+    "ghcr.io/chungoid/everything:latest",
+    "ghcr.io/chungoid/fetch:latest",
+    "ghcr.io/chungoid/filesystem:latest",
+    "ghcr.io/chungoid/git:latest",
+    "ghcr.io/chungoid/memory:latest",
+    "ghcr.io/chungoid/sequentialthinking:latest",
+    "ghcr.io/chungoid/time:latest",
 ]
 
 def get_real_username():

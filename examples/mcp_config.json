@@ -1,46 +1,46 @@
 {
   "servers": {
     "git": {
-              "command": ["docker", "run", "--rm", "-i", "ghcr.io/chungoid/git:v0.3.7-fixed"],
+      "command": ["docker", "run", "--rm", "-i", "-v", "$(pwd):/workspace", "ghcr.io/chungoid/git:latest"],
       "timeout": 30,
       "enabled": true,
       "description": "Git operations and repository management"
     },
     "time": {
-              "command": ["docker", "run", "--rm", "-i", "ghcr.io/chungoid/time:v0.3.7-fixed"],
+      "command": ["docker", "run", "--rm", "-i", "ghcr.io/chungoid/time:latest"],
       "timeout": 30,
       "enabled": true,
       "description": "Time zone operations and conversions"
     },
     "fetch": {
-              "command": ["docker", "run", "--rm", "-i", "ghcr.io/chungoid/fetch:v0.3.7-fixed"],
+      "command": ["docker", "run", "--rm", "-i", "ghcr.io/chungoid/fetch:latest"],
       "timeout": 30,
       "enabled": true,
       "description": "Web content fetching and processing"
     },
     "filesystem": {
-      "command": ["docker", "run", "--rm", "-i", "-v", "$(pwd):/workspace", "mcp/filesystem", "/workspace"],
+      "command": ["docker", "run", "--rm", "-i", "-v", "$(pwd):/workspace", "ghcr.io/chungoid/filesystem:latest", "/workspace"],
       "timeout": 30,
       "enabled": true,
       "description": "File system operations with current directory access"
     },
     "memory": {
-      "command": ["docker", "run", "--rm", "-i", "mcp/memory"],
+      "command": ["docker", "run", "--rm", "-i", "ghcr.io/chungoid/memory:latest"],
       "timeout": 30,
       "enabled": true,
       "description": "Persistent memory storage for context"
     },
     "sequential-thinking": {
-              "command": ["docker", "run", "--rm", "-i", "ghcr.io/chungoid/sequentialthinking:v0.3.7-fixed"],
+      "command": ["docker", "run", "--rm", "-i", "ghcr.io/chungoid/sequentialthinking:latest"],
       "timeout": 60,
       "enabled": true,
       "description": "Advanced reasoning through sequential thoughts"
     },
-    "context7": {
-      "command": ["docker", "run", "--rm", "-i", "-e", "MCP_TRANSPORT=stdio", "context7-mcp"],
+    "everything": {
+      "command": ["docker", "run", "--rm", "-i", "ghcr.io/chungoid/everything:latest"],
       "timeout": 30,
       "enabled": true,
-      "description": "Up-to-date documentation and code examples"
+      "description": "Reference MCP server with comprehensive tools"
     }
   },
   "settings": {
