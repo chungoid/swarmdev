@@ -146,34 +146,87 @@ def attempt_docker_install(os_type):
     if os_type not in ["ubuntu", "debian"]:
         return False
     
-    print("Attempting to install Docker automatically...")
+    print("\nInstalling Docker automatically...")
+    print("=" * 50)
+    
     try:
         # Update package list
-        subprocess.run(["sudo", "apt", "update"], check=True)
+        print("Updating package list...")
+        result = subprocess.run(["sudo", "apt", "update"], 
+                              capture_output=True, text=True, check=True)
+        print("Package list updated successfully")
         
         # Install docker.io
-        subprocess.run(["sudo", "apt", "install", "-y", "docker.io"], check=True)
+        print("Installing Docker...")
+        result = subprocess.run(["sudo", "apt", "install", "-y", "docker.io"], 
+                              capture_output=True, text=True, check=True)
+        print("Docker installed successfully")
         
         # Start and enable docker
-        subprocess.run(["sudo", "systemctl", "start", "docker"], check=True)
-        subprocess.run(["sudo", "systemctl", "enable", "docker"], check=True)
+        print("Starting Docker service...")
+        subprocess.run(["sudo", "systemctl", "start", "docker"], 
+                      capture_output=True, text=True, check=True)
+        subprocess.run(["sudo", "systemctl", "enable", "docker"], 
+                      capture_output=True, text=True, check=True)
+        print("Docker service started and enabled")
         
         # Add user to docker group
         import getpass
         username = getpass.getuser()
-        subprocess.run(["sudo", "usermod", "-aG", "docker", username], check=True)
+        print(f"Adding user '{username}' to docker group...")
+        subprocess.run(["sudo", "usermod", "-aG", "docker", username], 
+                      capture_output=True, text=True, check=True)
+        print("User added to docker group successfully")
         
-        print("Docker installed successfully!")
-        print("Note: You may need to log out and back in for group changes to take effect.")
-        print("For now, trying to continue...")
+        print("\nDocker installation completed successfully!")
+        print("=" * 50)
         
         return True
     except subprocess.CalledProcessError as e:
         print(f"Failed to install Docker automatically: {e}")
+        if e.stderr:
+            print(f"Error details: {e.stderr.strip()}")
         return False
     except Exception as e:
         print(f"Error during Docker installation: {e}")
         return False
+
+
+def test_docker_with_group(username):
+    """Test if Docker works with the user's group membership."""
+    try:
+        # Use sg to run docker command with docker group
+        result = subprocess.run(
+            ["sg", "docker", "-c", "docker info > /dev/null 2>&1"],
+            shell=False,
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+        return result.returncode == 0
+    except:
+        # Fall back to regular docker command
+        try:
+            subprocess.run(["docker", "info"], 
+                          capture_output=True, check=True, timeout=10)
+            return True
+        except:
+            return False
+
+
+def run_docker_command_with_group(cmd_args, username):
+    """Run a docker command with proper group context."""
+    try:
+        # Try with sg first (switch group)
+        sg_cmd = ["sg", "docker", "-c", " ".join(["docker"] + cmd_args)]
+        result = subprocess.run(sg_cmd, capture_output=True, text=True, timeout=300)
+        if result.returncode == 0:
+            return result
+    except:
+        pass
+    
+    # Fall back to regular docker command
+    return subprocess.run(["docker"] + cmd_args, capture_output=True, text=True, timeout=300)
 
 
 def check_docker():
@@ -197,9 +250,20 @@ def check_docker():
                 response = input("\nWould you like to attempt automatic Docker installation? (y/N): ").strip().lower()
                 if response in ['y', 'yes']:
                     if attempt_docker_install(os_type):
-                        # Try Docker check again after installation
-                        print("\nRechecking Docker status...")
-                        return check_docker()
+                        # Test Docker with new group membership
+                        import getpass
+                        username = getpass.getuser()
+                        
+                        print("\nTesting Docker access with group membership...")
+                        if test_docker_with_group(username):
+                            print("Docker is working with group membership!")
+                            print("\nProceeding to pull MCP images automatically...")
+                            return "docker_installed_continue"  # Special return value
+                        else:
+                            print("Group membership not yet active in this session.")
+                            print("Docker is installed but you may need to log out/in for full access.")
+                            print("Trying to continue anyway...")
+                            return "docker_installed_limited"  # Try to continue with limited access
                     else:
                         print("\nAutomatic installation failed. Please install manually.")
             except KeyboardInterrupt:
@@ -238,30 +302,43 @@ def check_docker():
         return False
 
 
-def pull_image(image_uri: str) -> bool:
+def pull_image(image_uri: str, use_group_command: bool = False) -> bool:
     """Pulls a single Docker image."""
     print(f"Pulling {image_uri}...")
     try:
-        # Stream output for better user experience
-        process = subprocess.Popen(["docker", "pull", image_uri], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1, universal_newlines=True)
-        
-        # Print stdout line by line
-        if process.stdout:
-            for line in iter(process.stdout.readline, ''):
-                print(f"   {line.strip()}")
-            process.stdout.close()
-
-        return_code = process.wait() # Wait for the process to complete
-
-        if return_code == 0:
-            print(f"Successfully pulled {image_uri}")
-            return True
+        if use_group_command:
+            # Try with group command first
+            import getpass
+            username = getpass.getuser()
+            result = run_docker_command_with_group(["pull", image_uri], username)
+            
+            if result.returncode == 0:
+                print(f"Successfully pulled {image_uri}")
+                return True
+            else:
+                print(f"Failed to pull {image_uri} with group command. Return code: {result.returncode}")
+                if result.stderr:
+                    print(f"Error: {result.stderr.strip()}")
+                return False
         else:
-            print(f"Failed to pull {image_uri}. Return code: {return_code}")
-            # Stderr would have been mixed if Popen redirected stderr=subprocess.STDOUT
-            # If stderr was separate, you could read it here, but for pull it often goes to stdout
-            # For simplicity, the live printing above should show errors.
-            return False
+            # Stream output for better user experience
+            process = subprocess.Popen(["docker", "pull", image_uri], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1, universal_newlines=True)
+            
+            # Print stdout line by line
+            if process.stdout:
+                for line in iter(process.stdout.readline, ''):
+                    if line.strip():  # Only print non-empty lines
+                        print(f"  {line.strip()}")
+                process.stdout.close()
+
+            return_code = process.wait() # Wait for the process to complete
+
+            if return_code == 0:
+                print(f"Successfully pulled {image_uri}")
+                return True
+            else:
+                print(f"Failed to pull {image_uri}. Return code: {return_code}")
+                return False
             
     except FileNotFoundError:
         print("Error: Docker command not found during pull. This should not happen if check_docker passed.")
@@ -289,19 +366,30 @@ def main():
     # print(f"Current working directory: {os.getcwd()}")
 
 
-    if not check_docker():
+    docker_status = check_docker()
+    if docker_status == True:
+        print("Docker is ready.")
+    elif docker_status in ["docker_installed_continue", "docker_installed_limited"]:
+        print("Docker was just installed. Continuing with image downloads...")
+    else:
         print("\\nDocker setup required. Please follow the instructions above and try again.")
         print("After installing Docker, run: swarmdev pull-images")
         sys.exit(1)
 
     print(f"\\nFound {len(MCP_IMAGES)} MCP images to pull.")
+    
+    # Determine if we should use group commands
+    use_group = docker_status == "docker_installed_limited"
+    
     all_successful = True
-    for image in MCP_IMAGES:
-        if not pull_image(image):
+    for i, image in enumerate(MCP_IMAGES, 1):
+        print(f"\\n[{i}/{len(MCP_IMAGES)}] {image}")
+        if not pull_image(image, use_group_command=use_group):
             all_successful = False
 
     if all_successful:
         print("\\nAll MCP Docker images pulled successfully!")
+        print("Setup complete! You can now use SwarmDev with MCP tools.")
     else:
         print("\\nSome images could not be pulled. Please check the errors above.")
         sys.exit(1)
