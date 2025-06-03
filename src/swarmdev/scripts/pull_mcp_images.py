@@ -193,79 +193,26 @@ def attempt_docker_install(os_type):
         print(f"Adding user '{username}' to docker group...")
         
         import getpass
-        print(f"  DEBUG: User detection breakdown:")
-        print(f"    SUDO_USER = '{os.environ.get('SUDO_USER')}'")
-        print(f"    USER = '{os.environ.get('USER')}'") 
-        print(f"    getpass.getuser() = '{getpass.getuser()}'")
-        print(f"    Final selected username = '{username}'")
-        
-        # Show current effective user context
-        print(f"  DEBUG: Current process context:")
-        print(f"    os.getuid() = {os.getuid()}")
-        print(f"    os.geteuid() = {os.geteuid()}")
+        print(f"  User detected: {username}")
         
         try:
-            # Show the exact command we're about to run
             cmd = ["sudo", "usermod", "-aG", "docker", username]
-            print(f"  DEBUG: About to run command: {' '.join(cmd)}")
-            
             result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-            print("  DEBUG: usermod command completed successfully")
-            
-            if result.stdout:
-                print(f"  DEBUG: usermod stdout: '{result.stdout.strip()}'")
-            if result.stderr:
-                print(f"  DEBUG: usermod stderr: '{result.stderr.strip()}'")
-            
             print("User added to docker group successfully")
             
-            # Multiple verification approaches
-            print(f"  DEBUG: Verifying user was added to docker group...")
-            
-            # Method 1: Check groups command for user
+            # Verify the user was actually added
             verify_result = subprocess.run(["groups", username], capture_output=True, text=True)
-            print(f"  DEBUG: 'groups {username}' returned code {verify_result.returncode}")
             if verify_result.returncode == 0:
                 groups_output = verify_result.stdout.strip()
-                print(f"  DEBUG: 'groups {username}' output: '{groups_output}'")
                 if "docker" in groups_output:
                     print(f"✓ Verified: User is now in docker group")
-                    print(f"  Groups: {groups_output}")
                 else:
-                    print(f"✗ Warning: User not showing in docker group after adding")
-                    print(f"  Groups: {groups_output}")
-            else:
-                print(f"  DEBUG: 'groups {username}' failed: {verify_result.stderr}")
+                    print(f"⚠ Warning: User not showing in docker group after adding")
             
-            # Method 2: Check /etc/group directly
-            try:
-                grep_result = subprocess.run(["grep", "^docker:", "/etc/group"], capture_output=True, text=True)
-                if grep_result.returncode == 0:
-                    docker_line = grep_result.stdout.strip()
-                    print(f"  DEBUG: /etc/group docker line: '{docker_line}'")
-                    if username in docker_line:
-                        print(f"  DEBUG: ✓ User '{username}' found in /etc/group docker line")
-                    else:
-                        print(f"  DEBUG: ✗ User '{username}' NOT found in /etc/group docker line")
-                else:
-                    print(f"  DEBUG: Could not read docker group from /etc/group")
-            except Exception as e:
-                print(f"  DEBUG: Error checking /etc/group: {e}")
-            
-            # Method 3: Check getent group docker
-            try:
-                getent_result = subprocess.run(["getent", "group", "docker"], capture_output=True, text=True)
-                if getent_result.returncode == 0:
-                    getent_output = getent_result.stdout.strip()
-                    print(f"  DEBUG: 'getent group docker' output: '{getent_output}'")
-                    if username in getent_output:
-                        print(f"  DEBUG: ✓ User '{username}' found in getent docker group")
-                    else:
-                        print(f"  DEBUG: ✗ User '{username}' NOT found in getent docker group")
-                else:
-                    print(f"  DEBUG: 'getent group docker' failed")
-            except Exception as e:
-                print(f"  DEBUG: Error running getent: {e}")
+            # Double-check with getent
+            getent_result = subprocess.run(["getent", "group", "docker"], capture_output=True, text=True)
+            if getent_result.returncode == 0 and username in getent_result.stdout:
+                print(f"✓ Confirmed: User found in system docker group")
             
         except subprocess.CalledProcessError as e:
             print(f"Failed to add user to docker group: {e}")
@@ -374,6 +321,8 @@ def attempt_docker_install(os_type):
         print("  2. Start a new terminal/SSH session")  
         print("  3. Use 'newgrp docker' command")
         print("  4. The script will try 'sg docker' to work around this")
+        print("\nFor the most seamless experience, the script can automatically")
+        print("activate your docker group membership and continue...")
         
         return True
     except subprocess.CalledProcessError as e:
@@ -450,6 +399,52 @@ def test_docker_with_group(username):
     return False
 
 
+def activate_docker_group_and_continue():
+    """Provide seamless docker group activation for users."""
+    username = get_real_username()
+    print(f"\n🔄 Docker group activation needed for user '{username}'")
+    print("=" * 60)
+    
+    print("Your user was successfully added to the docker group, but your current")
+    print("session needs to be refreshed to use the new group membership.")
+    print()
+    print("🎯 SIMPLE SOLUTION - Run this command:")
+    print(f"   su - {username}")
+    print()
+    print("Then re-run:")
+    print("   swarmdev pull-images")
+    print()
+    print("📋 Alternative options:")
+    print("   • newgrp docker          (activate group in current session)")
+    print("   • exit && ssh back in    (start fresh SSH session)")
+    print("   • logout and login       (if using console)")
+    print()
+    
+    try:
+        response = input("🤖 Auto-run 'su - {0}' for you? (Y/n): ".format(username)).strip().lower()
+        if response in ['y', 'yes', '']:
+            print(f"\n🚀 Running: su - {username}")
+            print("=" * 60)
+            print("After running 'su', your docker group will be active.")
+            print("Then run: swarmdev pull-images")
+            print("=" * 60)
+            
+            # Execute su command 
+            os.system(f"su - {username}")
+            return True
+        else:
+            print(f"\n💡 Manual activation: Run 'su - {username}' then 'swarmdev pull-images'")
+            return False
+            
+    except KeyboardInterrupt:
+        print(f"\n💡 Manual activation: Run 'su - {username}' then 'swarmdev pull-images'")
+        return False
+    except Exception as e:
+        print(f"Error: {e}")
+        print(f"💡 Manual activation: Run 'su - {username}' then 'swarmdev pull-images'")
+        return False
+
+
 def run_docker_command_with_group(cmd_args, username):
     """Run a docker command with proper group context."""
     # Try multiple approaches in order of preference
@@ -520,15 +515,27 @@ def check_docker():
                         username = get_real_username()
                         
                         print("\nTesting Docker access with group membership...")
-                        if test_docker_with_group(username):
+                        group_status = test_docker_with_group(username)
+                        
+                        if group_status:
                             print("Docker is working with group membership!")
                             print("\nProceeding to pull MCP images automatically...")
                             return "docker_installed_continue"  # Special return value
                         else:
                             print("Group membership not yet active in this session.")
-                            print("Docker is installed but you may need to log out/in for full access.")
-                            print("Trying to continue anyway...")
-                            return "docker_installed_limited"  # Try to continue with limited access
+                            print("The script can automatically activate docker group and continue.")
+                            
+                            try:
+                                response = input("\nAutomatically activate docker group and continue? (Y/n): ").strip().lower()
+                                if response in ['y', 'yes', '']:
+                                    return "docker_installed_activate_and_continue"
+                                else:
+                                    print("Docker is installed but you may need to log out/in for full access.")
+                                    print("Trying to continue anyway...")
+                                    return "docker_installed_limited"
+                            except:
+                                print("Could not get user input. Trying to continue with workarounds...")
+                                return "docker_installed_limited"
                     else:
                         print("\nAutomatic installation failed. Please install manually.")
                         return False
@@ -687,8 +694,16 @@ def main():
     docker_status = check_docker()
     if docker_status == True:
         print("Docker is ready.")
-    elif docker_status in ["docker_installed_continue", "docker_installed_limited"]:
+    elif docker_status == "docker_installed_continue":
         print("Docker was just installed. Continuing with image downloads...")
+    elif docker_status == "docker_installed_limited":
+        print("Docker was just installed. Continuing with image downloads...")
+    elif docker_status == "docker_installed_activate_and_continue":
+        print("Docker was just installed. Activating docker group and continuing...")
+        if activate_docker_group_and_continue():
+            print("Docker group activated successfully!")
+        else:
+            print("Could not activate docker group automatically. Using workarounds...")
     elif docker_status == "group_fix_needed":
         print("\nDocker group membership issue detected.")
         print("Please follow the fix instructions above and then re-run: swarmdev pull-images")
@@ -701,7 +716,22 @@ def main():
     print(f"\nFound {len(MCP_IMAGES)} MCP images to pull.")
     
     # Determine if we should use group commands
-    use_group = docker_status in ["docker_installed_continue", "docker_installed_limited"]
+    use_group = docker_status in ["docker_installed_limited"]
+    
+    # If we activated the group successfully, docker should work normally
+    if docker_status == "docker_installed_activate_and_continue":
+        # Test if docker works directly now
+        try:
+            test_result = subprocess.run(["docker", "--version"], capture_output=True, text=True, timeout=5)
+            if test_result.returncode == 0:
+                print("✓ Docker is now working directly (no workarounds needed)")
+                use_group = False
+            else:
+                print("⚠ Docker still needs group workarounds")
+                use_group = True
+        except:
+            print("⚠ Could not test docker directly, using group workarounds")
+            use_group = True
     
     all_successful = True
     for i, image in enumerate(MCP_IMAGES, 1):
