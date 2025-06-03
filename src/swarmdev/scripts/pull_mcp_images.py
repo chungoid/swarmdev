@@ -193,28 +193,87 @@ def attempt_docker_install(os_type):
         print(f"Adding user '{username}' to docker group...")
         
         import getpass
-        print(f"  Detected user via: SUDO_USER={os.environ.get('SUDO_USER')}, USER={os.environ.get('USER')}, getuser={getpass.getuser()}")
+        print(f"  DEBUG: User detection breakdown:")
+        print(f"    SUDO_USER = '{os.environ.get('SUDO_USER')}'")
+        print(f"    USER = '{os.environ.get('USER')}'") 
+        print(f"    getpass.getuser() = '{getpass.getuser()}'")
+        print(f"    Final selected username = '{username}'")
+        
+        # Show current effective user context
+        print(f"  DEBUG: Current process context:")
+        print(f"    os.getuid() = {os.getuid()}")
+        print(f"    os.geteuid() = {os.geteuid()}")
         
         try:
-            result = subprocess.run(["sudo", "usermod", "-aG", "docker", username], 
-                                  capture_output=True, text=True, check=True)
+            # Show the exact command we're about to run
+            cmd = ["sudo", "usermod", "-aG", "docker", username]
+            print(f"  DEBUG: About to run command: {' '.join(cmd)}")
+            
+            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+            print("  DEBUG: usermod command completed successfully")
+            
+            if result.stdout:
+                print(f"  DEBUG: usermod stdout: '{result.stdout.strip()}'")
+            if result.stderr:
+                print(f"  DEBUG: usermod stderr: '{result.stderr.strip()}'")
+            
             print("User added to docker group successfully")
             
-            # Verify the user was actually added
+            # Multiple verification approaches
+            print(f"  DEBUG: Verifying user was added to docker group...")
+            
+            # Method 1: Check groups command for user
             verify_result = subprocess.run(["groups", username], capture_output=True, text=True)
+            print(f"  DEBUG: 'groups {username}' returned code {verify_result.returncode}")
             if verify_result.returncode == 0:
                 groups_output = verify_result.stdout.strip()
+                print(f"  DEBUG: 'groups {username}' output: '{groups_output}'")
                 if "docker" in groups_output:
                     print(f"✓ Verified: User is now in docker group")
                     print(f"  Groups: {groups_output}")
                 else:
                     print(f"✗ Warning: User not showing in docker group after adding")
                     print(f"  Groups: {groups_output}")
+            else:
+                print(f"  DEBUG: 'groups {username}' failed: {verify_result.stderr}")
+            
+            # Method 2: Check /etc/group directly
+            try:
+                grep_result = subprocess.run(["grep", "^docker:", "/etc/group"], capture_output=True, text=True)
+                if grep_result.returncode == 0:
+                    docker_line = grep_result.stdout.strip()
+                    print(f"  DEBUG: /etc/group docker line: '{docker_line}'")
+                    if username in docker_line:
+                        print(f"  DEBUG: ✓ User '{username}' found in /etc/group docker line")
+                    else:
+                        print(f"  DEBUG: ✗ User '{username}' NOT found in /etc/group docker line")
+                else:
+                    print(f"  DEBUG: Could not read docker group from /etc/group")
+            except Exception as e:
+                print(f"  DEBUG: Error checking /etc/group: {e}")
+            
+            # Method 3: Check getent group docker
+            try:
+                getent_result = subprocess.run(["getent", "group", "docker"], capture_output=True, text=True)
+                if getent_result.returncode == 0:
+                    getent_output = getent_result.stdout.strip()
+                    print(f"  DEBUG: 'getent group docker' output: '{getent_output}'")
+                    if username in getent_output:
+                        print(f"  DEBUG: ✓ User '{username}' found in getent docker group")
+                    else:
+                        print(f"  DEBUG: ✗ User '{username}' NOT found in getent docker group")
+                else:
+                    print(f"  DEBUG: 'getent group docker' failed")
+            except Exception as e:
+                print(f"  DEBUG: Error running getent: {e}")
             
         except subprocess.CalledProcessError as e:
             print(f"Failed to add user to docker group: {e}")
+            print(f"  DEBUG: Command failed with return code: {e.returncode}")
+            if e.stdout:
+                print(f"  DEBUG: Command stdout: '{e.stdout.strip()}'")
             if e.stderr:
-                print(f"Error details: {e.stderr.strip()}")
+                print(f"  DEBUG: Command stderr: '{e.stderr.strip()}'")
             raise e
         
         # Start and enable docker service AFTER adding user to group
@@ -230,35 +289,84 @@ def attempt_docker_install(os_type):
         
         # Final verification that everything is set up correctly
         print("\nFinal verification:")
+        print(f"  DEBUG: Final verification for user '{username}'")
         try:
             # Check Docker service status
+            print(f"  DEBUG: Checking Docker service status...")
             service_result = subprocess.run(["sudo", "systemctl", "is-active", "docker"], capture_output=True, text=True)
+            print(f"  DEBUG: Docker service check returned code {service_result.returncode}")
+            print(f"  DEBUG: Docker service output: '{service_result.stdout.strip()}'")
             if service_result.returncode == 0 and service_result.stdout.strip() == "active":
                 print("✓ Docker service is running")
             else:
                 print("✗ Docker service is not running")
                 
             # Check Docker group exists
+            print(f"  DEBUG: Checking if docker group exists...")
             group_check = subprocess.run(["getent", "group", "docker"], capture_output=True, text=True)
+            print(f"  DEBUG: getent group docker returned code {group_check.returncode}")
             if group_check.returncode == 0:
                 print("✓ Docker group exists")
                 # Show group members
                 group_info = group_check.stdout.strip()
                 print(f"  Group info: {group_info}")
+                print(f"  DEBUG: Parsing group members from: '{group_info}'")
+                # Parse group info format: groupname:x:gid:member1,member2,member3
+                if ':' in group_info:
+                    parts = group_info.split(':')
+                    if len(parts) >= 4:
+                        members = parts[3].strip()
+                        print(f"  DEBUG: Group members string: '{members}'")
+                        if members:
+                            member_list = [m.strip() for m in members.split(',')]
+                            print(f"  DEBUG: Group members list: {member_list}")
+                            if username in member_list:
+                                print(f"  DEBUG: ✓ '{username}' found in parsed member list")
+                            else:
+                                print(f"  DEBUG: ✗ '{username}' NOT found in parsed member list")
+                        else:
+                            print(f"  DEBUG: No members in docker group")
             else:
                 print("✗ Docker group does not exist")
+                print(f"  DEBUG: getent error: '{group_check.stderr.strip()}'")
                 
-            # Final user group check
+            # Final user group check using multiple methods
+            print(f"  DEBUG: Final user group verification...")
+            
+            # Method 1: groups username
+            print(f"  DEBUG: Running 'groups {username}'...")
             final_groups = subprocess.run(["groups", username], capture_output=True, text=True)
+            print(f"  DEBUG: 'groups {username}' returned code {final_groups.returncode}")
             if final_groups.returncode == 0:
                 groups_list = final_groups.stdout.strip()
+                print(f"  DEBUG: 'groups {username}' output: '{groups_list}'")
                 if "docker" in groups_list:
-                    print(f"✓ User '{username}' is in docker group")
+                    print(f"✓ User '{username}' is in docker group (via groups command)")
                 else:
-                    print(f"✗ User '{username}' is NOT in docker group")
+                    print(f"✗ User '{username}' is NOT in docker group (via groups command)")
                 print(f"  All groups: {groups_list}")
+            else:
+                print(f"  DEBUG: 'groups {username}' failed: '{final_groups.stderr.strip()}'")
+            
+            # Method 2: id command
+            print(f"  DEBUG: Running 'id {username}'...")
+            id_result = subprocess.run(["id", username], capture_output=True, text=True)
+            print(f"  DEBUG: 'id {username}' returned code {id_result.returncode}")
+            if id_result.returncode == 0:
+                id_output = id_result.stdout.strip()
+                print(f"  DEBUG: 'id {username}' output: '{id_output}'")
+                if "docker" in id_output:
+                    print(f"  DEBUG: ✓ 'docker' found in id output")
+                else:
+                    print(f"  DEBUG: ✗ 'docker' NOT found in id output")
+            else:
+                print(f"  DEBUG: 'id {username}' failed: '{id_result.stderr.strip()}'")
+                
         except Exception as e:
             print(f"Could not perform final verification: {e}")
+            print(f"  DEBUG: Final verification exception: {type(e).__name__}: {e}")
+            import traceback
+            print(f"  DEBUG: Traceback: {traceback.format_exc()}")
         
         print("\nIMPORTANT: Group membership changes require a new login session.")
         print("Options to activate Docker group membership:")
