@@ -1432,17 +1432,29 @@ def cmd_pull_images(args):
     """Handles the 'pull-images' command to download MCP Docker images."""
     logger.info("Starting MCP Docker image download process...")
     try:
-        # Construct path to the script relative to this cli.py file
-        # cli.py is in src/swarmdev/, scripts/ is in src/swarmdev/scripts/
+        # Try to find the script in multiple locations to handle both development and installed modes
+        
+        # Option 1: Development mode (running from project directory)
         cli_file_path = os.path.abspath(__file__)
-        # Expected structure: <workspace>/src/swarmdev/cli.py
-        # We want: <workspace>/src/swarmdev/scripts/pull_mcp_images.py
-        src_swarmdev_dir = os.path.dirname(cli_file_path) # <workspace>/src/swarmdev
-        script_path = os.path.join(src_swarmdev_dir, "scripts", "pull_mcp_images.py")
-
-        if not os.path.exists(script_path):
-            logger.error(f"Image pulling script not found at: {script_path}")
-            logger.error("Please ensure 'scripts/pull_mcp_images.py' exists in the correct location relative to 'cli.py'.")
+        src_swarmdev_dir = os.path.dirname(cli_file_path)
+        dev_script_path = os.path.join(src_swarmdev_dir, "scripts", "pull_mcp_images.py")
+        
+        # Option 2: Installed mode (package installation)
+        import swarmdev
+        package_dir = os.path.dirname(swarmdev.__file__)
+        installed_script_path = os.path.join(package_dir, "scripts", "pull_mcp_images.py")
+        
+        # Choose the script path
+        if os.path.exists(dev_script_path):
+            script_path = dev_script_path
+            logger.debug(f"Using development script: {script_path}")
+        elif os.path.exists(installed_script_path):
+            script_path = installed_script_path
+            logger.debug(f"Using installed script: {script_path}")
+        else:
+            logger.error(f"Image pulling script not found in either location:")
+            logger.error(f"  Development: {dev_script_path}")
+            logger.error(f"  Installed: {installed_script_path}")
             sys.exit(1)
 
         # Run the script as a subprocess
@@ -1453,7 +1465,7 @@ def cmd_pull_images(args):
             sys.exit(process.returncode)
         else:
             # The script itself prints success, so just a confirmation from CLI
-            logger.info("MCP Docker image download process initiated by script. Check script output for results.")
+            logger.info("MCP Docker image download process completed successfully.")
 
     except FileNotFoundError: 
         logger.error(f"Python interpreter not found at: {sys.executable}")

@@ -400,7 +400,7 @@ def test_docker_with_group(username):
 
 
 def activate_docker_group_and_continue():
-    """Provide seamless docker group activation for users."""
+    """Provide safe docker group activation guidance for users."""
     username = get_real_username()
     print(f"\nDocker group activation needed for user '{username}'")
     print("=" * 60)
@@ -408,50 +408,25 @@ def activate_docker_group_and_continue():
     print("Your user was successfully added to the docker group, but your current")
     print("session needs to be refreshed to use the new group membership.")
     print()
-    print("SIMPLE SOLUTION - Run this command:")
-    print(f"   su - {username}")
+    print("REQUIRED: Start a new session with docker group active")
+    print("=" * 60)
     print()
-    print("Then re-run:")
+    print("SOLUTION: Run this command manually:")
+    print(f"   su - {username}")
     print("   swarmdev pull-images")
     print()
-    print("Alternative options:")
-    print("   • newgrp docker          (activate group in current session)")
-    print("   • exit && ssh back in    (start fresh SSH session)")
-    print("   • logout and login       (if using console)")
+    print("This avoids complex session switching and ensures reliable operation.")
+    print()
+    print("Alternative approaches:")
+    print("   • newgrp docker && swarmdev pull-images   (current session)")
+    print("   • exit && ssh back in                     (restart terminal)")
+    print("   • logout and login                        (console restart)")
     print()
     
-    try:
-        response = input("Auto-activate docker group and continue setup? (Y/n): ").strip().lower()
-        if response in ['y', 'yes', '']:
-            print(f"\nActivating docker group and continuing setup...")
-            print("You may be prompted for your password.")
-            print("=" * 60)
-            
-            # Execute su command with swarmdev pull-images automatically
-            exit_code = os.system(f"su - {username} -c 'swarmdev pull-images'")
-            
-            if exit_code == 0:
-                print("=" * 60)
-                print("DOCKER SETUP SUCCESSFUL!")
-                print("All MCP images have been downloaded.")
-                print("SwarmDev is ready to use!")
-            else:
-                print("=" * 60)
-                print("Setup completed but there may have been issues.")
-                print("Try running: swarmdev pull-images")
-            
-            return True
-        else:
-            print(f"\nManual activation: Run 'su - {username}' then 'swarmdev pull-images'")
-            return False
-            
-    except KeyboardInterrupt:
-        print(f"\nManual activation: Run 'su - {username}' then 'swarmdev pull-images'")
-        return False
-    except Exception as e:
-        print(f"Error: {e}")
-        print(f"Manual activation: Run 'su - {username}' then 'swarmdev pull-images'")
-        return False
+    print("Docker installation completed successfully!")
+    print("Please manually run one of the options above to download MCP images.")
+    
+    return False  # Always return False to force manual activation
 
 
 def run_docker_command_with_group(cmd_args, username):
@@ -640,6 +615,24 @@ def check_docker():
 def pull_image(image_uri: str, use_group_command: bool = False) -> bool:
     """Pulls a single Docker image."""
     print(f"Pulling {image_uri}...")
+    
+    # Check if image already exists locally
+    try:
+        if use_group_command:
+            username = get_real_username()
+            check_result = run_docker_command_with_group(["images", "-q", image_uri], username)
+            image_exists = check_result.returncode == 0 and check_result.stdout.strip()
+        else:
+            check_result = subprocess.run(["docker", "images", "-q", image_uri], 
+                                        capture_output=True, text=True, timeout=10)
+            image_exists = check_result.returncode == 0 and check_result.stdout.strip()
+        
+        if image_exists:
+            print(f"Image {image_uri} already exists locally - skipping download")
+            return True
+    except Exception as e:
+        print(f"Could not check if image exists (proceeding with pull): {e}")
+    
     try:
         if use_group_command:
             # Try with group command first
@@ -708,11 +701,10 @@ def main():
     elif docker_status == "docker_installed_limited":
         print("Docker was just installed. Continuing with image downloads...")
     elif docker_status == "docker_installed_activate_and_continue":
-        print("Docker was just installed. Activating docker group and continuing...")
-        if activate_docker_group_and_continue():
-            print("Docker group activated successfully!")
-        else:
-            print("Could not activate docker group automatically. Using workarounds...")
+        print("Docker was just installed. Group activation required...")
+        activate_docker_group_and_continue()
+        # Always exit after installation to prevent double execution
+        sys.exit(0)
     elif docker_status == "group_fix_needed":
         print("\nDocker group membership issue detected.")
         print("Please follow the fix instructions above and then re-run: swarmdev pull-images")
