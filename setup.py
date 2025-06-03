@@ -11,12 +11,6 @@ from setuptools.command.install import install
 from setuptools.command.develop import develop
 
 
-def read_requirements():
-    """Read requirements from requirements.txt file."""
-    with open('requirements.txt', 'r') as f:
-        return [line.strip() for line in f if line.strip() and not line.startswith('#')]
-
-
 def run_mcp_setup():
     """Run MCP server setup after installation."""
     try:
@@ -102,8 +96,8 @@ setup(
         "Topic :: Artificial Intelligence",
         "Topic :: Scientific/Engineering :: Artificial Intelligence",
     ],
-    python_requires=">=3.8",
-    install_requires=read_requirements(),
+    python_requires=">=3.8, <=3.11",
+    install_requires=[],
     extras_require={
         "dev": [
             "pytest>=7.0.0",
