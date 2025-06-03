@@ -1,4 +1,4 @@
-# SwarmDev MCP Servers - Stable Packaging
+# SwarmDev MCP Servers - Stable Packaging from github.com/chungoid/swarmdev-mcp-servers
 
 This repository contains stable Docker-packaged versions of the official [Model Context Protocol (MCP) servers](https://github.com/modelcontextprotocol/servers) for use with SwarmDev.
 

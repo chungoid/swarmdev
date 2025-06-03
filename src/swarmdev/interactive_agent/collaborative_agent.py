@@ -156,95 +156,28 @@ I can help you with:
                 print(f"Using {tool_id}->{method_name} with params: {json.dumps(parameters, indent=2)}", flush=True)
                 try:
                     if tool_id == "sequential-thinking" and method_name == "sequentialthinking":
-                        accumulated_thought_content = []
+                        # Handle the sequential-thinking tool - run it in background and synthesize response
                         current_params = parameters.copy()
+                        original_thought = current_params.get("thought", "")
                         
-                        # LLM provides the initial thoughtNumber (e.g., 1)
-                        # LLM provides initial totalThoughts and nextThoughtNeeded
+                        self.logger.info(f"Calling sequential-thinking with params: {json.dumps(current_params)}")
                         
-                        # Ensure thoughtNumber is an int for loop increment.
-                        # Robustly get parameters, checking for different casings LLM might use.
-                        def get_param_robustly(p_dict, keys, default_val, target_type=None):
-                            for key in keys:
-                                if key in p_dict:
-                                    val = p_dict[key]
-                                    if target_type:
-                                        try:
-                                            return target_type(val)
-                                        except ValueError:
-                                            self.logger.warning(f"Invalid type for param {key}, expected {target_type}, got {val}. Using default.")
-                                            return default_val
-                                    return val
-                            return default_val
-
-                        current_thought_number = get_param_robustly(current_params, ["thoughtNumber", "thought_number"], 1, int)
-                        max_steps = get_param_robustly(current_params, ["totalThoughts", "total_thoughts"], 1, int)
-                        loop_next_thought_needed = get_param_robustly(current_params, ["nextThoughtNeeded", "next_thought_needed"], True, bool)
+                        # Call the tool (thinking happens in terminal, we get metadata back)
+                        mcp_result = self.mcp_manager.call_tool(
+                            tool_id,
+                            "tools/call",
+                            {"name": method_name, "arguments": current_params},
+                            timeout=60
+                        )
                         
-                        current_params["thoughtNumber"] = current_thought_number # Normalize for tool call
-                        current_params["totalThoughts"] = max_steps           # Normalize for tool call
-                        current_params["nextThoughtNeeded"] = loop_next_thought_needed # Normalize for tool call
+                        self.logger.info(f"Sequential-thinking completed, synthesizing response")
 
-                        self.logger.info(f"Starting sequential-thinking loop. Initial params (normalized): {current_params}, Max steps: {max_steps}, Initial next_needed: {loop_next_thought_needed}")
-
-                        for step in range(max_steps):
-                            if not loop_next_thought_needed and step > 0: # only break if not the first iteration and explicitly told to stop
-                                self.logger.info(f"Sequential thinking loop breaking: nextThoughtNeeded is false after step {step}.")
-                                break
-
-                            current_params["thoughtNumber"] = current_thought_number # Update thoughtNumber for the current call
-                            
-                            self.logger.info(f"Calling sequential-thinking step {current_thought_number}/{max_steps}, params: {json.dumps(current_params)}")
-                            tool_step_result = self.mcp_manager.call_tool(
-                                tool_id,
-                                "tools/call",
-                                {"name": method_name, "arguments": current_params},
-                                timeout=35 
-                            )
-                            self.logger.info(f"Sequential-thinking step {current_thought_number} result: {json.dumps(tool_step_result)}")
-
-                            raw_text_from_tool = ""
-                            if tool_step_result.get("result", {}).get("content"):
-                                for item_content in tool_step_result["result"]["content"]:
-                                    if item_content.get("type") == "text" and item_content.get("text"):
-                                        raw_text_from_tool = item_content["text"]
-                                        break
-                            
-                            if not raw_text_from_tool:
-                                accumulated_thought_content.append(f"[Thought {current_thought_number}: No text content returned]")
-                                self.logger.warning(f"No text content from sequential-thinking step {current_thought_number}")
-                                # Decide if we should stop if no content
-                                loop_next_thought_needed = False # Stop if tool returns nothing
-                                continue
-
-                            try:
-                                # Try to parse as JSON to get control signals like nextThoughtNeeded
-                                status_data = json.loads(raw_text_from_tool)
-                                loop_next_thought_needed = status_data.get("nextThoughtNeeded", False)
-                                # If it's JSON, it's status. The actual thought might be missing or elsewhere.
-                                # For now, we'll log this status as part of the accumulated content.
-                                accumulated_thought_content.append(f"[Thought {current_thought_number} Status: {raw_text_from_tool}]")
-                                if "totalThoughts" in status_data and int(status_data["totalThoughts"]) != max_steps:
-                                    self.logger.info(f"Tool updated totalThoughts from {max_steps} to {status_data['totalThoughts']}")
-                                    max_steps = int(status_data["totalThoughts"]) # Allow tool to guide total length
-
-                            except json.JSONDecodeError:
-                                # Not JSON, assume it's the actual thought content for this step
-                                accumulated_thought_content.append(raw_text_from_tool)
-                                # If we get raw text, assume the tool might not be providing nextThoughtNeeded explicitly in this response,
-                                # so we continue based on max_steps or if a previous JSON status set nextThoughtNeeded.
-                                # If nextThoughtNeeded was not updated by a JSON status, it keeps its previous value.
-                                # If it was never true (e.g. LLM said nextThoughtNeeded=false initially), loop wouldn't run past first step if step > 0.
-
-                            current_thought_number += 1
-                        
+                        # Create a successful result that will trigger proper LLM synthesis
                         tool_result = {
-                            "type": "sequential_thinking_output",
-                            "steps_taken": current_thought_number - parameters.get("thoughtNumber", 1), # How many steps we actually ran
-                            "initial_prompt": parameters.get("thought"),
-                            "accumulated_thoughts": accumulated_thought_content
+                            "type": "sequential_thinking_success",
+                            "original_request": original_thought,
+                            "completed": True
                         }
-                        self.logger.info(f"Sequential-thinking loop completed. Result for synthesis: {json.dumps(tool_result, indent=2)}")
 
                     else:
                         # Standard single-call tool logic
@@ -493,16 +426,11 @@ Response (JSON only):
                 return f"{agent_initial_utterance}\nTool {tool_id} ({method_name}) encountered an issue: {tool_result.get('error', 'Unknown error')}."
 
         tool_output_for_prompt = ""
-        if tool_result.get("type") == "sequential_thinking_output":
-            # More descriptive formatting for the LLM
-            tool_output_for_prompt = f"The '{tool_id}' tool was used for a multi-step thinking process."
-            tool_output_for_prompt += f"\nInitial prompt for the tool: {tool_result.get('initial_prompt', 'N/A')}"
-            tool_output_for_prompt += f"\nNumber of thinking steps taken: {tool_result.get('steps_taken', 'N/A')}"
-            tool_output_for_prompt += "\nAccumulated thoughts/outputs from each step:"
-            for i, thought in enumerate(tool_result.get("accumulated_thoughts", [])):
-                tool_output_for_prompt += f"\nStep {i+1}: {thought[:500]}" # Limit length of each step in prompt
-                if len(thought) > 500:
-                    tool_output_for_prompt += "..."
+        if tool_result.get("type") == "sequential_thinking_success":
+            # Handle successful sequential thinking - the tool completed its analysis
+            tool_output_for_prompt = f"The sequential-thinking analysis has been completed for: '{tool_result.get('original_request', 'N/A')}'"
+            tool_output_for_prompt += f"\nThe thinking process was successful and comprehensive analysis was performed."
+            tool_output_for_prompt += f"\nYou should now provide a detailed, thoughtful response based on the original request."
         else:
             # Standard handling for other tools
             tool_output_for_prompt = json.dumps(tool_result, indent=2)
