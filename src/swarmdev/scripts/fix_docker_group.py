@@ -12,9 +12,23 @@ import os
 import getpass
 
 
+def get_real_username():
+    """Get the actual login user, not the effective user (which might be root if using sudo)."""
+    import getpass
+    import os
+    
+    # Try multiple methods to get the real user
+    username = (
+        os.environ.get('SUDO_USER') or  # User who ran sudo
+        os.environ.get('USER') or       # Current user 
+        getpass.getuser()               # Fallback
+    )
+    return username
+
+
 def check_current_groups():
     """Check current user's group membership."""
-    username = getpass.getuser()
+    username = get_real_username()
     print(f"Checking groups for user: {username}")
     
     try:
@@ -76,7 +90,7 @@ def test_docker_access():
 
 def fix_docker_group():
     """Add user to docker group."""
-    username = getpass.getuser()
+    username = get_real_username()
     print(f"\nAdding user '{username}' to docker group...")
     
     try:
@@ -174,7 +188,7 @@ def main():
                 else:
                     print("\n✗ Failed to add user to docker group")
                     print("You may need to run this manually:")
-                    print(f"  sudo usermod -aG docker {getpass.getuser()}")
+                    print(f"  sudo usermod -aG docker {get_real_username()}")
                     sys.exit(1)
             else:
                 print("Skipping group addition.")

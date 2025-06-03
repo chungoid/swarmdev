@@ -15,6 +15,20 @@ MCP_IMAGES = [
     "ghcr.io/chungoid/time:v0.3.6",
 ]
 
+def get_real_username():
+    """Get the actual login user, not the effective user (which might be root if using sudo)."""
+    import getpass
+    import os
+    
+    # Try multiple methods to get the real user
+    username = (
+        os.environ.get('SUDO_USER') or  # User who ran sudo
+        os.environ.get('USER') or       # Current user 
+        getpass.getuser()               # Fallback
+    )
+    return username
+
+
 def detect_os():
     """Detect the operating system and distribution."""
     system = platform.system().lower()
@@ -175,9 +189,12 @@ def attempt_docker_install(os_type):
             print(f"Note: Could not create docker group: {e}")
         
         # Add user to docker group BEFORE starting Docker service
-        import getpass
-        username = getpass.getuser()
+        username = get_real_username()
         print(f"Adding user '{username}' to docker group...")
+        
+        import getpass
+        print(f"  Detected user via: SUDO_USER={os.environ.get('SUDO_USER')}, USER={os.environ.get('USER')}, getuser={getpass.getuser()}")
+        
         try:
             result = subprocess.run(["sudo", "usermod", "-aG", "docker", username], 
                                   capture_output=True, text=True, check=True)
@@ -392,8 +409,7 @@ def check_docker():
                     print("Starting automatic Docker installation...")
                     if attempt_docker_install(os_type):
                         # Test Docker with new group membership
-                        import getpass
-                        username = getpass.getuser()
+                        username = get_real_username()
                         
                         print("\nTesting Docker access with group membership...")
                         if test_docker_with_group(username):
@@ -431,8 +447,7 @@ def check_docker():
         print("   Please ensure Docker is started and you have permissions to access it.")
         
         # Check if it's a group membership issue
-        import getpass
-        username = getpass.getuser()
+        username = get_real_username()
         try:
             # Check CURRENT session groups vs file groups
             current_session_result = subprocess.run(["groups"], capture_output=True, text=True)
@@ -504,8 +519,7 @@ def pull_image(image_uri: str, use_group_command: bool = False) -> bool:
     try:
         if use_group_command:
             # Try with group command first
-            import getpass
-            username = getpass.getuser()
+            username = get_real_username()
             result = run_docker_command_with_group(["pull", image_uri], username)
             
             if result.returncode == 0:

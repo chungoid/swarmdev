@@ -29,7 +29,20 @@ git clone https://github.com/chungoid/swarmdev.git
 cd swarmdev
 pipx install .
 pipx ensurepath && exec $SHELL
-swarmdev pull-images
+swarmdev pull-images  # Auto-installs Docker if needed (Ubuntu/Debian)
+```
+
+**What to Expect:**
+- On first run, `pull-images` will automatically install Docker on Ubuntu/Debian systems
+- You'll be prompted to confirm Docker installation (defaults to Yes)
+- The script sets up Docker group membership automatically
+- After installation, you may need to log out/in for full Docker access
+- All 7 MCP container images will be downloaded (~1.2GB total)
+
+**If Docker group issues persist:**
+```bash
+swarmdev fix-docker-group  # Diagnose and fix Docker permission issues
+```
 
 # Test MCP Install & Connections
 
