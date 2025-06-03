@@ -299,10 +299,10 @@ AVAILABLE TOOLS (with methods and input schemas):
 {tool_catalog_str}
 
 TOOL USAGE EXAMPLES:
-- sequential-thinking: Multi-step reasoning tool to help you think through a problem. Once the thought chain is complete you MUST output the final response.
-- filesystem: Use to read/write files. Example: {{"path": "/workspace/file.txt"}}
-- memory: Use to store/recall information. Example: {{"entities": [...]}} for create_entities
-- fetch: Use to get web content. Example: {{"url": "https://example.com"}}
+- sequential-thinking: Multi-step reasoning tool for complex analysis. CRITICAL: Do NOT reply until the entire thought chain is complete. When using this tool, continue the thinking process until nextThoughtNeeded becomes false, then provide your final response based on all thoughts.
+- filesystem: Use to read/write files for path operations
+- memory: Use to store/recall information for knowledge management
+- fetch: Use to get web content for information gathering
 
 YOUR TASK:
 IMPORTANT: Your entire response MUST be a single, valid JSON object. No other text, greetings, or explanations are allowed.
@@ -367,7 +367,7 @@ The tool execution resulted in:
 MANDATORY REQUIREMENTS - NO EXCEPTIONS:
 1. You MUST provide a substantive response with actual content - NEVER return empty/blank responses
 2. You MUST extract and present the final conclusions from the tool output
-3. For sequential-thinking: When "nextThoughtNeeded": false, the thought chain is complete - extract and present the final conclusions
+3. For sequential-thinking: When nextThoughtNeeded is false, the complete thought chain has finished - extract and present the final conclusions from all thoughts in the chain
 4. If you cannot find clear results in the tool output, you MUST provide a helpful response based on what information is available
 5. Your response MUST directly answer the user's original question using the tool results
 
