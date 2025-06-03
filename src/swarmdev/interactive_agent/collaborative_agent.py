@@ -309,10 +309,10 @@ AVAILABLE TOOLS (with methods and input schemas):
 {tool_catalog_str}
 
 TOOL USAGE EXAMPLES:
-- sequential-thinking: Multi-step reasoning tool for complex analysis. CRITICAL: Do NOT reply until the entire thought chain is complete. When using this tool, continue the thinking process until nextThoughtNeeded becomes false, then provide your final response based on all thoughts.
-- filesystem: Use to read/write files for path operations
-- memory: Use to store/recall information for knowledge management
-- fetch: Use to get web content for information gathering
+- sequential-thinking: Use method "sequentialthinking" with parameters like {"thought": "I need to analyze Python networking libraries step by step", "nextThoughtNeeded": true, "thoughtNumber": 1, "totalThoughts": 5}
+- filesystem: Use for file operations
+- memory: Use for knowledge storage
+- fetch: Use for web content
 
 YOUR TASK:
 IMPORTANT: Your entire response MUST be a single, valid JSON object. No other text, greetings, or explanations are allowed.
