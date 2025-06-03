@@ -27,7 +27,7 @@ SwarmDev is a comprehensive multi-agent swarm platform that enables autonomous p
 ```bash
 git clone https://github.com/chungoid/swarmdev.git
 cd swarmdev
-pipx install swarmdev
+pipx install swarmdev .
 
 # Test MCP Install & Connections
 cd scripts

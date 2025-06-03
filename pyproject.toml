@@ -20,16 +20,11 @@ dependencies = [
     "brotlicffi==1.1.0.0",
     "chardet==5.2.0",
     "click==8.2.1",
-    "ConfigParser==7.2.0",
     "cryptography==45.0.3",
     "docutils==0.21.2",
     "filelock==3.18.0",
-    "freezegun==1.5.2",
     "h2==4.2.0",
-    "HTMLParser==0.0.2",
     "httpx==0.28.1",
-    "ipython==9.3.0",
-    "ipywidgets==8.1.7",
     "keyring==25.6.0",
     "markdownify==1.1.0",
     "mcp==1.9.2",
@@ -38,13 +33,10 @@ dependencies = [
     "protobuf==6.31.1",
     "pydantic==2.11.5",
     "pyOpenSSL==25.1.0",
-    "pytest==8.4.0",
     "readabilipy==0.3.0",
     "redis==6.2.0",
     "sentence_transformers==4.1.0",
-    "setuptools==80.9.0",
     "simplejson==3.20.1",
-    "Sphinx==8.2.3",
     "tomlkit==0.13.2",
     "zstandard==0.23.0"
 ]
@@ -53,6 +45,30 @@ dependencies = [
 "Homepage" = "https://github.com/yourusername/swarmdev"  # Please update
 "Bug Tracker" = "https://github.com/yourusername/swarmdev/issues" # Please update
 
-# Optional: If you have console scripts
-# [project.scripts]
-# swarmdev-cli = "swarmdev.swarmdev_cli:main" 
+[project.scripts]
+"swarmdev" = "swarmdev.cli:main"
+
+[project.optional-dependencies]
+dev = [
+    "pytest==8.4.0",
+    "ipython==9.3.0",
+    "ipywidgets==8.1.7",
+    "freezegun==1.5.2",
+    "pytest-asyncio>=0.21.0",
+    "black>=22.0.0",
+    "flake8>=4.0.0",
+    "mypy>=0.950",
+]
+docs = [
+    "Sphinx==8.2.3",
+]
+mcp = [
+    "mcp-server-git>=0.1.0",
+    "mcp-server-time>=0.1.0",
+    "mcp-server-fetch>=0.1.0",
+]
+full = [
+    "swarmdev[dev]",
+    "swarmdev[docs]",
+    "swarmdev[mcp]",
+] 
