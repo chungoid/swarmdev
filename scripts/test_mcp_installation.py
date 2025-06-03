@@ -88,19 +88,19 @@ class MCPInstallationTester:
                     "git": {
                         "command": ["docker", "run", "-i", "--rm",
                                     "-v", f"{project_root}:/workspace",
-                                    "mcp/git"],
+                                    "ghcr.io/chungoid/git:latest"],
                         "timeout": 30,
                         "enabled": True,
                         "description": "Git operations and repository management"
                     },
                     "time": {
-                        "command": ["docker", "run", "-i", "--rm", "mcp/time"],
+                        "command": ["docker", "run", "-i", "--rm", "ghcr.io/chungoid/time:latest"],
                         "timeout": 30,
                         "enabled": True,
                         "description": "Time zone operations and conversions"
                     },
                     "fetch": {
-                        "command": ["docker", "run", "-i", "--rm", "mcp/fetch"],
+                        "command": ["docker", "run", "-i", "--rm", "ghcr.io/chungoid/fetch:latest"],
                         "timeout": 30,
                         "enabled": True,
                         "description": "Web content fetching and processing"

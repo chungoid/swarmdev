@@ -89,7 +89,7 @@ def get_default_build_config():
                 # Build context is one level up, so Dockerfile's "COPY src/memory /app" works
                 "docker_build_dir": str(base_server_src_path), 
                 "dockerfile_path": str(Path("src") / "memory" / "Dockerfile"), # Path relative to new context
-                "docker_tag": "mcp/memory",
+                "docker_tag": "ghcr.io/chungoid/memory:latest",
                 "build_enabled": True,
                 "language": "nodejs"
             },
@@ -107,7 +107,7 @@ def get_default_build_config():
                 "server_src_path": str(direct_src_path / "filesystem"),
                 "docker_build_dir": str(base_server_src_path),
                 "dockerfile_path": str(Path("src") / "filesystem" / "Dockerfile"),
-                "docker_tag": "mcp/filesystem",
+                "docker_tag": "ghcr.io/chungoid/filesystem:latest",
                 "build_enabled": True,
                 "language": "nodejs"
             },
@@ -116,7 +116,7 @@ def get_default_build_config():
                 "server_src_path": str(direct_src_path / "context7"),
                 "docker_build_dir": str(direct_src_path / "context7"), # Its own directory is the context
                 "dockerfile_path": "Dockerfile", # Dockerfile is at the root of this context
-                "docker_tag": "context7-mcp",
+                "docker_tag": "ghcr.io/chungoid/context7:latest",
                 "build_enabled": True,
                 "language": "nodejs"
             },
@@ -125,7 +125,7 @@ def get_default_build_config():
                 "server_src_path": str(direct_src_path / "everything"),
                 "docker_build_dir": str(base_server_src_path), # Assume similar structure to other failing node ones
                 "dockerfile_path": str(Path("src") / "everything" / "Dockerfile"),
-                "docker_tag": "mcp/everything",
+                "docker_tag": "ghcr.io/chungoid/everything:latest",
                 "build_enabled": True,
                 "language": "nodejs"
             },
