@@ -618,7 +618,7 @@ class MCPManager:
         with self._lock:
             self.metrics["total_calls"] += 1
         
-        # Enhanced logging: Call start
+        # Enhanced logging: Call start (reduced verbosity)
         self.enhanced_logger.log_call_start(
             call_id=call_id,
             tool_id=tool_id,
@@ -629,12 +629,8 @@ class MCPManager:
             context=context
         )
         
-        # Original logging for backward compatibility
-        self.mcp_logger.info(f"=== MCP CALL START ===")
-        self.mcp_logger.info(f"Call ID: {call_id}")
-        self.mcp_logger.info(f"Server: {tool_id}")
-        self.mcp_logger.info(f"Method: {method}")
-        self.mcp_logger.info(f"Agent: {agent_id or 'unknown'}")
+        # Minimal logging for user experience
+        self.mcp_logger.debug(f"MCP call: {tool_id}.{method} (ID: {call_id})")
         
         try:
             # Ensure server is connected
@@ -685,15 +681,13 @@ class MCPManager:
             with self._lock:
                 if status == "success":
                     self.metrics["successful_calls"] += 1
-                    self.mcp_logger.info(f"Call SUCCEEDED in {response_time:.2f}s")
+                    self.mcp_logger.debug(f"Call SUCCEEDED in {response_time:.2f}s")
                 else:
                     self.metrics["failed_calls"] += 1
                     self.mcp_logger.warning(f"Call FAILED ({status}) in {response_time:.2f}s")
             
             self.servers[tool_id]["last_used"] = datetime.now().isoformat()
             self.servers[tool_id]["usage_count"] += 1
-            
-            self.mcp_logger.info(f"=== MCP CALL END ===")
             
             return result
             
@@ -714,9 +708,7 @@ class MCPManager:
                 error=e
             )
             
-            self.mcp_logger.error(f"=== MCP CALL EXCEPTION ===")
-            self.mcp_logger.error(f"Call ID: {call_id}")
-            self.mcp_logger.error(f"Error: {error_msg}")
+            self.mcp_logger.error(f"MCP call exception: {error_msg} (ID: {call_id})")
             return {"error": error_msg}
 
     def _create_error_response(self, code: int, message: str, request_id: Optional[str]) -> Dict:
@@ -787,7 +779,7 @@ class MCPManager:
                         if "arguments" in next_params:
                             next_params["arguments"]["thoughtNumber"] = parsed_content.get("thoughtNumber", 1) + 1
                         
-                        self.mcp_logger.info(f"Multi-call tool {tool_id}: continuing to thought {next_params['arguments']['thoughtNumber']}")
+                        self.mcp_logger.debug(f"Multi-call {tool_id}: continuing to thought {next_params['arguments']['thoughtNumber']}")
                         
                         # Make the next call
                         next_result = self._call_server_method(tool_id, "tools/call", next_params, timeout)
@@ -798,10 +790,10 @@ class MCPManager:
                             parsed_content = json.loads(next_content)
                             result = next_result  # Use latest result as final
                         else:
-                            self.mcp_logger.warning(f"Multi-call tool {tool_id}: next call failed, stopping")
+                            self.mcp_logger.warning(f"Multi-call {tool_id}: chain failed at thought {next_params['arguments']['thoughtNumber']}")
                             break
                     
-                    self.mcp_logger.info(f"Multi-call tool {tool_id}: completed after {parsed_content.get('thoughtNumber', 1)} thoughts")
+                    self.mcp_logger.debug(f"Multi-call {tool_id}: completed with {parsed_content.get('thoughtNumber', 1)} thoughts")
                     
                 except (json.JSONDecodeError, KeyError, IndexError):
                     # Not a multi-call tool or unexpected format, return original result

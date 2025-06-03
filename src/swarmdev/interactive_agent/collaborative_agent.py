@@ -153,7 +153,7 @@ I can help you with:
                 self.logger.error(f"LLM decided to use a tool but didn't specify tool_id or method_name. Decision: {agent_action}")
                 final_response = "I wanted to use one of my tools, but I'm not sure which one or how. Can you clarify?"
             else:
-                print(f"Using {tool_id}->{method_name} with params: {json.dumps(parameters, indent=2)}", flush=True)
+                print(f"{tool_id} call", flush=True)
                 try:
                     # Standard tool calling - multi-call support handled in MCP Manager
                     tool_result = self.mcp_manager.call_tool(
@@ -162,7 +162,6 @@ I can help you with:
                         {"name": method_name, "arguments": parameters},
                         timeout=60 
                     )
-                    print(f"Tool {tool_id} result (or final accumulated): {json.dumps(tool_result, indent=2)}", flush=True) # Ensure this prints the final result
                     final_response = self._synthesize_final_response(human_message, initial_response_to_user, tool_id, method_name, tool_result)
                 except Exception as e:
                     self.logger.error(f"Error calling tool {tool_id}->{method_name}: {e}", exc_info=True)
