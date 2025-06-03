@@ -29,6 +29,7 @@ import logging
 from datetime import datetime
 from dotenv import load_dotenv
 from pathlib import Path
+import subprocess
 
 from swarmdev.utils.llm_provider import OpenAIProvider, AnthropicProvider, GoogleProvider, ProviderRegistry
 from swarmdev.utils.blueprint_manager import BlueprintManager
@@ -144,6 +145,10 @@ def setup_parser():
     # MCP analysis command
     mcp_analysis_parser = subparsers.add_parser('mcp-analysis', help='Analyze MCP system performance and health')
     mcp_analysis_parser.add_argument('--project-dir', '-d', default='.', help='Project directory')
+
+    # Pull MCP Images command
+    pull_images_parser = subparsers.add_parser('pull-images', help='Download and set up MCP Docker images from GHCR')
+    # No specific arguments needed for pull-images_parser itself
     
     return parser
  
@@ -1400,6 +1405,44 @@ def cmd_mcp_analysis(args):
             traceback.print_exc()
 
 
+def cmd_pull_images(args):
+    """Handles the 'pull-images' command to download MCP Docker images."""
+    logger.info("Starting MCP Docker image download process...")
+    try:
+        # Construct path to the script relative to this cli.py file
+        # cli.py is in src/swarmdev/, scripts/ is in src/swarmdev/scripts/
+        cli_file_path = os.path.abspath(__file__)
+        # Expected structure: <workspace>/src/swarmdev/cli.py
+        # We want: <workspace>/src/swarmdev/scripts/pull_mcp_images.py
+        src_swarmdev_dir = os.path.dirname(cli_file_path) # <workspace>/src/swarmdev
+        script_path = os.path.join(src_swarmdev_dir, "scripts", "pull_mcp_images.py")
+
+        if not os.path.exists(script_path):
+            logger.error(f"Image pulling script not found at: {script_path}")
+            logger.error("Please ensure 'scripts/pull_mcp_images.py' exists in the correct location relative to 'cli.py'.")
+            sys.exit(1)
+
+        # Run the script as a subprocess
+        process = subprocess.run([sys.executable, script_path], check=False, text=True)
+        
+        if process.returncode != 0:
+            logger.error("MCP Docker image download process failed. See output from the script above for details.")
+            sys.exit(process.returncode)
+        else:
+            # The script itself prints success, so just a confirmation from CLI
+            logger.info("MCP Docker image download process initiated by script. Check script output for results.")
+
+    except FileNotFoundError: 
+        logger.error(f"Python interpreter not found at: {sys.executable}")
+        sys.exit(1)
+    except Exception as e:
+        logger.error(f"An unexpected error occurred while trying to run the image pulling script: {e}")
+        if hasattr(args, 'verbose') and args.verbose:
+            import traceback
+            traceback.print_exc()
+        sys.exit(1)
+
+
 def main():
     """Main entry point for the SwarmDev CLI."""
     parser = setup_parser()
@@ -1430,6 +1473,8 @@ def main():
         cmd_blueprint(args)
     elif args.command == "mcp-analysis":
         cmd_mcp_analysis(args)
+    elif args.command == "pull-images":
+        cmd_pull_images(args)
     else:
         print(f"Unknown command: {args.command}")
         parser.print_help()

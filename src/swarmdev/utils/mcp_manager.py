@@ -237,19 +237,19 @@ class MCPManager:
                 "git": {
                     "command": ["docker", "run", "-i", "--rm", 
                                 "-v", f"{project_root_placeholder}:/workspace", # Git needs mount
-                                "mcp/git"],
+                                "ghcr.io/chungoid/git:v0.3.6"],
                     "timeout": 30,
                     "enabled": True,
                     "description": "Git operations and repository management"
                 },
                 "time": {
-                    "command": ["docker", "run", "-i", "--rm", "mcp/time"],
+                    "command": ["docker", "run", "-i", "--rm", "ghcr.io/chungoid/time:v0.3.6"],
                     "timeout": 30,
                     "enabled": True,
                     "description": "Time zone operations and conversions"
                 },
                 "fetch": {
-                    "command": ["docker", "run", "-i", "--rm", "mcp/fetch"],
+                    "command": ["docker", "run", "-i", "--rm", "ghcr.io/chungoid/fetch:v0.3.6"],
                     "timeout": 30,
                     "enabled": True,
                     "description": "Web content fetching and processing"
@@ -257,35 +257,35 @@ class MCPManager:
                 "filesystem": {
                     "command": ["docker", "run", "-i", "--rm", 
                                 "-v", f"{project_root_placeholder}:/workspace", 
-                                "mcp/filesystem", "/workspace"],
+                                "ghcr.io/chungoid/filesystem:v0.3.6", "/workspace"],
                     "timeout": 30,
                     "enabled": True,
                     "description": "File system operations with current directory access"
                 },
                 "memory": {
-                    "command": ["docker", "run", "-i", "--rm", "mcp/memory"],
+                    "command": ["docker", "run", "-i", "--rm", "ghcr.io/chungoid/memory:v0.3.6"],
                     "timeout": 30,
                     "enabled": True,
                     "description": "Persistent memory storage for context"
                 },
                 "sequential-thinking": {
-                    "command": ["docker", "run", "-i", "--rm", "mcp/sequentialthinking"],
+                    "command": ["docker", "run", "-i", "--rm", "ghcr.io/chungoid/sequentialthinking:v0.3.6"],
                     "timeout": 60,
                     "enabled": True,
                     "description": "Advanced reasoning through sequential thoughts"
                 },
                 "context7": {
-                    "command": ["docker", "run", "-i", "--rm", "-e", "MCP_TRANSPORT=stdio", "context7-mcp"],
+                    "command": ["docker", "run", "-i", "--rm", "-e", "MCP_TRANSPORT=stdio", "ghcr.io/chungoid/context7:v0.1.1-context7"],
                     "timeout": 30,
                     "enabled": True,
                     "description": "Up-to-date documentation and code examples"
                 },
-                "everything": {
-                    "command": ["docker", "run", "-i", "--rm", "mcp/everything"],
-                    "timeout": 30,
-                    "enabled": True,
-                    "description": "Node.js MCP server for everything" 
-                }
+                # "everything": {
+                #     "command": ["docker", "run", "-i", "--rm", "mcp/everything"],
+                #     "timeout": 30,
+                #     "enabled": True,
+                #     "description": "Node.js MCP server for everything" 
+                # }
             }
         }
     
