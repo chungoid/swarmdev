@@ -155,23 +155,11 @@ I can help you with:
             else:
                 print(f"Using {tool_id}->{method_name} with params: {json.dumps(parameters, indent=2)}", flush=True)
                 try:
-                    # Convert snake_case parameters to camelCase if needed
-                    def snake_to_camel(snake_str):
-                        components = snake_str.split('_')
-                        return components[0] + ''.join(x.capitalize() for x in components[1:])
-                    
-                    converted_params = {}
-                    for key, value in parameters.items():
-                        if '_' in key:
-                            converted_params[snake_to_camel(key)] = value
-                        else:
-                            converted_params[key] = value
-                    
-                    # Standard tool calling
+                    # Standard tool calling - no special cases
                     tool_result = self.mcp_manager.call_tool(
                         tool_id,
                         "tools/call",
-                        {"name": method_name, "arguments": converted_params},
+                        {"name": method_name, "arguments": parameters},
                         timeout=25 
                     )
                     print(f"Tool {tool_id} result (or final accumulated): {json.dumps(tool_result, indent=2)}", flush=True) # Ensure this prints the final result
@@ -321,7 +309,7 @@ The value of "action" should be an object with the following fields:
 - "initial_response_to_user": (String) A message to show to the user immediately. If using a tool, this could be "Okay, I'll use [tool_name] to [action_description]." If not using a tool, this will be your direct answer to the user.
 - "tool_id": (String, Optional) If use_tool is true, the ID of the tool to use (e.g., "filesystem").
 - "method_name": (String, Optional) If use_tool is true, the specific method of the tool to call (e.g., "list_directory"). Choose from the methods listed in AVAILABLE TOOLS.
-- "parameters": (Object, Optional) If use_tool is true, a JSON object of parameters for the chosen method, conforming to its input_schema. Use the EXACT parameter names from the schema (e.g., "thoughtNumber" not "thought_number").
+- "parameters": (Object, Optional) If use_tool is true, a JSON object of parameters for the chosen method, conforming to its input_schema.
 
 Ensure your entire output is ONLY the JSON object described. Do not include any other text, greeting, or explanation before or after the JSON.
 Response (JSON only):
