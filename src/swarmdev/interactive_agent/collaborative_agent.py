@@ -154,7 +154,9 @@ I can help you with:
                 self.logger.error(f"LLM decided to use a tool but didn't specify tool_id or method_name. Decision: {agent_action}")
                 final_response = "I wanted to use one of my tools, but I'm not sure which one or how. Can you clarify?"
             else:
-                print(f"{tool_id} call", flush=True)
+                # Suppress noisy call notice for sequential-thinking to keep chat clean
+                if not (tool_id == "sequential-thinking" and method_name == "sequentialthinking"):
+                    print(f"{tool_id} call", flush=True)
                 
                 try:
                     # If sequential-thinking is requested, run a dedicated reasoning chain
@@ -492,8 +494,21 @@ Response (JSON only):
                         f"Reasoning steps:\n" + "\n".join(f"Step {i+1}: {s}" for i, s in enumerate(history)) + "\n\n"
                         "Provide a concise, helpful answer to the user without exposing the internal steps."
                     )
-                    final_ans = self.llm_provider.generate_text(summary_prompt, temperature=0.3, max_tokens=400)
-                    return final_ans.strip()
+                    try:
+                        final_ans = self.llm_provider.generate_text(summary_prompt, temperature=0.3, max_tokens=400).strip()
+                    except Exception as e:
+                        self.logger.warning(f"LLM summarization failed: {e}. Falling back to direct answer.")
+                        final_ans = ""
+
+                    # Robust fallback: if LLM returned blank, answer directly without chain history
+                    if not final_ans:
+                        final_ans = self.llm_provider.generate_text(
+                            f"Answer the question directly: {human_message}",
+                            temperature=0.3,
+                            max_tokens=400
+                        ).strip()
+
+                    return final_ans
 
                 # Otherwise ask LLM for the next thought
                 guidance_prompt = (
