@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=42", "wheel", "Cython"]
+requires = ["setuptools>=42", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -22,7 +22,6 @@ dependencies = [
     "click==8.2.1",
     "ConfigParser==7.2.0",
     "cryptography==45.0.3",
-    "Cython",
     "docutils==0.21.2",
     "filelock==3.18.0",
     "freezegun==1.5.2",
