@@ -354,9 +354,9 @@ class MCPManager:
             self.mcp_logger.info(f"Successfully registered MCP server '{server_id}'")
             self.mcp_logger.info(f"  Command: {' '.join(command)}")
             self.mcp_logger.info(f"  Timeout: {timeout}s")
-            # >>> DEBUG PRINT for filesystem command registration
+            # Debug filesystem registration
             if server_id == "filesystem":
-                self.mcp_logger.critical(f"DEBUG_FILESYSTEM_REGISTER: Registered command for {server_id}: {self.servers[server_id]['command']}")
+                self.mcp_logger.debug(f"Registered filesystem server: {self.servers[server_id]['command']}")
             
         except Exception as e:
             self.mcp_logger.error(f"Failed to register MCP server '{server_id}': {e}", exc_info=True)
@@ -412,10 +412,10 @@ class MCPManager:
         try:
             # Start the server process
             self.mcp_logger.debug(f"Starting subprocess for {server_id}: {command}")
-            print(f"MCP_DEBUG: _initialize_server for {server_id} - Just before Popen. Command: {command}", flush=True)
-            # >>> DEBUG PRINT for filesystem command execution
+            self.mcp_logger.debug(f"Starting {server_id} server: {' '.join(command)}")
+                        # Debug for filesystem command execution (reduced to debug level)
             if server_id == "filesystem":
-                 self.mcp_logger.critical(f"DEBUG_FILESYSTEM_EXEC: Command just before Popen for {server_id}: {command}")
+                self.mcp_logger.debug(f"Filesystem command: {command}")
             
             process = subprocess.Popen(
                 command, 
@@ -429,7 +429,7 @@ class MCPManager:
                 env=env_vars
             )
             
-            print(f"MCP_DEBUG: _initialize_server for {server_id} - Just after Popen. PID: {process.pid if process else 'None'}", flush=True)
+            self.mcp_logger.debug(f"Started {server_id} server with PID: {process.pid if process else 'None'}")
             self.mcp_logger.info(f"Subprocess for {server_id} started. PID: {process.pid}")
             
             # Brief pause to allow server to actually start its process before handshake
@@ -618,16 +618,16 @@ class MCPManager:
         with self._lock:
             self.metrics["total_calls"] += 1
         
-        # Enhanced logging: Call start (reduced verbosity)
-        self.enhanced_logger.log_call_start(
-            call_id=call_id,
-            tool_id=tool_id,
-            method=method,
-            params=params,
-            timeout=timeout or self.servers[tool_id]["timeout"],
-            agent_id=agent_id,
-            context=context
-        )
+        # Enhanced logging: Call start (debug level only)
+        # self.enhanced_logger.log_call_start(
+        #     call_id=call_id,
+        #     tool_id=tool_id,
+        #     method=method,
+        #     params=params,
+        #     timeout=timeout or self.servers[tool_id]["timeout"],
+        #     agent_id=agent_id,
+        #     context=context
+        # )
         
         # Minimal logging for user experience
         self.mcp_logger.debug(f"MCP call: {tool_id}.{method} (ID: {call_id})")
@@ -668,14 +668,14 @@ class MCPManager:
             else:
                 status = "success"
             
-            # Enhanced logging: Call end
-            self.enhanced_logger.log_call_end(
-                call_id=call_id,
-                status=status,
-                duration=response_time,
-                response=result,
-                error=None if status == "success" else Exception(result.get("error", "unknown"))
-            )
+            # Enhanced logging: Call end (debug level only)
+            # self.enhanced_logger.log_call_end(
+            #     call_id=call_id,
+            #     status=status,
+            #     duration=response_time,
+            #     response=result,
+            #     error=None if status == "success" else Exception(result.get("error", "unknown"))
+            # )
             
             # Update metrics and tool usage
             with self._lock:
@@ -699,14 +699,14 @@ class MCPManager:
             response_time = time.time() - start_time
             error_msg = f"Error calling MCP server '{tool_id}': {e}"
             
-            # Enhanced logging: Exception
-            self.enhanced_logger.log_call_end(
-                call_id=call_id,
-                status="exception",
-                duration=response_time,
-                response=None,
-                error=e
-            )
+            # Enhanced logging: Exception (debug level only)
+            # self.enhanced_logger.log_call_end(
+            #     call_id=call_id,
+            #     status="exception",
+            #     duration=response_time,
+            #     response=None,
+            #     error=e
+            # )
             
             self.mcp_logger.error(f"MCP call exception: {error_msg} (ID: {call_id})")
             return {"error": error_msg}
