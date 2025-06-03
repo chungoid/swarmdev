@@ -1,0 +1,63 @@
+[build-system]
+requires = ["setuptools>=42", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "swarmdev"
+version = "0.1.0"
+description = "A project for Swarm Development"
+readme = "README.md"
+requires-python = ">=3.8"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",  # Assuming MIT, please change if not
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    "anthropic==0.52.2",
+    "attr==0.3.2",
+    "brotli==1.1.0",
+    "brotlicffi==1.1.0.0",
+    "chardet==5.2.0",
+    "click==8.2.1",
+    "ConfigParser==7.2.0",
+    "cryptography==45.0.3",
+    "docutils==0.21.2",
+    "filelock==3.18.0",
+    "freezegun==1.5.2",
+    "h2==4.2.0",
+    "HTMLParser==0.0.2",
+    "httpx==0.28.1",
+    "ipython==9.3.0",
+    "ipywidgets==8.1.7",
+    "jnius==1.1.0",
+    "keyring==25.6.0",
+    "markdownify==1.1.0",
+    "mcp==1.9.2",
+    "openai==1.83.0",
+    "protego==0.4.0",
+    "protobuf==6.31.1",
+    "pydantic==2.11.5",
+    "pyodide==0.0.2",
+    "pyOpenSSL==25.1.0",
+    "pytest==8.4.0",
+    "readabilipy==0.3.0",
+    "redis==6.2.0",
+    "sentence_transformers==4.1.0",
+    "setuptools==80.9.0",
+    "simplejson==3.20.1",
+    "Sphinx==8.2.3",
+    "thread==2.0.5",
+    "tomlkit==0.13.2",
+    "urllib3_secure_extra==0.1.0",
+    "xmlrpclib==1.0.1",
+    "zstandard==0.23.0"
+]
+
+[project.urls]
+"Homepage" = "https://github.com/yourusername/swarmdev"  # Please update
+"Bug Tracker" = "https://github.com/yourusername/swarmdev/issues" # Please update
+
+# Optional: If you have console scripts
+# [project.scripts]
+# swarmdev-cli = "swarmdev.swarmdev_cli:main" 
