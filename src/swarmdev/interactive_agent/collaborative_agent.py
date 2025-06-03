@@ -364,7 +364,11 @@ You then used the tool '{tool_id}' with method '{method_name}'.
 The tool execution resulted in:
 {tool_output_for_prompt}
 
-CRITICAL: If the tool was sequential-thinking or any analysis tool, you MUST present the final conclusion/answer to the user. Don't just acknowledge you used the tool - ACTUALLY OUTPUT THE RESULTS.
+CRITICAL REQUIREMENTS:
+1. NEVER return an empty or blank response - your response must contain substantive content
+2. If the tool was sequential-thinking or any analysis tool, you MUST present the final conclusion/answer to the user
+3. Don't just acknowledge you used the tool - ACTUALLY OUTPUT THE RESULTS/CONCLUSIONS
+4. Extract the final thoughts/recommendations and present them clearly to the user
 
 Based on the original request, your initial response, and the tool's result, formulate a concise and helpful final response to the user.
 - If the tool was successful, integrate its findings naturally and PRESENT THE ACTUAL RESULTS/CONCLUSIONS.
@@ -372,6 +376,7 @@ Based on the original request, your initial response, and the tool's result, for
 - If the tool failed, acknowledge the specific error transparently and suggest alternatives.
 - Do not explicitly say "The tool returned...". Instead, incorporate the information naturally.
 - Be conversational and helpful.
+- Your response MUST contain actual content that answers the user's question.
 
 Final response to user:
 """
