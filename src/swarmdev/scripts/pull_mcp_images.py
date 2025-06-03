@@ -222,10 +222,15 @@ def run_docker_command_with_group(cmd_args, username):
         result = subprocess.run(sg_cmd, capture_output=True, text=True, timeout=300)
         if result.returncode == 0:
             return result
-    except:
-        pass
+        else:
+            print(f"Debug: sg command failed with return code {result.returncode}")
+            if result.stderr:
+                print(f"Debug: sg stderr: {result.stderr}")
+    except Exception as e:
+        print(f"Debug: sg command exception: {e}")
     
     # Fall back to regular docker command
+    print("Debug: Falling back to regular docker command")
     return subprocess.run(["docker"] + cmd_args, capture_output=True, text=True, timeout=300)
 
 
@@ -372,26 +377,26 @@ def main():
     elif docker_status in ["docker_installed_continue", "docker_installed_limited"]:
         print("Docker was just installed. Continuing with image downloads...")
     else:
-        print("\\nDocker setup required. Please follow the instructions above and try again.")
+        print("\nDocker setup required. Please follow the instructions above and try again.")
         print("After installing Docker, run: swarmdev pull-images")
         sys.exit(1)
 
-    print(f"\\nFound {len(MCP_IMAGES)} MCP images to pull.")
+    print(f"\nFound {len(MCP_IMAGES)} MCP images to pull.")
     
     # Determine if we should use group commands
-    use_group = docker_status == "docker_installed_limited"
+    use_group = docker_status in ["docker_installed_continue", "docker_installed_limited"]
     
     all_successful = True
     for i, image in enumerate(MCP_IMAGES, 1):
-        print(f"\\n[{i}/{len(MCP_IMAGES)}] {image}")
+        print(f"\n[{i}/{len(MCP_IMAGES)}] {image}")
         if not pull_image(image, use_group_command=use_group):
             all_successful = False
 
     if all_successful:
-        print("\\nAll MCP Docker images pulled successfully!")
+        print("\nAll MCP Docker images pulled successfully!")
         print("Setup complete! You can now use SwarmDev with MCP tools.")
     else:
-        print("\\nSome images could not be pulled. Please check the errors above.")
+        print("\nSome images could not be pulled. Please check the errors above.")
         sys.exit(1)
 
 if __name__ == "__main__":
