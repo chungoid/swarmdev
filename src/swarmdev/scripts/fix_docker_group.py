@@ -18,19 +18,32 @@ def check_current_groups():
     print(f"Checking groups for user: {username}")
     
     try:
-        result = subprocess.run(["groups", username], capture_output=True, text=True)
-        if result.returncode == 0:
-            groups = result.stdout.strip()
-            print(f"Current groups: {groups}")
+        # Check CURRENT session groups vs file groups
+        current_session_result = subprocess.run(["groups"], capture_output=True, text=True)
+        file_result = subprocess.run(["groups", username], capture_output=True, text=True)
+        
+        if current_session_result.returncode == 0 and file_result.returncode == 0:
+            current_groups = current_session_result.stdout.strip()
+            file_groups = file_result.stdout.strip()
             
-            if "docker" in groups:
-                print("✓ User is in docker group")
+            print(f"Current session groups: {current_groups}")
+            print(f"File system groups: {file_groups}")
+            
+            session_has_docker = "docker" in current_groups
+            file_has_docker = "docker" in file_groups
+            
+            if session_has_docker:
+                print("✓ User is in docker group (current session)")
                 return True
+            elif file_has_docker and not session_has_docker:
+                print("⚠ User is in docker group in /etc/group but NOT in current session")
+                print("  Group membership hasn't taken effect in this session yet")
+                return "file_only"  # Special return value
             else:
                 print("✗ User is NOT in docker group")
                 return False
         else:
-            print(f"Failed to check groups: {result.stderr}")
+            print(f"Failed to check groups")
             return False
     except Exception as e:
         print(f"Error checking groups: {e}")
@@ -122,7 +135,7 @@ def main():
     print("=" * 40)
     
     # Step 1: Check current group membership
-    in_docker_group = check_current_groups()
+    group_status = check_current_groups()
     
     # Step 2: Test Docker access
     docker_works = test_docker_access()
@@ -132,7 +145,24 @@ def main():
         print("No fix needed.")
         return
     
-    if not in_docker_group:
+    if group_status == "file_only":
+        print(f"\nProblem identified: User is in docker group but session not updated")
+        print(f"No need to add to group - just need to refresh session")
+        working_method = test_group_workarounds()
+        
+        if working_method:
+            print(f"\n✓ Found working method: {working_method}")
+            print(f"SwarmDev should be able to use Docker now.")
+        else:
+            print(f"\n✗ No workarounds successful in current session.")
+            print(f"\nTo fully activate docker group membership:")
+            print(f"  1. Log out and log back in")
+            print(f"  2. Or start a new terminal/SSH session")
+            print(f"  3. Or run: newgrp docker")
+            print(f"\nThen try: swarmdev pull-images")
+        return
+        
+    if not group_status:
         print(f"\nProblem identified: User is not in docker group")
         
         try:
@@ -140,7 +170,7 @@ def main():
             if response in ['y', 'yes']:
                 if fix_docker_group():
                     print("\n✓ User added to docker group!")
-                    in_docker_group = True
+                    group_status = True
                 else:
                     print("\n✗ Failed to add user to docker group")
                     print("You may need to run this manually:")
@@ -154,7 +184,7 @@ def main():
             sys.exit(1)
     
     # Step 3: Test workarounds for current session
-    if in_docker_group:
+    if group_status:
         print(f"\nUser is now in docker group, but group membership")
         print(f"changes don't take effect until a new login session.")
         

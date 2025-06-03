@@ -207,17 +207,38 @@ def attempt_docker_install(os_type):
 
 def test_docker_with_group(username):
     """Test if Docker works with the user's group membership."""
-    # First check if user is actually in docker group
+    # Check ACTUAL current session group membership (not just /etc/group file)
     try:
-        result = subprocess.run(["groups", username], capture_output=True, text=True)
-        if result.returncode == 0 and "docker" in result.stdout:
-            print(f"✓ User '{username}' is in docker group")
+        # Use 'groups' without username to get CURRENT session groups
+        current_session_result = subprocess.run(["groups"], capture_output=True, text=True)
+        # Also check what /etc/group says
+        file_result = subprocess.run(["groups", username], capture_output=True, text=True)
+        
+        current_session_groups = current_session_result.stdout.strip() if current_session_result.returncode == 0 else ""
+        file_groups = file_result.stdout.strip() if file_result.returncode == 0 else ""
+        
+        print(f"Checking group membership for user: {username}")
+        print(f"  Current session groups: {current_session_groups}")
+        print(f"  File system groups: {file_groups}")
+        
+        # Check if docker group is in current session (what matters for Docker access)
+        session_has_docker = "docker" in current_session_groups
+        file_has_docker = "docker" in file_groups
+        
+        if session_has_docker:
+            print(f"✓ User '{username}' has docker group in current session")
+            return True
+        elif file_has_docker and not session_has_docker:
+            print(f"⚠ User '{username}' is in docker group in /etc/group but NOT in current session")
+            print(f"  This means group membership hasn't taken effect yet")
+            print(f"  Need to log out/in or use 'newgrp docker' or 'sg docker'")
+            return False
         else:
-            print(f"✗ User '{username}' is NOT in docker group yet")
-            print(f"  Groups: {result.stdout.strip()}")
+            print(f"✗ User '{username}' is NOT in docker group")
             return False
     except Exception as e:
         print(f"Could not check group membership: {e}")
+        return False
     
     # Test different approaches to run docker
     approaches = [
@@ -340,12 +361,21 @@ def check_docker():
         import getpass
         username = getpass.getuser()
         try:
-            groups_result = subprocess.run(["groups", username], capture_output=True, text=True)
-            if groups_result.returncode == 0:
-                user_groups = groups_result.stdout.strip()
-                if "docker" not in user_groups:
+            # Check CURRENT session groups vs file groups
+            current_session_result = subprocess.run(["groups"], capture_output=True, text=True)
+            file_result = subprocess.run(["groups", username], capture_output=True, text=True)
+            
+            if current_session_result.returncode == 0 and file_result.returncode == 0:
+                current_groups = current_session_result.stdout.strip()
+                file_groups = file_result.stdout.strip()
+                
+                session_has_docker = "docker" in current_groups
+                file_has_docker = "docker" in file_groups
+                
+                if not session_has_docker and not file_has_docker:
                     print(f"\n   DETECTED ISSUE: User '{username}' is not in 'docker' group.")
-                    print(f"   Current groups: {user_groups}")
+                    print(f"   Current session groups: {current_groups}")
+                    print(f"   File system groups: {file_groups}")
                     print("\n   TO FIX THIS:")
                     print("   1. Add user to docker group: sudo usermod -aG docker $USER")
                     print("   2. Then either:")
@@ -354,8 +384,21 @@ def check_docker():
                     print("      - Start a new terminal session")
                     print("   3. Then re-run: swarmdev pull-images")
                     return "group_fix_needed"
+                elif file_has_docker and not session_has_docker:
+                    print(f"\n   DETECTED ISSUE: User '{username}' is in docker group but session not updated.")
+                    print(f"   Current session groups: {current_groups}")
+                    print(f"   File system groups: {file_groups}")
+                    print("\n   TO FIX THIS:")
+                    print("   1. The user is already in docker group, but current session needs refresh")
+                    print("   2. Either:")
+                    print("      - Log out and log back in")
+                    print("      - Run: newgrp docker")
+                    print("      - Start a new terminal session")
+                    print("   3. Then re-run: swarmdev pull-images")
+                    return "group_fix_needed"
                 else:
-                    print(f"   User '{username}' is in docker group: {user_groups}")
+                    print(f"   User '{username}' is in docker group (session): {current_groups}")
+                    print(f"   But Docker daemon seems inaccessible - check if Docker is running")
         except:
             pass
         
