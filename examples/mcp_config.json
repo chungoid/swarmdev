@@ -1,19 +1,19 @@
 {
   "servers": {
     "git": {
-      "command": ["docker", "run", "--rm", "-i", "mcp/git"],
+              "command": ["docker", "run", "--rm", "-i", "ghcr.io/chungoid/git:v0.3.7-fixed"],
       "timeout": 30,
       "enabled": true,
       "description": "Git operations and repository management"
     },
     "time": {
-      "command": ["docker", "run", "--rm", "-i", "mcp/time"],
+              "command": ["docker", "run", "--rm", "-i", "ghcr.io/chungoid/time:v0.3.7-fixed"],
       "timeout": 30,
       "enabled": true,
       "description": "Time zone operations and conversions"
     },
     "fetch": {
-      "command": ["docker", "run", "--rm", "-i", "mcp/fetch"],
+              "command": ["docker", "run", "--rm", "-i", "ghcr.io/chungoid/fetch:v0.3.7-fixed"],
       "timeout": 30,
       "enabled": true,
       "description": "Web content fetching and processing"
@@ -31,7 +31,7 @@
       "description": "Persistent memory storage for context"
     },
     "sequential-thinking": {
-      "command": ["docker", "run", "--rm", "-i", "mcp/sequentialthinking"],
+              "command": ["docker", "run", "--rm", "-i", "ghcr.io/chungoid/sequentialthinking:v0.3.7-fixed"],
       "timeout": 60,
       "enabled": true,
       "description": "Advanced reasoning through sequential thoughts"
