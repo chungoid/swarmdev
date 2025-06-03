@@ -657,9 +657,9 @@ class MCPManager:
             # Call the method
             result = self._call_server_method(tool_id, method, params, timeout)
             
-            # Handle multi-call tools naturally
-            if not result.get("error") and method == "tools/call":
-                result = self._handle_multi_call_tool(tool_id, params, result, timeout)
+            # Multi-call support disabled temporarily - causing infinite loops
+            # if not result.get("error") and method == "tools/call":
+            #     result = self._handle_multi_call_tool(tool_id, params, result, timeout)
             
             # Determine call status
             response_time = time.time() - start_time
