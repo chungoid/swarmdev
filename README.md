@@ -32,6 +32,21 @@ pipx ensurepath && exec $SHELL
 swarmdev pull-images
 
 # Test MCP Install & Connections
+
+## Common Docker Issues
+
+If you encounter "permission denied" or "broken pipe" errors when using MCP tools, this is usually a Docker group membership issue:
+
+```bash
+# Fix Docker group membership automatically
+swarmdev fix-docker-group
+
+# Or manually add user to docker group
+sudo usermod -aG docker $USER
+newgrp docker  # Activate in current session
+```
+
+**Note**: Group membership changes require a new login session to fully take effect.
 cd scripts
 python3 test_mcp_installation.py
 ============================================================
