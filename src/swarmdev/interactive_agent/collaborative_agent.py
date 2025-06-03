@@ -155,11 +155,23 @@ I can help you with:
             else:
                 print(f"Using {tool_id}->{method_name} with params: {json.dumps(parameters, indent=2)}", flush=True)
                 try:
-                    # Standard tool calling - no special cases
+                    # Convert snake_case parameters to camelCase if needed
+                    def snake_to_camel(snake_str):
+                        components = snake_str.split('_')
+                        return components[0] + ''.join(x.capitalize() for x in components[1:])
+                    
+                    converted_params = {}
+                    for key, value in parameters.items():
+                        if '_' in key:
+                            converted_params[snake_to_camel(key)] = value
+                        else:
+                            converted_params[key] = value
+                    
+                    # Standard tool calling
                     tool_result = self.mcp_manager.call_tool(
                         tool_id,
                         "tools/call",
-                        {"name": method_name, "arguments": parameters},
+                        {"name": method_name, "arguments": converted_params},
                         timeout=25 
                     )
                     print(f"Tool {tool_id} result (or final accumulated): {json.dumps(tool_result, indent=2)}", flush=True) # Ensure this prints the final result
