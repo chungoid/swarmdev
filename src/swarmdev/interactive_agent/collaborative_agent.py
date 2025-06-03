@@ -316,8 +316,8 @@ GUIDANCE ON ASSISTING WITH GOAL REFINEMENT:
 - You SHOULD use your tools to help. For example:
     - Use `sequential-thinking` to structure brainstorming steps or explore pros/cons.
     - Use `fetch` to research new tools, libraries, or concepts the user mentions.
-    - Use `context7` to look up details about specific technologies.
-- Your `thought` should reflect this plan, and `initial_response_to_user` should tell the user how you intend to help them (e.g., "Okay, let me research some additional libraries for network scanning and I'll get back to you with ideas.").
+    - Use `everything` to look up details about specific technologies.
+- Your `thought` should reflect this plan, and `initial_response_to_user` should tell the user how you intend to help them.
 
 CRITICAL INSTRUCTIONS FOR `goal.txt` and `filesystem` tool:
 1.  If the user discusses a project goal, or asks to save/write a goal, you should consider using the `filesystem` tool with the `write_file` method.
@@ -392,10 +392,6 @@ Response (JSON only):
         if not self.llm_provider:
             # Simple fallback if no LLM
             if tool_result and not tool_result.get("error"):
-                if tool_result.get("type") == "sequential_thinking_output":
-                    # Basic formatting for sequential thinking output
-                    thoughts_str = "\n".join(tool_result.get("accumulated_thoughts", ["No thoughts recorded."]))
-                    return f"{agent_initial_utterance}\nTool {tool_id} ({method_name}) completed.\nAccumulated thoughts:\n{thoughts_str[:1000]}..."
                 return f"{agent_initial_utterance}\nTool {tool_id} ({method_name}) completed. Result: {str(tool_result)[:300]}..."
             else:
                 return f"{agent_initial_utterance}\nTool {tool_id} ({method_name}) encountered an issue: {tool_result.get('error', 'Unknown error')}."
@@ -417,10 +413,10 @@ Based on the original request, your initial response, and the tool's result, for
 - Be conversational and helpful.
 
 Final response to user:
-            """
+"""
         
         try:
-            final_response = self.llm_provider.generate_text(synthesis_prompt, temperature=0.3, max_tokens=700) # Increased max_tokens
+            final_response = self.llm_provider.generate_text(synthesis_prompt, temperature=0.3, max_tokens=700)
             return final_response.strip()
         except Exception as e:
             self.logger.error(f"Final response synthesis failed: {e}")
