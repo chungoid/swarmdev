@@ -658,9 +658,7 @@ class MCPManager:
             # Call the method
             result = self._call_server_method(tool_id, method, params, timeout)
             
-            # Handle built-in multi-call logic for sequential-thinking tool
-            if tool_id == "sequential-thinking" and method == "tools/call" and not result.get("error"):
-                result = self._handle_multi_call_tool(tool_id, params, result, timeout)
+            # Note: sequential-thinking multi-step orchestration is handled at the agent layer. MCPManager stays single-call.
             
             # Determine call status
             response_time = time.time() - start_time

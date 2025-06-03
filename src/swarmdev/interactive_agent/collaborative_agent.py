@@ -157,35 +157,35 @@ I can help you with:
                 print(f"{tool_id} call", flush=True)
                 
                 try:
-                    # Generic tool invocation (no hard-coded branches)
-                    self.logger.info(f"DEBUG: Calling {tool_id} with method {method_name} and parameters: {parameters}")
-                    tool_result = self.mcp_manager.call_tool(
-                        tool_id,
-                        "tools/call",
-                        {"name": method_name, "arguments": parameters},
-                        timeout=60 
-                    )
-                    
-                    # Process tool result
-                    if tool_result and not tool_result.get("error"):
-                        # Extract the actual content from the tool result
-                        content = tool_result.get("content", tool_result.get("result", str(tool_result)))
-                        if isinstance(content, list) and content:
-                            # If it's a list, take the first item's text
-                            final_response = content[0].get("text", str(content[0])) if isinstance(content[0], dict) else str(content[0])
-                        elif isinstance(content, dict):
-                            final_response = content.get("text", str(content))
-                        else:
-                            final_response = str(content)
+                    # If sequential-thinking is requested, run a dedicated reasoning chain
+                    if tool_id == "sequential-thinking" and method_name == "sequentialthinking":
+                        final_response = self._run_sequential_thinking_chain(parameters, human_message)
                     else:
-                        # Tool failed - just answer the question directly with LLM
-                        self.logger.warning(f"Tool {tool_id} failed with result: {tool_result}, falling back to direct LLM response")
-                        fallback_prompt = f"Answer this question directly: {human_message}"
-                        try:
-                            final_response = self.llm_provider.generate_text(fallback_prompt, temperature=0.3, max_tokens=500)
-                            self.logger.info(f"Fallback response generated: {final_response[:100]}...")
-                        except Exception as e:
-                            final_response = f"I had trouble using my tools and generating a response. Could you try rephrasing your question?"
+                        # Generic single-call invocation for all other tools
+                        self.logger.info(f"DEBUG: Calling {tool_id} with method {method_name} and parameters: {parameters}")
+                        tool_result = self.mcp_manager.call_tool(
+                            tool_id,
+                            "tools/call",
+                            {"name": method_name, "arguments": parameters},
+                            timeout=60 
+                        )
+                        # Process tool result
+                        if tool_result and not tool_result.get("error"):
+                            content = tool_result.get("content", tool_result.get("result", str(tool_result)))
+                            if isinstance(content, list) and content:
+                                final_response = content[0].get("text", str(content[0])) if isinstance(content[0], dict) else str(content[0])
+                            elif isinstance(content, dict):
+                                final_response = content.get("text", str(content))
+                            else:
+                                final_response = str(content)
+                        else:
+                            self.logger.warning(f"Tool {tool_id} failed with result: {tool_result}, falling back to direct LLM response")
+                            fallback_prompt = f"Answer this question directly: {human_message}"
+                            try:
+                                final_response = self.llm_provider.generate_text(fallback_prompt, temperature=0.3, max_tokens=500)
+                                self.logger.info(f"Fallback response generated: {final_response[:100]}...")
+                            except Exception:
+                                final_response = "I had trouble using my tools and generating a response. Could you try rephrasing your question?"
                         
                 except Exception as e:
                     self.logger.error(f"Error calling tool {tool_id}->{method_name}: {e}", exc_info=True)
@@ -426,3 +426,98 @@ Response (JSON only):
                 v = v_converted
             normalized[new_key] = v
         return normalized
+
+    # ---------------------------------------------------------------------
+    # Sequential Thinking helper (LLM-driven loop, no user-visible thoughts)
+    # ---------------------------------------------------------------------
+
+    def _run_sequential_thinking_chain(self, initial_params: Dict[str, Any], human_message: str) -> str:
+        """Execute a full sequential-thinking loop until nextThoughtNeeded == False.
+
+        The LLM provides the *content* of each next thought; the MCP server merely
+        stores bookkeeping. Intermediate thoughts are not shown to the user; only
+        the final answer is returned.
+        """
+        try:
+            # Extract initial values
+            current_thought = initial_params.get("thought", "Let's think step by step.")
+            thought_number = int(initial_params.get("thoughtNumber", 1))
+            total_thoughts = int(initial_params.get("totalThoughts", 20))
+            next_needed = bool(initial_params.get("nextThoughtNeeded", True))
+
+            history: List[str] = []
+            max_steps = 50  # safety cap
+
+            while True:
+                # Send current thought to the MCP server
+                tool_args = {
+                    "thought": current_thought,
+                    "nextThoughtNeeded": next_needed,
+                    "thoughtNumber": thought_number,
+                    "totalThoughts": total_thoughts
+                }
+                self.logger.debug(f"Sequential-thinking call #{thought_number}: {current_thought[:80]}…")
+
+                result = self.mcp_manager.call_tool(
+                    "sequential-thinking",
+                    "tools/call",
+                    {"name": "sequentialthinking", "arguments": tool_args},
+                    timeout=60
+                )
+
+                # If the tool itself errors, break and fallback
+                if not result or result.get("error"):
+                    self.logger.warning(f"Sequential-thinking server error: {result}")
+                    break
+
+                history.append(current_thought)
+
+                # Parse bookkeeping response; we only care about flags / numbers
+                payload = result.get("content", result.get("result", {}))
+                if isinstance(payload, list) and payload:
+                    payload = payload[0].get("text", payload[0]) if isinstance(payload[0], dict) else payload[0]
+                if isinstance(payload, str):
+                    try:
+                        payload = json.loads(payload)
+                    except json.JSONDecodeError:
+                        payload = {}
+
+                # Check if more thinking required
+                next_needed = bool(payload.get("nextThoughtNeeded", False))
+                if not next_needed or thought_number >= max_steps:
+                    # Ask LLM to craft the final answer using the accumulated history
+                    summary_prompt = (
+                        f"We have finished a sequential reasoning chain for the user question below.\n"
+                        f"Question: {human_message}\n\n"
+                        f"Reasoning steps:\n" + "\n".join(f"Step {i+1}: {s}" for i, s in enumerate(history)) + "\n\n"
+                        "Provide a concise, helpful answer to the user without exposing the internal steps."
+                    )
+                    final_ans = self.llm_provider.generate_text(summary_prompt, temperature=0.3, max_tokens=400)
+                    return final_ans.strip()
+
+                # Otherwise ask LLM for the next thought
+                guidance_prompt = (
+                    f"We are answering the user question: {human_message}\n\n"
+                    f"Completed thoughts so far:\n" + "\n".join(f"Step {i+1}: {s}" for i, s in enumerate(history)) + "\n\n"
+                    "Based on these, provide the *next* thought needed to continue the analysis, no more than two sentences.\n"
+                    "Respond ONLY in JSON with keys: 'thought' (string), 'nextThoughtNeeded' (boolean)."
+                )
+                llm_json = self.llm_provider.generate_text(guidance_prompt, temperature=0.3, max_tokens=150)
+                try:
+                    parsed = json.loads(llm_json)
+                    current_thought = parsed.get("thought", "Continue analysis…")
+                    next_needed = bool(parsed.get("nextThoughtNeeded", False))
+                except json.JSONDecodeError:
+                    # If LLM didn't output valid JSON, fallback to simple continue or end
+                    self.logger.warning(f"LLM returned invalid JSON for next thought: {llm_json}")
+                    next_needed = False
+                thought_number += 1
+
+            # If loop breaks due to errors, fallback to direct answer
+            fallback = self.llm_provider.generate_text(
+                f"Answer the question directly: {human_message}", temperature=0.3, max_tokens=400)
+            return fallback.strip()
+
+        except Exception as e:
+            self.logger.error(f"Unexpected error in sequential-thinking chain: {e}")
+            return "I ran into an error while reasoning. Could you rephrase or try again?"
