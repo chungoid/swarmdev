@@ -202,6 +202,11 @@ class AgentMCPTester:
             
             print(f"    → Tool {tool_id} confirmed in {self.agent_type_name}'s MCP manager tool list.")
 
+            # Special multi-step validation for sequential-thinking
+            if tool_id == "sequential-thinking":
+                ok, detail = self._test_sequential_thinking_multi()
+                return ok, detail
+
             test_method, test_params, test_name = _get_basic_connectivity_test_for_tool(tool_id)
             print(f"    → Using test: '{test_name}' (Method: {test_method}, Params: {test_params}) for {self.agent_type_name} call.")
             
@@ -218,6 +223,67 @@ class AgentMCPTester:
         except Exception as e:
             print(f"    → Exception during {self.agent_type_name} test for {tool_id}: {e}")
             traceback.print_exc()
+            return False, str(e)
+
+    def _test_sequential_thinking_multi(self) -> Tuple[bool, Optional[str]]:
+        """Run a 3-step sequential-thinking chain and ensure the server accepts each step."""
+        try:
+            current_thought = "Test step 1"
+            thought_number = 1
+            total_thoughts = 3
+            next_needed = True
+
+            for _ in range(total_thoughts):
+                # Determine if another thought will be needed AFTER this one
+                next_needed_flag = thought_number < total_thoughts
+                params = {
+                    "name": "sequentialthinking",
+                    "arguments": {
+                        "thought": current_thought,
+                        "nextThoughtNeeded": next_needed_flag,
+                        "thoughtNumber": thought_number,
+                        "totalThoughts": total_thoughts
+                    }
+                }
+                result = self.agent_instance.mcp_manager.call_tool(
+                    "sequential-thinking",
+                    "tools/call",
+                    params,
+                    timeout=15
+                )
+
+                if result.get("error"):
+                    return False, f"Server returned error at thought {thought_number}: {result['error']}"
+
+                # Parse bookkeeping
+                payload = result.get("result", {}).get("content", [{}])[0]
+                if isinstance(payload, dict):
+                    payload_text = payload.get("text", "{}")
+                else:
+                    payload_text = str(payload)
+                import json
+                meta = json.loads(payload_text)
+
+                if meta.get("thoughtNumber") != thought_number:
+                    return False, "thoughtNumber mismatch in response"
+
+                if next_needed_flag:
+                    # Expect server to echo nextThoughtNeeded true during intermediate steps
+                    if not meta.get("nextThoughtNeeded", False):
+                        return False, f"Server ended chain early at step {thought_number}"
+                else:
+                    # Final step should have nextThoughtNeeded false
+                    if meta.get("nextThoughtNeeded", True):
+                        return False, "Server still wants more thoughts after final step"
+
+                # prepare next
+                thought_number += 1
+                current_thought = f"Test step {thought_number}"
+                next_needed = thought_number < total_thoughts
+
+            return True, None
+        except Exception as e:
+            import traceback; traceback.print_exc()
             return False, str(e)
 
 class TestSuiteRunner:

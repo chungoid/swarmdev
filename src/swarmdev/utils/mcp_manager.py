@@ -262,6 +262,17 @@ class MCPManager:
                     "enabled": True,
                     "description": "Advanced reasoning through sequential thoughts"
                 },
+                "context7": {
+                    # Context7 defaults to HTTP transport; set MCP_TRANSPORT=stdio so our manager can talk over stdin/stdout
+                    "command": [
+                        "docker", "run", "-i", "--rm",
+                        "-e", "MCP_TRANSPORT=stdio",
+                        "ghcr.io/chungoid/context7:latest"
+                    ],
+                    "timeout": 30,
+                    "enabled": True,
+                    "description": "Context-aware library and dependency resolution (stdio transport)"
+                },
                 "everything": {
                     "command": ["docker", "run", "-i", "--rm", "ghcr.io/chungoid/everything:latest"],
                     "timeout": 30,
