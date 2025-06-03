@@ -299,7 +299,7 @@ AVAILABLE TOOLS (with methods and input schemas):
 {tool_catalog_str}
 
 TOOL USAGE EXAMPLES:
-- sequential-thinking: Multi-step reasoning tool. Start with: {{"thought": "Starting thought...", "thoughtNumber": 1, "totalThoughts": 5, "nextThoughtNeeded": true}}. The tool will iterate through thoughts automatically and return final conclusions when "nextThoughtNeeded": false.
+- sequential-thinking: Multi-step reasoning tool to help you think through a problem. Once the thought chain is complete you MUSToutput the final response.
 - filesystem: Use to read/write files. Example: {{"path": "/workspace/file.txt"}}
 - memory: Use to store/recall information. Example: {{"entities": [...]}} for create_entities
 - fetch: Use to get web content. Example: {{"url": "https://example.com"}}
