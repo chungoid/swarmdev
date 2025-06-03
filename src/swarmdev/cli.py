@@ -148,7 +148,30 @@ def setup_parser():
 
     # Pull MCP Images command
     pull_images_parser = subparsers.add_parser('pull-images', help='Download and set up MCP Docker images from GHCR')
-    # No specific arguments needed for pull-images_parser itself
+    pull_images_parser.epilog = """
+Examples:
+  swarmdev pull-images                    # Download all MCP Docker images
+  
+If you get "permission denied" or "broken pipe" errors, try:
+  swarmdev fix-docker-group              # Fix Docker group membership issues
+"""
+    
+    # Fix Docker Group command
+    fix_docker_parser = subparsers.add_parser('fix-docker-group', help='Fix Docker group membership issues that prevent MCP containers from running')
+    fix_docker_parser.epilog = """
+This command helps fix common Docker permission issues including:
+  - User not in docker group
+  - Group membership not active in current session
+  - Permission denied errors when running Docker commands
+
+Examples:
+  swarmdev fix-docker-group              # Diagnose and fix Docker group issues
+  
+After running this, you may need to:
+  - Log out and log back in
+  - Start a new terminal session
+  - Run 'newgrp docker' in your current session
+"""
     
     return parser
  
@@ -1443,6 +1466,40 @@ def cmd_pull_images(args):
         sys.exit(1)
 
 
+def cmd_fix_docker_group(args):
+    """Handles the 'fix-docker-group' command to fix Docker group membership issues."""
+    logger.info("Starting Docker group membership fix...")
+    try:
+        # Construct path to the fix script
+        cli_file_path = os.path.abspath(__file__)
+        src_swarmdev_dir = os.path.dirname(cli_file_path)
+        script_path = os.path.join(src_swarmdev_dir, "scripts", "fix_docker_group.py")
+
+        if not os.path.exists(script_path):
+            logger.error(f"Docker group fix script not found at: {script_path}")
+            logger.error("Please ensure 'scripts/fix_docker_group.py' exists in the correct location relative to 'cli.py'.")
+            sys.exit(1)
+
+        # Run the script as a subprocess
+        process = subprocess.run([sys.executable, script_path], check=False, text=True)
+        
+        if process.returncode != 0:
+            logger.error("Docker group fix process failed. See output from the script above for details.")
+            sys.exit(process.returncode)
+        else:
+            logger.info("Docker group fix process completed. Check script output for results.")
+
+    except FileNotFoundError: 
+        logger.error(f"Python interpreter not found at: {sys.executable}")
+        sys.exit(1)
+    except Exception as e:
+        logger.error(f"An unexpected error occurred while trying to run the Docker group fix script: {e}")
+        if hasattr(args, 'verbose') and args.verbose:
+            import traceback
+            traceback.print_exc()
+        sys.exit(1)
+
+
 def main():
     """Main entry point for the SwarmDev CLI."""
     parser = setup_parser()
@@ -1475,6 +1532,8 @@ def main():
         cmd_mcp_analysis(args)
     elif args.command == "pull-images":
         cmd_pull_images(args)
+    elif args.command == "fix-docker-group":
+        cmd_fix_docker_group(args)
     else:
         print(f"Unknown command: {args.command}")
         parser.print_help()

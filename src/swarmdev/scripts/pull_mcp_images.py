@@ -178,8 +178,21 @@ def attempt_docker_install(os_type):
                       capture_output=True, text=True, check=True)
         print("User added to docker group successfully")
         
+        # Create docker group if it doesn't exist (edge case)
+        try:
+            subprocess.run(["sudo", "groupadd", "docker"], 
+                          capture_output=True, text=True, check=False)
+        except:
+            pass  # Group already exists, which is fine
+        
         print("\nDocker installation completed successfully!")
         print("=" * 50)
+        print("\nIMPORTANT: Group membership changes require a new login session.")
+        print("Options to activate Docker group membership:")
+        print("  1. Log out and log back in")
+        print("  2. Start a new terminal/SSH session")  
+        print("  3. Use 'newgrp docker' command")
+        print("  4. The script will try 'sg docker' to work around this")
         
         return True
     except subprocess.CalledProcessError as e:
@@ -194,44 +207,82 @@ def attempt_docker_install(os_type):
 
 def test_docker_with_group(username):
     """Test if Docker works with the user's group membership."""
+    # First check if user is actually in docker group
     try:
-        # Use sg to run docker command with docker group
-        result = subprocess.run(
-            ["sg", "docker", "-c", "docker info > /dev/null 2>&1"],
-            shell=False,
-            capture_output=True,
-            text=True,
-            timeout=10
-        )
-        return result.returncode == 0
-    except:
-        # Fall back to regular docker command
-        try:
-            subprocess.run(["docker", "info"], 
-                          capture_output=True, check=True, timeout=10)
-            return True
-        except:
+        result = subprocess.run(["groups", username], capture_output=True, text=True)
+        if result.returncode == 0 and "docker" in result.stdout:
+            print(f"✓ User '{username}' is in docker group")
+        else:
+            print(f"✗ User '{username}' is NOT in docker group yet")
+            print(f"  Groups: {result.stdout.strip()}")
             return False
+    except Exception as e:
+        print(f"Could not check group membership: {e}")
+    
+    # Test different approaches to run docker
+    approaches = [
+        # Method 1: Use sg to switch to docker group
+        (["sg", "docker", "-c", "docker info >/dev/null 2>&1"], "sg (switch group)"),
+        # Method 2: Use newgrp in a subshell  
+        (["bash", "-c", "newgrp docker && docker info >/dev/null 2>&1"], "newgrp"),
+        # Method 3: Direct docker command (might work if already in group)
+        (["docker", "info"], "direct")
+    ]
+    
+    for cmd, method in approaches:
+        try:
+            print(f"  Testing Docker access with {method}...")
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+            if result.returncode == 0:
+                print(f"  ✓ Docker working with {method}")
+                return True
+            else:
+                print(f"  ✗ Docker failed with {method} (code: {result.returncode})")
+                if result.stderr and "permission denied" in result.stderr.lower():
+                    print(f"    Permission denied error detected")
+        except subprocess.TimeoutExpired:
+            print(f"  ✗ Docker command timed out with {method}")
+        except Exception as e:
+            print(f"  ✗ Exception with {method}: {e}")
+    
+    return False
 
 
 def run_docker_command_with_group(cmd_args, username):
     """Run a docker command with proper group context."""
-    try:
-        # Try with sg first (switch group)
-        sg_cmd = ["sg", "docker", "-c", " ".join(["docker"] + cmd_args)]
-        result = subprocess.run(sg_cmd, capture_output=True, text=True, timeout=300)
-        if result.returncode == 0:
-            return result
-        else:
-            print(f"Debug: sg command failed with return code {result.returncode}")
-            if result.stderr:
-                print(f"Debug: sg stderr: {result.stderr}")
-    except Exception as e:
-        print(f"Debug: sg command exception: {e}")
+    # Try multiple approaches in order of preference
+    approaches = [
+        # Method 1: sg (switch group) - most reliable
+        (["sg", "docker", "-c", " ".join(["docker"] + cmd_args)], "sg"),
+        # Method 2: sudo with group specification
+        (["sudo", "-g", "docker", "docker"] + cmd_args, "sudo -g"),
+        # Method 3: Direct docker (fallback)
+        (["docker"] + cmd_args, "direct")
+    ]
     
-    # Fall back to regular docker command
-    print("Debug: Falling back to regular docker command")
-    return subprocess.run(["docker"] + cmd_args, capture_output=True, text=True, timeout=300)
+    for cmd, method in approaches:
+        try:
+            print(f"  Trying {method} method...")
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+            if result.returncode == 0:
+                print(f"  ✓ Success with {method}")
+                return result
+            else:
+                print(f"  ✗ Failed with {method} (code: {result.returncode})")
+                if result.stderr:
+                    print(f"    Error: {result.stderr.strip()[:100]}...")
+        except Exception as e:
+            print(f"  ✗ Exception with {method}: {e}")
+    
+    # All methods failed
+    print("  All Docker execution methods failed!")
+    print("  You may need to:")
+    print("    1. Log out and log back in to refresh group membership")
+    print("    2. Or run: newgrp docker")
+    print("    3. Or restart your terminal/SSH session")
+    
+    # Return the last result for error reporting
+    return result
 
 
 def check_docker():
@@ -284,6 +335,30 @@ def check_docker():
     except subprocess.CalledProcessError as e:
         print("Error: Docker command found, but Docker daemon might not be running or accessible.")
         print("   Please ensure Docker is started and you have permissions to access it.")
+        
+        # Check if it's a group membership issue
+        import getpass
+        username = getpass.getuser()
+        try:
+            groups_result = subprocess.run(["groups", username], capture_output=True, text=True)
+            if groups_result.returncode == 0:
+                user_groups = groups_result.stdout.strip()
+                if "docker" not in user_groups:
+                    print(f"\n   DETECTED ISSUE: User '{username}' is not in 'docker' group.")
+                    print(f"   Current groups: {user_groups}")
+                    print("\n   TO FIX THIS:")
+                    print("   1. Add user to docker group: sudo usermod -aG docker $USER")
+                    print("   2. Then either:")
+                    print("      - Log out and log back in")
+                    print("      - Run: newgrp docker")
+                    print("      - Start a new terminal session")
+                    print("   3. Then re-run: swarmdev pull-images")
+                    return "group_fix_needed"
+                else:
+                    print(f"   User '{username}' is in docker group: {user_groups}")
+        except:
+            pass
+        
         # Attempt to get more specific error from docker info if possible, without printing full output
         try:
             result = subprocess.run(["docker", "info"], capture_output=True, text=True, check=False)
@@ -376,6 +451,10 @@ def main():
         print("Docker is ready.")
     elif docker_status in ["docker_installed_continue", "docker_installed_limited"]:
         print("Docker was just installed. Continuing with image downloads...")
+    elif docker_status == "group_fix_needed":
+        print("\nDocker group membership issue detected.")
+        print("Please follow the fix instructions above and then re-run: swarmdev pull-images")
+        sys.exit(1)
     else:
         print("\nDocker setup required. Please follow the instructions above and try again.")
         print("After installing Docker, run: swarmdev pull-images")
