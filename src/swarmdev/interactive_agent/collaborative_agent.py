@@ -155,13 +155,41 @@ I can help you with:
             else:
                 print(f"Using {tool_id}->{method_name} with params: {json.dumps(parameters, indent=2)}", flush=True)
                 try:
-                    # Standard tool calling - no special cases
+                    # Standard tool calling with multi-call support
                     tool_result = self.mcp_manager.call_tool(
                         tool_id,
                         "tools/call",
                         {"name": method_name, "arguments": parameters},
-                        timeout=25 
+                        timeout=60 
                     )
+                    
+                    # Handle multi-call tools naturally
+                    if tool_result and not tool_result.get("error"):
+                        result_content = tool_result.get("result", {})
+                        if isinstance(result_content, dict) and result_content.get("content"):
+                            try:
+                                content_text = result_content["content"][0].get("text", "{}")
+                                parsed_content = json.loads(content_text)
+                                
+                                # If tool wants more calls, continue naturally
+                                while parsed_content.get("nextThoughtNeeded"):
+                                    next_params = parameters.copy()
+                                    next_params["thoughtNumber"] = parsed_content.get("thoughtNumber", 1) + 1
+                                    
+                                    next_result = self.mcp_manager.call_tool(
+                                        tool_id, "tools/call", 
+                                        {"name": method_name, "arguments": next_params},
+                                        timeout=60
+                                    )
+                                    
+                                    if next_result and not next_result.get("error"):
+                                        next_content = next_result.get("result", {}).get("content", [{}])[0].get("text", "{}")
+                                        parsed_content = json.loads(next_content)
+                                        tool_result = next_result  # Use latest result
+                                    else:
+                                        break
+                            except (json.JSONDecodeError, KeyError, IndexError):
+                                pass  # Not a multi-call tool, use original result
                     print(f"Tool {tool_id} result (or final accumulated): {json.dumps(tool_result, indent=2)}", flush=True) # Ensure this prints the final result
                     final_response = self._synthesize_final_response(human_message, initial_response_to_user, tool_id, method_name, tool_result)
                 except Exception as e:
