@@ -309,7 +309,7 @@ AVAILABLE TOOLS (with methods and input schemas):
 {tool_catalog_str}
 
 TOOL USAGE EXAMPLES:
-- sequential-thinking: Use method "sequentialthinking" with parameters like {"thought": "I need to analyze Python networking libraries step by step", "nextThoughtNeeded": true, "thoughtNumber": 1, "totalThoughts": 5}
+- sequential-thinking: Use method "sequentialthinking" with parameters like {{"thought": "your thinking step", "nextThoughtNeeded": true, "thoughtNumber": 1, "totalThoughts": 5}}
 - filesystem: Use for file operations
 - memory: Use for knowledge storage
 - fetch: Use for web content
