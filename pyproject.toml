@@ -31,7 +31,7 @@ dependencies = [
     "httpx==0.28.1",
     "ipython==9.3.0",
     "ipywidgets==8.1.7",
-    "jnius==1.1.0",
+    "jnius==1.5.0",
     "keyring==25.6.0",
     "markdownify==1.1.0",
     "mcp==1.9.2",
