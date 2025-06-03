@@ -173,8 +173,13 @@ I can help you with:
                         else:
                             final_response = str(content)
                     else:
-                        error_msg = tool_result.get("error", "Unknown error") if tool_result else "No response"
-                        final_response = f"The {tool_id} tool encountered an issue: {error_msg}"
+                        # Tool failed - just answer the question directly with LLM
+                        self.logger.warning(f"Tool {tool_id} failed, falling back to direct LLM response")
+                        fallback_prompt = f"Answer this question directly: {human_message}"
+                        try:
+                            final_response = self.llm_provider.generate_text(fallback_prompt, temperature=0.3, max_tokens=500)
+                        except Exception as e:
+                            final_response = f"I had trouble using my tools and generating a response. Could you try rephrasing your question?"
                         
                 except Exception as e:
                     self.logger.error(f"Error calling tool {tool_id}->{method_name}: {e}", exc_info=True)
