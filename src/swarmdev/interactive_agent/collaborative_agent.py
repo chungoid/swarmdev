@@ -309,7 +309,7 @@ The value of "action" should be an object with the following fields:
 - "initial_response_to_user": (String) A message to show to the user immediately. If using a tool, this could be "Okay, I'll use [tool_name] to [action_description]." If not using a tool, this will be your direct answer to the user.
 - "tool_id": (String, Optional) If use_tool is true, the ID of the tool to use (e.g., "filesystem").
 - "method_name": (String, Optional) If use_tool is true, the specific method of the tool to call (e.g., "list_directory"). Choose from the methods listed in AVAILABLE TOOLS.
-- "parameters": (Object, Optional) If use_tool is true, a JSON object of parameters for the chosen method, conforming to its input_schema.
+- "parameters": (Object, Optional) If use_tool is true, a JSON object of parameters for the chosen method, conforming to its input_schema. Use the EXACT parameter names from the schema (e.g., "thoughtNumber" not "thought_number").
 
 Ensure your entire output is ONLY the JSON object described. Do not include any other text, greeting, or explanation before or after the JSON.
 Response (JSON only):
