@@ -299,7 +299,7 @@ AVAILABLE TOOLS (with methods and input schemas):
 {tool_catalog_str}
 
 TOOL USAGE EXAMPLES:
-- sequential-thinking: Use for step-by-step analysis. Always provide: {{"thought": "Starting thought...", "thoughtNumber": 1, "totalThoughts": 3, "nextThoughtNeeded": true}}
+- sequential-thinking: Multi-step reasoning tool. Start with: {{"thought": "Starting thought...", "thoughtNumber": 1, "totalThoughts": 5, "nextThoughtNeeded": true}}. The tool will iterate through thoughts automatically and return final conclusions when "nextThoughtNeeded": false.
 - filesystem: Use to read/write files. Example: {{"path": "/workspace/file.txt"}}
 - memory: Use to store/recall information. Example: {{"entities": [...]}} for create_entities
 - fetch: Use to get web content. Example: {{"url": "https://example.com"}}
@@ -367,7 +367,7 @@ The tool execution resulted in:
 MANDATORY REQUIREMENTS - NO EXCEPTIONS:
 1. You MUST provide a substantive response with actual content - NEVER return empty/blank responses
 2. You MUST extract and present the final conclusions from the tool output
-3. If the tool was sequential-thinking, you MUST find the final thought/conclusion and output it completely
+3. For sequential-thinking: When "nextThoughtNeeded": false, the thought chain is complete - extract and present the final conclusions
 4. If you cannot find clear results in the tool output, you MUST provide a helpful response based on what information is available
 5. Your response MUST directly answer the user's original question using the tool results
 
@@ -404,6 +404,7 @@ Your substantive response with actual findings:
             else:
                 return f"{agent_initial_utterance}\n\nI tried using the {tool_id} tool but encountered an issue: {tool_result.get('error', str(e))}. Let me know how else I can help!"
     
+
     def _get_recent_context(self) -> str:
         """Get recent conversation context."""
         if not self.conversation_history:
