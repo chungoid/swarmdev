@@ -155,42 +155,17 @@ I can help you with:
             else:
                 print(f"Using {tool_id}->{method_name} with params: {json.dumps(parameters, indent=2)}", flush=True)
                 try:
-                    if tool_id == "sequential-thinking" and method_name == "sequentialthinking":
-                        # Handle the sequential-thinking tool - run it in background and synthesize response
-                        current_params = parameters.copy()
-                        original_thought = current_params.get("thought", "")
-                        
-                        self.logger.info(f"Calling sequential-thinking with params: {json.dumps(current_params)}")
-                        
-                        # Call the tool (thinking happens in terminal, we get metadata back)
-                        mcp_result = self.mcp_manager.call_tool(
-                            tool_id,
-                            "tools/call",
-                            {"name": method_name, "arguments": current_params},
-                            timeout=60
-                        )
-                        
-                        self.logger.info(f"Sequential-thinking completed, synthesizing response")
-
-                        # Create a successful result that will trigger proper LLM synthesis
-                        tool_result = {
-                            "type": "sequential_thinking_success",
-                            "original_request": original_thought,
-                            "completed": True
-                        }
-
-                    else:
-                        # Standard single-call tool logic
-                        tool_result = self.mcp_manager.call_tool(
-                            tool_id,
-                            "tools/call",
-                            {"name": method_name, "arguments": parameters},
-                            timeout=25 
-                        )
+                    # Standard tool calling - no special cases
+                    tool_result = self.mcp_manager.call_tool(
+                        tool_id,
+                        "tools/call",
+                        {"name": method_name, "arguments": parameters},
+                        timeout=25 
+                    )
                     print(f"Tool {tool_id} result (or final accumulated): {json.dumps(tool_result, indent=2)}", flush=True) # Ensure this prints the final result
                     final_response = self._synthesize_final_response(human_message, initial_response_to_user, tool_id, method_name, tool_result)
                 except Exception as e:
-                    self.logger.error(f"Error calling tool {tool_id}->{method_name} or in sequential_thinking loop: {e}", exc_info=True)
+                    self.logger.error(f"Error calling tool {tool_id}->{method_name}: {e}", exc_info=True)
                     final_response = f"I tried to use the {tool_id} tool, but encountered an error: {e}. I can still try to answer based on what I know."
         else:
             # No tool needed, the initial_response_to_user is the final response
@@ -425,16 +400,7 @@ Response (JSON only):
             else:
                 return f"{agent_initial_utterance}\nTool {tool_id} ({method_name}) encountered an issue: {tool_result.get('error', 'Unknown error')}."
 
-        tool_output_for_prompt = ""
-        if tool_result.get("type") == "sequential_thinking_success":
-            # Handle successful sequential thinking - the tool completed its analysis
-            tool_output_for_prompt = f"The sequential-thinking analysis has been completed for: '{tool_result.get('original_request', 'N/A')}'"
-            tool_output_for_prompt += f"\nThe thinking process was successful and comprehensive analysis was performed."
-            tool_output_for_prompt += f"\nYou should now provide a detailed, thoughtful response based on the original request."
-        else:
-            # Standard handling for other tools
-            tool_output_for_prompt = json.dumps(tool_result, indent=2)
-
+        tool_output_for_prompt = json.dumps(tool_result, indent=2)
 
         synthesis_prompt = f"""You are SwarmDev's Collaborative Agent.
 The user originally said: "{original_human_message}"
@@ -445,12 +411,10 @@ The tool execution resulted in:
 {tool_output_for_prompt}
 
 Based on the original request, your initial response, and the tool's result, formulate a concise and helpful final response to the user.
-- If the tool was successful, integrate its findings naturally. For multi-step tools like sequential-thinking, summarize the key outcomes or the final developed thought. 
-    - If the 'accumulated_thoughts' for sequential-thinking seems to contain ONLY status updates (e.g., JSON objects with 'thoughtNumber', 'nextThoughtNeeded') and no actual textual thought content for each step, explicitly state that the tool provided progress updates but not the detailed thoughts, and ask if the user wants to try a different approach.
-- If the tool was successful and the output is data (like file content from `read_file` or information from `fetch`) that is meant to be used in a subsequent step for the user's original request (e.g., user asked to "refine X after reading X"), your response should acknowledge receipt/summary of the data and clearly state your plan for the NEXT step (e.g., "Okay, I have the content of goal.txt. Now, I will use sequential-thinking to brainstorm refinements."). This sets up the user for your next action.
-- If the tool failed (e.g., an error message in 'tool_output_for_prompt'), acknowledge the specific error transparently. Do NOT attempt to generate a response as if the tool succeeded. Instead, state the problem and ask the user how they'd like to proceed (e.g., try again, try a different tool, or abandon the attempt).
-- Do not explicitly say "The tool returned...". Instead, incorporate the information. For example, if the tool listed files, say "Here are the files I found: ...".
-- Be conversational.
+- If the tool was successful, integrate its findings naturally.
+- If the tool failed, acknowledge the specific error transparently and suggest alternatives.
+- Do not explicitly say "The tool returned...". Instead, incorporate the information naturally.
+- Be conversational and helpful.
 
 Final response to user:
             """
@@ -460,10 +424,7 @@ Final response to user:
             return final_response.strip()
         except Exception as e:
             self.logger.error(f"Final response synthesis failed: {e}")
-            # Fallback if synthesis fails, providing at least some of the raw accumulated data for sequential_thinking
-            if tool_result.get("type") == "sequential_thinking_output":
-                thoughts_str = "\n".join(tool_result.get("accumulated_thoughts", ["No thoughts recorded."]))
-                return f"{agent_initial_utterance}\nI used the {tool_id} tool. Here's a summary of the thinking process:\n{thoughts_str[:1000]}..."
+            # Standard fallback for all tools
             return f"{agent_initial_utterance}\nI've processed the information from the {tool_id} tool. {str(tool_result)[:200]}..."
     
     def _get_recent_context(self) -> str:
