@@ -406,7 +406,7 @@ AVAILABLE TOOLS (with methods and input schemas):
 {tool_catalog_str}
 
 TOOL USAGE EXAMPLES:
-- sequential-thinking: Use method "sequentialthinking" with just {"initial_thought": "your starting thought here"}. The system will automatically handle the thinking chain.
+- sequential-thinking: Use method "sequentialthinking" with just {{"initial_thought": "your starting thought here"}}. The system will automatically handle the thinking chain.
 - filesystem: Use for file operations
 - memory: Use for knowledge storage
 - fetch: Use for web content
