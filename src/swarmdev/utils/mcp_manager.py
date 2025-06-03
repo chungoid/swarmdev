@@ -89,7 +89,7 @@ class MCPManager:
         
         # Create MCP-specific logger
         self.mcp_logger = logging.getLogger("swarmdev.mcp")
-        self.mcp_logger.setLevel(logging.DEBUG)
+        self.mcp_logger.setLevel(logging.INFO)  # Changed from DEBUG to INFO to reduce spam
         
         # Remove existing handlers to avoid duplicates
         for handler in self.mcp_logger.handlers[:]:
@@ -98,7 +98,7 @@ class MCPManager:
         # Create file handler for mcp.log in the PROJECT directory
         mcp_log_file = os.path.join(logs_dir, "mcp.log")
         mcp_file_handler = logging.FileHandler(mcp_log_file)
-        mcp_file_handler.setLevel(logging.DEBUG)
+        mcp_file_handler.setLevel(logging.INFO)  # Changed from DEBUG to INFO
         
         # Create console handler for immediate feedback - REDUCED SPAM
         mcp_console_handler = logging.StreamHandler()
@@ -411,11 +411,12 @@ class MCPManager:
         process = None
         try:
             # Start the server process
-            self.mcp_logger.debug(f"Starting subprocess for {server_id}: {command}")
-            self.mcp_logger.debug(f"Starting {server_id} server: {' '.join(command)}")
-                        # Debug for filesystem command execution (reduced to debug level)
-            if server_id == "filesystem":
-                self.mcp_logger.debug(f"Filesystem command: {command}")
+                    # Removed debug logging to eliminate spam
+        # self.mcp_logger.debug(f"Starting subprocess for {server_id}: {command}")
+        # self.mcp_logger.debug(f"Starting {server_id} server: {' '.join(command)}")
+        # Debug for filesystem command execution (reduced to debug level)
+        # if server_id == "filesystem":
+        #     self.mcp_logger.debug(f"Filesystem command: {command}")
             
             process = subprocess.Popen(
                 command, 
@@ -429,7 +430,7 @@ class MCPManager:
                 env=env_vars
             )
             
-            self.mcp_logger.debug(f"Started {server_id} server with PID: {process.pid if process else 'None'}")
+            # self.mcp_logger.debug(f"Started {server_id} server with PID: {process.pid if process else 'None'}")
             self.mcp_logger.info(f"Subprocess for {server_id} started. PID: {process.pid}")
             
             # Brief pause to allow server to actually start its process before handshake
@@ -640,13 +641,13 @@ class MCPManager:
                     response = {"error": f"Failed to initialize server {tool_id}"}
                     response_time = time.time() - start_time
                     
-                    self.enhanced_logger.log_call_end(
-                        call_id=call_id,
-                        status="connection_failure",
-                        duration=response_time,
-                        response=response,
-                        error=Exception(response["error"])
-                    )
+                    # self.enhanced_logger.log_call_end(
+                    #     call_id=call_id,
+                    #     status="connection_failure",
+                    #     duration=response_time,
+                    #     response=response,
+                    #     error=Exception(response["error"])
+                    # )
                     
                     with self._lock:
                         self.metrics["failed_calls"] += 1
@@ -824,13 +825,13 @@ class MCPManager:
         payload_str = json.dumps(payload)
 
         self.mcp_logger.debug(f"Calling server '{server_id}', method '{method}', params: {json.dumps(params)}, timeout: {call_timeout}s, request_id: {request_id}")
-        self.enhanced_logger.log_call_start(
-            call_id=request_id,
-            tool_id=server_id,
-            method=method,
-            params=params,
-            timeout=float(call_timeout)
-        )
+        # self.enhanced_logger.log_call_start(
+        #     call_id=request_id,
+        #     tool_id=server_id,
+        #     method=method,
+        #     params=params,
+        #     timeout=float(call_timeout)
+        # )
 
         start_time = time.monotonic()
         response_json: Dict = {}
@@ -957,13 +958,13 @@ class MCPManager:
                 log_error_obj = log_response.get("error")
 
 
-            self.enhanced_logger.log_call_end(
-                call_id=request_id,
-                status=log_status,
-                duration=duration,
-                response=log_response,
-                error=log_error_obj # Pass the error object (dict) or None
-            )
+            # self.enhanced_logger.log_call_end(
+            #     call_id=request_id,
+            #     status=log_status,
+            #     duration=duration,
+            #     response=log_response,
+            #     error=log_error_obj # Pass the error object (dict) or None
+            # )
             self.mcp_logger.debug(f"Call to {server_id} method {method} (request_id: {request_id}) ended with status '{log_status}', took {duration:.4f}s")
 
         if error_response:
