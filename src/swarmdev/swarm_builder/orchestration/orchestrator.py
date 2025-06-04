@@ -693,7 +693,12 @@ class Orchestrator:
             task_id = task.get("task_id", "")
             
             # Check if this is an implementation task that completes an iteration cycle
-            if "improvement_implementation" in task_id:
+            iteration_task_names = [
+                "improvement_implementation",
+                "strategic_implementation"  # New enhanced iteration workflow task name
+            ]
+            
+            if any(task_name in task_id for task_name in iteration_task_names):
                 execution_id = task.get("execution_id")
                 workflow_id = task.get("workflow_id")
                 context = task.get("context", {}).copy()  # Copy context to avoid mutation
@@ -812,7 +817,7 @@ class Orchestrator:
                 self.logger.info(f"Found {len(improvement_suggestions)} improvements from previous analysis")
             
             # Create analysis task for this iteration
-            task_id = f"{cycle_execution_id}_iteration_analysis"
+            task_id = f"{cycle_execution_id}_completion_evaluation"  # Updated to match new workflow
             
             analysis_task = {
                 "task_id": task_id,
@@ -826,10 +831,14 @@ class Orchestrator:
                 "goal": context.get("goal"),  # This will now be the evolved goal if available
                 "project_dir": context.get("project_dir"),
                 "iteration_count": iteration_count,
-                "max_iterations": context.get("max_iterations"),
+                "initial_iterations": context.get("initial_iterations", context.get("max_iterations", 3)),  # Enhanced workflow uses initial_iterations
                 "workflow_type": context.get("workflow_type", "iteration"),
-                "analysis_depth": "focused",
-                "check_continue": True
+                "analysis_depth": "completion_focused",  # Enhanced workflow uses completion_focused
+                "check_continue": True,
+                # Enhanced workflow context
+                "target_version": context.get("target_version"),
+                "completion_strategy": context.get("completion_strategy", "smart"),
+                "adaptive_planning": context.get("adaptive", True)
             }
             
             # Add task to execution
@@ -837,8 +846,8 @@ class Orchestrator:
             self.task_queue.append(task_id)
             
             # If analysis suggests improvements, create planning and implementation tasks
-            planning_task_id = f"{cycle_execution_id}_improvement_planning"
-            implementation_task_id = f"{cycle_execution_id}_improvement_implementation"
+            planning_task_id = f"{cycle_execution_id}_strategic_planning"  # Enhanced workflow task name
+            implementation_task_id = f"{cycle_execution_id}_strategic_implementation"  # Enhanced workflow task name
             
             planning_task = {
                 "task_id": planning_task_id,
@@ -851,9 +860,15 @@ class Orchestrator:
                 "context": context,
                 "goal": context.get("goal"),  # This will now be the evolved goal if available
                 "project_dir": context.get("project_dir"),
-                "planning_type": "improvement",
+                "planning_type": "strategic_iteration",  # Enhanced workflow planning type
                 "use_analysis_results": True,
-                "focus_on_incremental": True
+                "use_research_results": True,  # Enhanced workflow uses research
+                "preserve_functionality": True,
+                "plan_incremental_steps": True,
+                "risk_assessment": True,
+                "plan_iteration_roadmap": True,
+                "estimate_effort_distribution": True,
+                "plan_completion_sequence": True
             }
             
             implementation_task = {
@@ -867,10 +882,14 @@ class Orchestrator:
                 "context": context,
                 "goal": context.get("goal"),  # This will now be the evolved goal if available
                 "project_dir": context.get("project_dir"),
-                "implementation_style": "incremental",
+                "implementation_style": "adaptive",  # Enhanced workflow implementation style
                 "preserve_existing": True,
+                "incremental_refactor": True,
+                "maintain_compatibility": True,
                 "focus_on_improvements": True,
-                "use_analysis_results": True
+                "use_analysis_results": True,
+                "use_research_results": True,
+                "implementation_prioritization": "completion_focused"
             }
             
             # Add dependent tasks

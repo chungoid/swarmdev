@@ -40,7 +40,8 @@ class EnhancedInteractiveAgent(LLMEnabledInteractiveAgent):
         self.build_config = {}  # Build configuration being assembled
         self.available_workflows = [
             "standard_project", "research_only", "development_only", 
-            "indefinite", "iteration", "refactor", "versioned"
+            "indefinite", "iteration"
+            # "refactor" and "versioned" are deprecated - use enhanced "iteration" instead
         ]
         self.recommended_config = {}
     

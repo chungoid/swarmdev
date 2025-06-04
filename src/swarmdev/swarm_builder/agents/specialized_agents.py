@@ -936,6 +936,12 @@ class AnalysisAgent(BaseAgent):
     
     def _should_continue_iteration(self, improvement_analysis: Dict, iteration_count: int, max_iterations: Optional[int], workflow_type: str) -> bool:
         """Determine if another iteration should be performed."""
+        # For the new enhanced iteration workflow, use the smart continuation logic
+        if workflow_type == "iteration" and "completion_strategy" in improvement_analysis:
+            continuation_result = self._should_continue_iteration_enhanced(improvement_analysis, iteration_count)
+            return continuation_result.get("should_continue", False)
+        
+        # Legacy logic for other workflows
         # Check max iterations limit
         if max_iterations is not None and iteration_count >= max_iterations:
             return False
@@ -951,6 +957,198 @@ class AnalysisAgent(BaseAgent):
         
         # Default: continue if improvements are available
         return improvement_analysis.get("improvement_count", 0) > 0
+
+    def _should_continue_iteration_enhanced(self, improvement_analysis: Dict, iteration_count: int) -> Dict:
+        """
+        Enhanced iteration continuation logic for the new unified iteration workflow.
+        Solves the "coat tails" problem with smart completion planning.
+        """
+        # Extract context from the improvement analysis
+        context = improvement_analysis.get("context", {})
+        initial_iterations = context.get("initial_iterations", 3)
+        target_version = context.get("target_version")
+        completion_strategy = context.get("completion_strategy", "smart")
+        adaptive = context.get("adaptive_planning", True)
+        
+        self.logger.info(f"Enhanced continuation assessment: iteration {iteration_count}/{initial_iterations}, strategy: {completion_strategy}")
+        
+        # STRATEGY 1: Version-driven completion (from VersionedWorkflow)
+        if target_version and completion_strategy == "version_driven":
+            version_status = self._assess_version_completion(improvement_analysis, target_version)
+            if version_status.get("target_reached", False):
+                self.logger.info(f"Target version {target_version} reached - stopping iterations")
+                return {
+                    "should_continue": False,
+                    "completion_reason": f"Target version {target_version} reached",
+                    "completion_mode": "version_complete"
+                }
+        
+        # STRATEGY 2: Smart completion assessment (NEW - solving "coat tails")
+        if completion_strategy == "smart":
+            completion_assessment = self._assess_smart_completion(
+                improvement_analysis, iteration_count, initial_iterations, target_version
+            )
+            
+            if completion_assessment.get("ready_for_completion", False):
+                self.logger.info(f"Smart completion triggered: {completion_assessment.get('reason', 'ready')}")
+                return {
+                    "should_continue": completion_assessment.get("needs_final_iteration", False),
+                    "completion_reason": completion_assessment.get("reason", "Project ready for completion"),
+                    "completion_mode": "smart_completion",
+                    "final_iteration_plan": completion_assessment.get("final_plan", {})
+                }
+        
+        # STRATEGY 3: Adaptive iteration adjustment (from VersionedWorkflow pattern)
+        if adaptive:
+            iteration_assessment = self._assess_adaptive_iterations(
+                improvement_analysis, iteration_count, initial_iterations
+            )
+            
+            # Can extend beyond initial estimate if valuable work remains
+            if iteration_assessment.get("should_extend", False):
+                self.logger.info(f"Adaptive extension: {iteration_assessment.get('reason', 'valuable work remains')}")
+                return {
+                    "should_continue": True,
+                    "completion_reason": f"Extending beyond initial estimate: {iteration_assessment.get('reason', 'valuable work remains')}",
+                    "completion_mode": "adaptive_extension",
+                    "estimated_remaining": iteration_assessment.get("estimated_remaining", 1)
+                }
+        
+        # STRATEGY 4: Fixed iteration respect (fallback)
+        if iteration_count >= initial_iterations:
+            self.logger.info(f"Reached initial iteration limit ({initial_iterations}) - stopping")
+            return {
+                "should_continue": False,
+                "completion_reason": f"Reached initial iteration limit ({initial_iterations})",
+                "completion_mode": "fixed_limit"
+            }
+        
+        # Default: continue if improvements available
+        improvement_count = improvement_analysis.get("improvement_count", 0)
+        should_continue = improvement_count > 0
+        self.logger.info(f"Standard continuation: {should_continue} ({improvement_count} improvements available)")
+        
+        return {
+            "should_continue": should_continue,
+            "completion_reason": "Improvements available" if should_continue else "No improvements needed",
+            "completion_mode": "standard_iteration"
+        }
+
+    def _assess_smart_completion(self, improvement_analysis: Dict, iteration_count: int, 
+                               initial_iterations: int, target_version: Optional[str]) -> Dict:
+        """
+        NEW: Smart completion assessment to avoid "coat tails".
+        Analyzes the current state to determine if the project is ready for completion.
+        """
+        improvements = improvement_analysis.get("improvements", [])
+        
+        # Categorize improvements by impact and effort
+        critical_bugs = [imp for imp in improvements if any(word in imp.lower() for word in ["bug", "error", "critical", "broken", "fix"])]
+        major_features = [imp for imp in improvements if any(word in imp.lower() for word in ["feature", "implement", "add", "create"])]
+        polish_items = [imp for imp in improvements if any(word in imp.lower() for word in ["polish", "enhance", "optimize", "clean", "refactor", "improve"])]
+        
+        # Calculate remaining capacity
+        remaining_iterations = initial_iterations - iteration_count
+        
+        self.logger.info(f"Smart completion analysis: {len(critical_bugs)} bugs, {len(major_features)} features, {len(polish_items)} polish items, {remaining_iterations} iterations remaining")
+        
+        # Smart completion logic
+        if remaining_iterations <= 1:
+            # Last iteration - focus on completion readiness
+            if not critical_bugs and len(major_features) <= 1:
+                return {
+                    "ready_for_completion": True,
+                    "needs_final_iteration": len(major_features) > 0 or len(polish_items) > 0,
+                    "reason": "Project ready for completion with optional final polish",
+                    "final_plan": {
+                        "focus": "completion_and_polish",
+                        "tasks": major_features + polish_items[:2]  # Limit polish scope
+                    }
+                }
+            elif critical_bugs:
+                return {
+                    "ready_for_completion": False,
+                    "needs_final_iteration": True,
+                    "reason": f"Critical issues must be resolved: {len(critical_bugs)} bugs",
+                    "final_plan": {
+                        "focus": "critical_fixes",
+                        "tasks": critical_bugs
+                    }
+                }
+        
+        elif remaining_iterations == 2:
+            # Second-to-last iteration - prepare for completion
+            total_remaining_work = len(critical_bugs) + len(major_features)
+            if total_remaining_work <= 2:
+                return {
+                    "ready_for_completion": True,
+                    "needs_final_iteration": True,
+                    "reason": "Entering completion sequence - preparing final iteration",
+                    "final_plan": {
+                        "focus": "prepare_completion",
+                        "tasks": critical_bugs + major_features[:1]
+                    }
+                }
+        
+        return {
+            "ready_for_completion": False,
+            "needs_final_iteration": False,
+            "reason": "Substantial work remains - continue normal iteration"
+        }
+
+    def _assess_version_completion(self, improvement_analysis: Dict, target_version: str) -> Dict:
+        """
+        Assess if the target version has been reached (borrowed from VersionedWorkflow logic).
+        """
+        # This is a simplified version - in a real implementation, this would
+        # analyze version files and semantic versioning
+        project_state = improvement_analysis.get("project_state", {})
+        analysis_text = project_state.get("analysis", "").lower()
+        
+        # Look for version indicators in the analysis
+        version_reached = target_version.lower() in analysis_text or "target version" in analysis_text
+        
+        return {
+            "target_reached": version_reached,
+            "current_version": "auto-detected",  # Placeholder
+            "progress_to_target": 0.8 if not version_reached else 1.0
+        }
+
+    def _assess_adaptive_iterations(self, improvement_analysis: Dict, iteration_count: int, 
+                                  initial_iterations: int) -> Dict:
+        """
+        Assess if iterations should be extended beyond the initial estimate (borrowed from VersionedWorkflow).
+        """
+        improvements = improvement_analysis.get("improvements", [])
+        improvement_count = len(improvements)
+        
+        # High-value work that justifies extension
+        architectural_improvements = [imp for imp in improvements if any(word in imp.lower() for word in ["architecture", "design", "structure", "framework"])]
+        security_improvements = [imp for imp in improvements if any(word in imp.lower() for word in ["security", "vulnerability", "safety"])]
+        performance_improvements = [imp for imp in improvements if any(word in imp.lower() for word in ["performance", "speed", "optimization", "efficiency"])]
+        
+        high_value_work = len(architectural_improvements) + len(security_improvements) + len(performance_improvements)
+        
+        # Extension criteria
+        should_extend = (
+            iteration_count < initial_iterations * 2 and  # Don't extend beyond 2x original estimate
+            high_value_work > 0 and  # Must have high-value work
+            improvement_count >= 3  # Must have substantial work remaining
+        )
+        
+        if should_extend:
+            estimated_remaining = min(high_value_work, 2)  # Cap extension at 2 iterations
+            reason = f"{high_value_work} high-value improvements available (architecture/security/performance)"
+        else:
+            estimated_remaining = 0
+            reason = "No high-value work justifies extension"
+        
+        return {
+            "should_extend": should_extend,
+            "estimated_remaining": estimated_remaining,
+            "reason": reason,
+            "high_value_work_count": high_value_work
+        }
 
 
 class DocumentationAgent(BaseAgent):

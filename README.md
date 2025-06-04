@@ -171,20 +171,44 @@ SwarmDev provides 7 specialized workflows for different development scenarios:
 **Process**: Analysis → Planning → Implementation (repeats until stopped)  
 **Use when**: Ongoing maintenance, feature addition, or continuous improvement
 
-### 5. Iteration Improvement (`iteration`)
-**Best for**: Controlled enhancement with specific improvement cycles  
-**Process**: Analysis → Planning → Implementation (repeats N times)  
-**Use when**: Structured improvement with defined iteration limits
+### 5. Ultimate Iteration (`iteration`) - **RECOMMENDED**
 
-### 6. Refactor (`refactor`)
-**Best for**: Code restructuring and optimization of existing projects  
-**Process**: Analysis → Planning → Refactoring → Documentation (repeats as needed)  
-**Use when**: Improving code quality, architecture, or performance of existing codebases
+**Process**: Comprehensive Discovery → Strategic Research → Strategic Planning → Smart Implementation → Completion Evaluation (repeats intelligently)
 
-### 7. Versioned Development (`versioned`)
-**Best for**: Goal-driven development with version progression  
-**Process**: Incremental development toward target version (1.3→1.4→...→2.0)  
-**Use when**: Building toward a specific version milestone with gradual feature additions
+**Features**: 
+- Handles both new projects AND existing codebases
+- Smart completion planning (no more "coat tails")
+- Adaptive iteration adjustment (no upfront guessing)
+- Version-aware development with semantic targets
+- Risk assessment and compatibility preservation
+- Combines the best patterns from iteration, refactor, and versioned workflows
+
+**Usage Examples**:
+```bash
+# Basic usage with enhanced iteration workflow (recommended)
+swarmdev build --goal goal.txt --workflow iteration --max-iterations 5
+
+# Version-targeted development  
+swarmdev build --goal goal.txt --workflow iteration --target-version 2.0 --completion-strategy version_driven
+
+# Existing codebase improvement (replaces old refactor workflow)
+swarmdev build --goal improve_performance.txt --workflow iteration --completion-strategy smart --adaptive
+
+# Continuous improvement
+swarmdev build --goal goal.txt --workflow indefinite
+```
+
+### 6. Refactor (`refactor`) - **DEPRECATED**
+
+**Status**: DEPRECATED - Use `iteration` workflow instead
+**Migration**: Use `--workflow iteration --completion-strategy smart --adaptive`
+
+**Process**: Analysis → Planning → Refactoring → Documentation (repeats as needed)
+
+### 7. Versioned Development (`versioned`) - **DEPRECATED**
+
+**Status**: DEPRECATED - Use `iteration` workflow with `--target-version` instead  
+**Migration**: Use `--workflow iteration --target-version X.Y --completion-strategy version_driven`
 
 ## Command Reference
 
@@ -205,12 +229,16 @@ swarmdev build --goal GOAL_FILE [OPTIONS]
 --goal, -g PATH              Path to goal file
 
 # Workflow Options  
---workflow TYPE              Workflow type (default: standard_project)
-                            [standard_project, research_only, development_only, 
-                             indefinite, iteration, refactor, versioned]
---max-iterations N           Max iterations for iteration workflow (default: 3)
---target-version VERSION     Target version for versioned workflow (e.g., "2.0", "1.5")
+--workflow {standard_project,research_only,development_only,
+                         indefinite, iteration, refactor, versioned}
+                         Workflow type to use (default: standard_project)
+--max-iterations MAX_ITERATIONS     Initial iteration estimate for iteration workflow (can be adjusted dynamically)
+--target-version VERSION     Target semantic version for iteration workflow (e.g., "2.0", "1.5")
 --current-version VERSION    Current version for versioned workflow (auto-detected if not provided)
+--completion-strategy {smart,fixed,version_driven}
+                                Completion strategy for iteration workflow (default: smart)
+--adaptive                    Enable adaptive iteration adjustment (default: True)
+--no-adaptive                 Disable adaptive iteration adjustment
 
 # Execution Options
 --project-dir, -d PATH       Project directory (default: ./project)
@@ -306,11 +334,7 @@ swarmdev build --goal goal.txt --workflow indefinite --background
 # Fixed improvement cycles
 swarmdev build --goal goal.txt --workflow iteration --max-iterations 5
 
-# Refactor existing codebase
-swarmdev build --goal refactor_goal.txt --workflow refactor --project-dir ./existing_project
-
-# Version-driven development
-swarmdev build --goal goal.txt --workflow versioned --target-version 2.0 --max-iterations 15
+# Enhanced iteration workflow examples covered above
 ```
 
 ### Advanced Usage
@@ -325,75 +349,3 @@ swarmdev blueprint feedback "Add better error handling to the authentication mod
 # Check MCP system health
 swarmdev mcp-analysis
 ```
-
-### Background Processing
-```bash
-# Start long-running project in background
-swarmdev build --goal goal.txt --workflow indefinite --background
-
-# Monitor anytime
-swarmdev status --project-id PROJECT_ID --watch --detailed
-```
-
-## Configuration
-
-### Environment Variables
-```bash
-# LLM Provider Keys (at least one required)
-OPENAI_API_KEY=your_openai_key
-ANTHROPIC_API_KEY=your_anthropic_key  
-GOOGLE_API_KEY=your_google_key
-
-# Default Settings (optional)
-SWARMDEV_DEFAULT_WORKFLOW=standard_project
-SWARMDEV_DEFAULT_LLM_PROVIDER=auto
-SWARMDEV_MAX_RUNTIME=3600
-```
-
-### Project Configuration
-Create `.swarmdev/swarmdev_config.json` in your project directory:
-```json
-{
-  "workflow": "indefinite",
-  "max_iterations": 10,
-  "llm": {
-    "provider": "openai",
-    "model": "o4-mini-2025-04-16"
-  },
-  "mcp": {
-    "enabled": true,
-    "config_file": ".swarmdev/mcp_config.json"
-  }
-}
-```
-
-## Architecture
-
-SwarmDev uses a multi-agent architecture with specialized roles:
-
-- **ResearchAgent**: Technology analysis, requirement gathering, solution exploration
-- **PlanningAgent**: Project blueprints, architecture design, task planning  
-- **DevelopmentAgent**: Code implementation, file creation, technical execution
-- **DocumentationAgent**: User guides, API documentation, project documentation
-- **AnalysisAgent**: Project evaluation, improvement suggestions, iteration management
-
-## Contributing
-
-Contributions welcome! See [CONTRIBUTING.md] for guidelines.
-
-```bash
-# Development setup
-git clone https://github.com/chungoid/swarmdev.git
-cd swarmdev
-pip install -e ".[dev]"
-```
-
-## License
-
-MIT License - see LICENSE file for details.
-
-## Acknowledgments
-
-- Built with [Swarms](https://github.com/kyegomez/swarms)
-- MCP integration follows [Docker's best practices](https://www.docker.com/blog/build-to-prod-mcp-servers-with-docker/)
-- Powered by OpenAI, Anthropic, and Google LLMs

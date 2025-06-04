@@ -1,6 +1,5 @@
 """
-Workflow module initialization for the SwarmDev platform.
-This module provides workflow definitions for different project types.
+Workflow definitions and orchestration for SwarmDev.
 """
 
 from .workflow_definitions import (
@@ -10,10 +9,9 @@ from .workflow_definitions import (
     DevelopmentOnlyWorkflow,
     IndefiniteWorkflow,
     IterationWorkflow,
-    RefactorWorkflow,
-    VersionedWorkflow,
     get_workflow_by_id,
-    list_available_workflows
+    list_available_workflows,
+    list_all_workflows_including_deprecated
 )
 
 __all__ = [
@@ -23,8 +21,7 @@ __all__ = [
     "DevelopmentOnlyWorkflow",
     "IndefiniteWorkflow",
     "IterationWorkflow",
-    "RefactorWorkflow",
-    "VersionedWorkflow", 
     "get_workflow_by_id",
-    "list_available_workflows"
+    "list_available_workflows",
+    "list_all_workflows_including_deprecated"
 ]

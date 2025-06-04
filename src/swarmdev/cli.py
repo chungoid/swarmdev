@@ -91,10 +91,16 @@ def setup_parser():
     build_parser.add_argument('--background', '-b', action='store_true', help='Run build in background and return immediately')
     build_parser.add_argument('--wait', '-w', action='store_true', help='Wait for build to complete (default behavior)')
     build_parser.add_argument('--workflow', choices=['standard_project', 'research_only', 'development_only', 'indefinite', 'iteration', 'refactor', 'versioned'], 
-                             default='standard_project', help='Workflow type to use')
-    build_parser.add_argument('--max-iterations', type=int, default=3, help='Maximum iterations for iteration workflow')
-    build_parser.add_argument('--target-version', help='Target version for versioned workflow (e.g., "2.0", "1.5")')
+                             default='iteration', help='Workflow type to use (iteration is recommended)')
+    build_parser.add_argument('--max-iterations', type=int, default=3, help='Initial iteration estimate for iteration workflow (can be adjusted dynamically)')
+    build_parser.add_argument('--target-version', help='Target semantic version for iteration workflow (e.g., "2.0", "1.5")')
     build_parser.add_argument('--current-version', help='Current version for versioned workflow (auto-detected if not provided)')
+    build_parser.add_argument('--completion-strategy', choices=['smart', 'fixed', 'version_driven'], default='smart',
+                             help='Completion strategy for iteration workflow: smart (assess readiness), fixed (respect initial), version_driven (target version)')
+    build_parser.add_argument('--adaptive', action='store_true', default=True,
+                             help='Enable adaptive iteration adjustment for iteration workflow (can extend beyond initial estimate)')
+    build_parser.add_argument('--no-adaptive', dest='adaptive', action='store_false',
+                             help='Disable adaptive iteration adjustment (stick to initial estimate)')
     
     # Status command
     status_parser = subparsers.add_parser('status', help='Check the status of a project')
@@ -106,7 +112,9 @@ def setup_parser():
     
     # List workflows command
     workflows_parser = subparsers.add_parser('workflows', help='List available workflows')
-    workflows_parser.add_argument('--verbose', action='store_true', help='Show detailed workflow descriptions')
+    workflows_parser.add_argument('--verbose', '-v', action='store_true', help='Show detailed descriptions and usage examples')
+    workflows_parser.add_argument('--show-deprecated', action='store_true', help='Include deprecated workflows in the listing')
+    workflows_parser.set_defaults(func=handle_workflows)
     
     # Analyze logs command
     logs_parser = subparsers.add_parser('analyze-logs', help='Analyze agent logs and generate workflow report')
@@ -593,7 +601,9 @@ def cmd_build(args):
         "workflow": args.workflow,
         "max_iterations": args.max_iterations,
         "target_version": getattr(args, 'target_version', None),
-        "current_version": getattr(args, 'current_version', None)
+        "current_version": getattr(args, 'current_version', None),
+        "completion_strategy": getattr(args, 'completion_strategy', 'smart'),
+        "adaptive": getattr(args, 'adaptive', True)
     }
     
     # Only override llm settings if explicitly provided in CLI
@@ -978,48 +988,61 @@ def _display_recent_logs(status: dict):
             print(f"  Started at: {status['started_at']}")
 
 
-def cmd_workflows(args):
-    """Run the workflows command to list available workflows."""
+def handle_workflows(args):
+    """Handle the workflows command."""
     logger.info("Listing available workflows")
     
-    try:
+    # Import here to avoid circular imports
+    from swarmdev.swarm_builder.workflows.workflow_definitions import (
+        list_available_workflows, 
+        list_all_workflows_including_deprecated
+    )
+    
+    # Get workflows based on whether deprecated ones should be shown
+    if args.show_deprecated:
+        workflows = list_all_workflows_including_deprecated()
+        print("\nAvailable Workflows (including deprecated):")
+    else:
         workflows = list_available_workflows()
-        
         print("\nAvailable Workflows:")
-        print("=" * 60)
+    
+    print("=" * 60)
+    
+    for workflow in workflows:
+        print(f"\n{workflow['name']} ({workflow['id']})")
+        print(f"  {workflow['description']}")
         
-        for workflow in workflows:
-            print(f"\n{workflow['name']} ({workflow['id']})")
-            if args.verbose:
-                print(f"  Description: {workflow['description']}")
-                
-                # Add usage examples for each workflow
-                if workflow['id'] == 'standard_project':
-                    print(f"  Usage: swarmdev build --goal goal.txt --workflow {workflow['id']}")
-                elif workflow['id'] == 'indefinite':
-                    print(f"  Usage: swarmdev build --goal goal.txt --workflow {workflow['id']}")
-                    print(f"  Note: Runs continuously until manually stopped")
-                elif workflow['id'] == 'iteration':
-                    print(f"  Usage: swarmdev build --goal goal.txt --workflow {workflow['id']} --max-iterations 5")
-                    print(f"  Note: Runs specified number of improvement cycles")
-                elif workflow['id'] == 'refactor':
-                    print(f"  Usage: swarmdev build --goal refactor_goal.txt --workflow {workflow['id']} --project-dir ./existing_project")
-                    print(f"  Note: Analyzes existing codebase and refactors according to goal")
-                elif workflow['id'] == 'versioned':
-                    print(f"  Usage: swarmdev build --goal goal.txt --workflow {workflow['id']} --target-version 2.0 --max-iterations 15")
-                    print(f"  Note: Version-driven development with incremental progression (1.3→1.4→...→2.0)")
-                    print(f"  Advanced: Can overshoot max-iterations to reach target version, or stop early if target reached")
-                else:
-                    print(f"  Usage: swarmdev build --goal goal.txt --workflow {workflow['id']}")
+        if args.verbose:
+            print(f"  Description: {workflow['description']}")
+            if workflow['id'] == 'standard_project':
+                print(f"  Usage: swarmdev build --goal goal.txt --workflow {workflow['id']}")
+            elif workflow['id'] == 'research_only':
+                print(f"  Usage: swarmdev build --goal goal.txt --workflow {workflow['id']}")
+            elif workflow['id'] == 'development_only':
+                print(f"  Usage: swarmdev build --goal goal.txt --workflow {workflow['id']}")
+            elif workflow['id'] == 'indefinite':
+                print(f"  Usage: swarmdev build --goal goal.txt --workflow {workflow['id']}")
+                print(f"  Note: Runs continuously until manually stopped")
+            elif workflow['id'] == 'iteration':
+                print(f"  Usage: swarmdev build --goal goal.txt --workflow {workflow['id']} --max-iterations 5")
+                print(f"  Advanced: swarmdev build --goal goal.txt --workflow {workflow['id']} --target-version 2.0 --completion-strategy smart --adaptive")
+                print(f"  Note: Enhanced workflow combining best of iteration, refactor, and versioned patterns")
+                print(f"  Features: existing project support, smart completion planning, adaptive iteration adjustment")
+            elif workflow['id'] == 'refactor':
+                print(f"  Usage: swarmdev build --goal refactor_goal.txt --workflow {workflow['id']} --project-dir ./existing_project")
+                print(f"  DEPRECATED: Use --workflow iteration --completion-strategy smart --adaptive instead")
+                print(f"  Migration: The iteration workflow now includes all refactor patterns and more")
+            elif workflow['id'] == 'versioned':
+                print(f"  Usage: swarmdev build --goal goal.txt --workflow {workflow['id']} --target-version 2.0 --max-iterations 15")
+                print(f"  DEPRECATED: Use --workflow iteration --target-version 2.0 --completion-strategy version_driven instead")
+                print(f"  Migration: The iteration workflow now includes all versioned patterns and more")
             else:
-                print(f"  {workflow['description']}")
-        
-        print(f"\nUse --verbose for detailed descriptions and usage examples.")
-        print(f"Example: swarmdev workflows --verbose")
-        
-    except Exception as e:
-        logger.error(f"Error listing workflows: {e}")
-        print(f"Error: {e}")
+                print(f"  Usage: swarmdev build --goal goal.txt --workflow {workflow['id']}")
+    
+    if not args.show_deprecated:
+        print(f"\nUse --show-deprecated to see deprecated workflows.")
+    print(f"\nUse --verbose for detailed descriptions and usage examples.")
+    print(f"Example: swarmdev workflows --verbose")
 
 
 # Helper function to get all available status commands
@@ -1535,7 +1558,7 @@ def main():
     elif args.command == "status":
         cmd_status(args)
     elif args.command == "workflows":
-        cmd_workflows(args)
+        handle_workflows(args)
     elif args.command == "analyze-logs":
         cmd_analyze_logs(args)
     elif args.command == "blueprint":

@@ -259,11 +259,25 @@ class SwarmBuilder:
             workflow_type = self.config.get("workflow", "standard_project")
             max_iterations = self.config.get("max_iterations", 3)
             
-            # Get version parameters for versioned workflow
+            # Get enhanced iteration workflow parameters
             workflow_kwargs = {}
-            if workflow_type == "versioned":
+            if workflow_type == "iteration":
+                workflow_kwargs["target_version"] = self.config.get("target_version")
+                workflow_kwargs["completion_strategy"] = self.config.get("completion_strategy", "smart")
+                workflow_kwargs["adaptive"] = self.config.get("adaptive", True)
+            elif workflow_type == "versioned":
+                # Handle deprecated versioned workflow with migration
+                self.logger.warning("'versioned' workflow is deprecated. Migrating to enhanced 'iteration' workflow.")
+                workflow_type = "iteration"
                 workflow_kwargs["target_version"] = self.config.get("target_version", "1.0")
-                workflow_kwargs["current_version"] = self.config.get("current_version")
+                workflow_kwargs["completion_strategy"] = "version_driven"
+                workflow_kwargs["adaptive"] = self.config.get("adaptive", True)
+            elif workflow_type == "refactor":
+                # Handle deprecated refactor workflow with migration  
+                self.logger.warning("'refactor' workflow is deprecated. Migrating to enhanced 'iteration' workflow.")
+                workflow_type = "iteration"
+                workflow_kwargs["completion_strategy"] = "smart"
+                workflow_kwargs["adaptive"] = self.config.get("adaptive", True)
             
             # Get the workflow definition
             workflow = get_workflow_by_id(workflow_type, max_iterations, **workflow_kwargs)
@@ -274,7 +288,7 @@ class SwarmBuilder:
             # Register workflow with orchestrator
             self.orchestrator.register_workflow(workflow_type, workflow)
             
-            self.logger.info(f"Workflow '{workflow_type}' registered successfully")
+            self.logger.info(f"Workflow '{workflow_type}' registered successfully with params: {workflow_kwargs}")
             
         except Exception as e:
             self.logger.error(f"Failed to register workflow: {e}")
