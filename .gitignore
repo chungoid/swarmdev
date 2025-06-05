@@ -1,6 +1,7 @@
 /.env
 /.venv
 /datacenter_scraping
+/tmux-mcp
 /test_simple
 /swarmdev.log
 /src/swarmdev.egg-info
