@@ -281,182 +281,76 @@ class IndefiniteWorkflow(WorkflowDefinition):
 
 class IterationWorkflow(WorkflowDefinition):
     """
-    Ultimate iteration workflow combining the best patterns from refactor, versioned, and iteration workflows.
-    
-    Features:
-    - Handles new projects AND existing codebases
-    - Smart completion planning (no more "coat tails")  
-    - Dynamic iteration adjustment (no upfront guessing)
-    - Version-aware development with semantic targets
-    - Risk assessment and compatibility preservation
-    - Comprehensive project analysis with architecture focus
+    Enhanced iteration workflow with intelligent completion strategies and parameter-aware agents.
+    Handles both new projects and existing codebase improvements with smart stopping criteria.
     """
     
-    def __init__(self, 
-                 initial_iterations: int = 3,
-                 target_version: Optional[str] = None,
-                 adaptive: bool = True,
-                 completion_strategy: str = "smart"):
-        """
-        Initialize the ultimate iteration workflow.
-        
-        Args:
-            initial_iterations: Starting estimate for iterations (can be adjusted)
-            target_version: Optional semantic version target (e.g. "2.0", "1.5")
-            adaptive: Whether to dynamically adjust iteration count
-            completion_strategy: "smart" (assess readiness), "fixed" (respect initial_iterations), "version_driven"
-        """
-        description = f"Adaptive iteration workflow handling new/existing projects with smart completion planning"
-        if target_version:
-            description += f" targeting version {target_version}"
-        
+    def __init__(self):
+        """Initialize the enhanced iteration workflow."""
         super().__init__(
             workflow_id="iteration",
-            name="Ultimate Iteration Workflow",
-            description=description
+            name="Enhanced Iteration Workflow",
+            description="Advanced iteration workflow with smart completion strategies, parameter-aware agents, and file cleanup capabilities"
         )
         
-        self.initial_iterations = initial_iterations
-        self.target_version = target_version
-        self.adaptive = adaptive
-        self.completion_strategy = completion_strategy
-        
-        # PHASE 1: COMPREHENSIVE PROJECT DISCOVERY (borrowing from RefactorWorkflow + VersionedWorkflow)
+        # Add enhanced analysis task with cleanup capabilities
         self.add_initial_task(
-            task_id="project_discovery",
-            agent_type="analysis", 
+            task_id="enhanced_analysis",
+            agent_type="analysis",
             data={
                 "workflow_type": "iteration",
-                "iteration_count": 0,
-                "initial_iterations": initial_iterations,
-                "target_version": target_version,
-                "adaptive_planning": adaptive,
-                "completion_strategy": completion_strategy,
-                
-                # From RefactorWorkflow: existing project analysis
                 "analysis_depth": "comprehensive",
                 "focus_on_existing": True,
                 "analyze_architecture": True,
                 "identify_pain_points": True,
                 "detect_project_type": True,
-                
-                # From VersionedWorkflow: version analysis
-                "detect_current_version": target_version is not None,
-                "plan_version_roadmap": target_version is not None,
-                "assess_version_completion": target_version is not None,
-                
-                # NEW: Smart completion planning
-                "estimate_iteration_needs": True,
-                "assess_completion_scope": True,
-                "plan_completion_strategy": True
+                "cleanup_duplicates": True,  # NEW: Enable automatic duplicate cleanup
+                "auto_cleanup": False  # Require confirmation for cleanup by default
             }
         )
         
-        # PHASE 2: INTELLIGENT RESEARCH (borrowing RefactorWorkflow's research phase)
-        self.add_dependent_task(
-            task_id="strategic_research",
-            dependencies=["project_discovery"],
-            agent_type="research",
-            data={
-                # From RefactorWorkflow: comprehensive research
-                "research_type": "adaptive_strategy",
-                "use_analysis_results": True,
-                "focus_on_architecture": True,
-                "research_best_practices": True,
-                
-                # From VersionedWorkflow: version-aware research
-                "research_semantic_versioning": target_version is not None,
-                "identify_breaking_changes": target_version is not None,
-                
-                # NEW: Completion-focused research
-                "research_completion_patterns": True,
-                "identify_technical_debt": True
-            }
-        )
-        
-        # PHASE 3: STRATEGIC PLANNING (best of all workflows)
+        # Add strategic planning task
         self.add_dependent_task(
             task_id="strategic_planning",
-            dependencies=["strategic_research"],
+            dependencies=["enhanced_analysis"],
             agent_type="planning",
             data={
-                # From RefactorWorkflow: comprehensive planning
                 "planning_type": "strategic_iteration",
                 "use_analysis_results": True,
-                "use_research_results": True,
                 "preserve_functionality": True,
                 "plan_incremental_steps": True,
                 "risk_assessment": True,
-                
-                # From VersionedWorkflow: version planning
-                "scope_to_current_version": target_version is not None,
-                "plan_version_increment": target_version is not None,
-                "define_completion_criteria": True,
-                "create_version_blueprint": target_version is not None,
-                
-                # NEW: Adaptive iteration planning
-                "plan_iteration_roadmap": True,
-                "estimate_effort_distribution": True,
-                "plan_completion_sequence": True
+                "include_cleanup_plan": True  # NEW: Include file cleanup in planning
             }
         )
         
-        # PHASE 4: SMART IMPLEMENTATION (synthesis of all approaches)
+        # Add smart implementation task
         self.add_dependent_task(
-            task_id="strategic_implementation",
+            task_id="smart_implementation",
             dependencies=["strategic_planning"],
             agent_type="development",
             data={
-                # From RefactorWorkflow: safe implementation
-                "implementation_style": "adaptive",  # Can be "new_project", "refactor", or "incremental"
-                "preserve_existing": True,
-                "incremental_refactor": True,
+                "implementation_style": "adaptive",
+                "use_planning_results": True,
                 "maintain_compatibility": True,
-                "focus_on_improvements": True,
-                
-                # From VersionedWorkflow: version-aware implementation
-                "version_aware": target_version is not None,
-                "update_version_files": target_version is not None,
-                "maintain_backwards_compatibility": True,
-                "focus_on_version_goals": target_version is not None,
-                
-                # NEW: Completion-aware implementation
-                "use_analysis_results": True,
-                "use_research_results": True,
-                "implementation_prioritization": "completion_focused"
+                "optimize_for_maintainability": True,
+                "prefer_modification_over_creation": True,  # NEW: Prefer modifying existing files
+                "cleanup_obsolete_files": True  # NEW: Clean up files made obsolete by improvements
             }
         )
         
-        # PHASE 5: COMPLETION-AWARE EVALUATION (solving the "coat tails" problem)
+        # Add completion evaluation task
         self.add_dependent_task(
             task_id="completion_evaluation",
-            dependencies=["strategic_implementation"],
+            dependencies=["smart_implementation"],
             agent_type="analysis",
             data={
-                # From all workflows: comprehensive evaluation
-                "workflow_type": "iteration",
-                "analysis_depth": "completion_focused",
-                "check_continue": True,
-                "initial_iterations": initial_iterations,
-                "target_version": target_version,
-                "adaptive_planning": adaptive,
-                "completion_strategy": completion_strategy,
-                
-                # From RefactorWorkflow: improvement evaluation
                 "evaluate_improvements": True,
-                "assess_goal_completion": True,
-                
-                # From VersionedWorkflow: version evaluation
-                "check_version_complete": target_version is not None,
-                "check_target_reached": target_version is not None,
-                "plan_next_version": target_version is not None,
-                "evaluate_stopping_criteria": True,
-                
-                # NEW: Smart completion logic
                 "assess_completion_readiness": True,
                 "calculate_remaining_effort": True,
                 "determine_completion_mode": True,
-                "plan_final_iteration": True
+                "plan_final_iteration": True,
+                "final_cleanup_check": True  # NEW: Final cleanup verification
             }
         )
 
@@ -497,12 +391,7 @@ def get_workflow_by_id(workflow_id: str, max_iterations: int = 3, **kwargs) -> O
         "research_only": ResearchOnlyWorkflow(),
         "development_only": DevelopmentOnlyWorkflow(),
         "indefinite": IndefiniteWorkflow(),
-        "iteration": IterationWorkflow(
-            initial_iterations=max_iterations,
-            target_version=kwargs.get("target_version"),
-            adaptive=kwargs.get("adaptive", True),
-            completion_strategy=kwargs.get("completion_strategy", "smart")
-        ),
+        "iteration": IterationWorkflow(),
         # Legacy workflows removed - they now redirect to enhanced iteration workflow
     }
     
@@ -542,8 +431,8 @@ def list_available_workflows() -> List[Dict]:
         },
         {
             "id": "iteration",
-            "name": "Ultimate Iteration Workflow",
-            "description": "Adaptive iteration workflow handling new/existing projects with smart completion planning"
+            "name": "Enhanced Iteration Workflow",
+            "description": "Advanced iteration workflow with smart completion strategies, parameter-aware agents, and file cleanup capabilities"
         }
         # Deprecated workflows (refactor, versioned) are hidden from main listing but still work for backward compatibility
     ]
