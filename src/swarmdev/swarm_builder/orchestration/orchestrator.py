@@ -305,9 +305,22 @@ class Orchestrator:
                 )
                 
                 if all_completed:
+                    # Collect results from dependency tasks and add to context
+                    dependency_results = self._collect_dependency_results(dependencies)
+                    if dependency_results:
+                        dependent_context = dependent.get("context", {})
+                        dependent_context.update(dependency_results)
+                        dependent["context"] = dependent_context
+                        self.logger.info(f"Added dependency results to task {dependent_id}: {list(dependency_results.keys())}")
+                    
                     # All dependencies completed, mark as ready
                     dependent["status"] = "ready"
                     self.task_queue.append(dependent_id)
+        
+        # Check if this completed task should trigger workflow continuation
+        completed_task = self.tasks.get(task_id)
+        if completed_task:
+            self._check_workflow_continuation(completed_task)
     
     def _create_initial_tasks(self, workflow: Dict, execution_id: str, context: Dict):
         """
@@ -373,6 +386,42 @@ class Orchestrator:
             
             # Add to tasks
             self.tasks[task_id] = task
+    
+    def _collect_dependency_results(self, dependencies: List[str]) -> Dict:
+        """
+        Collect results from dependency tasks to pass to dependent tasks.
+        
+        Args:
+            dependencies: List of dependency task IDs
+            
+        Returns:
+            Dict: Collected results from dependencies
+        """
+        collected_results = {}
+        
+        for dep_task_id in dependencies:
+            dep_task = self.tasks.get(dep_task_id)
+            if not dep_task or dep_task.get("status") != "completed":
+                continue
+            
+            dep_result = dep_task.get("result", {})
+            dep_agent_type = dep_task.get("agent_type", "unknown")
+            
+            # Map agent results to expected context keys
+            if dep_agent_type == "analysis":
+                collected_results["analysis_results"] = dep_result
+            elif dep_agent_type == "research":
+                collected_results["research_results"] = dep_result
+            elif dep_agent_type == "planning":
+                collected_results["planning_results"] = dep_result
+            elif dep_agent_type == "development":
+                collected_results["development_results"] = dep_result
+            elif dep_agent_type == "documentation":
+                collected_results["documentation_results"] = dep_result
+            
+            self.logger.debug(f"Collected {dep_agent_type} results from task {dep_task_id}")
+        
+        return collected_results
     
     def _save_task_artifacts(self, task: Dict, result: Dict):
         """
@@ -686,54 +735,99 @@ class Orchestrator:
             task: Completed task information
         """
         try:
-            # Only check implementation tasks at the end of iteration cycles
-            if task.get("agent_type") != "development":
+            # Check analysis tasks with completion evaluation
+            if task.get("agent_type") == "analysis":
+                task_id = task.get("task_id", "")
+                
+                # Check if this is a completion evaluation task
+                if "completion_evaluation" in task_id:
+                    result = task.get("result", {})
+                    continuation_decision = result.get("continuation_decision", {})
+                    should_continue = continuation_decision.get("should_continue", False)
+                    
+                    self.logger.info(f"Analysis completion evaluation: should_continue={should_continue}, reason={continuation_decision.get('reason', 'No reason provided')}")
+                    
+                    if should_continue:
+                        execution_id = task.get("execution_id")
+                        workflow_id = task.get("workflow_id")
+                        context = task.get("context", {}).copy()  # Copy context to avoid mutation
+                        
+                        # Extract cycle information
+                        if "_cycle_" in execution_id:
+                            # This is already a cycle execution, extract the cycle number
+                            base_execution = execution_id.split('_cycle_')[0]
+                            current_cycle = int(execution_id.split('_cycle_')[1])
+                            next_iteration = current_cycle + 1
+                        else:
+                            # This is the initial execution, next will be cycle 1
+                            base_execution = execution_id
+                            next_iteration = 1
+                        
+                        # Check adaptive vs fixed iteration limits
+                        max_iterations = context.get("max_iterations")
+                        adaptive = context.get("adaptive", True)
+                        completion_strategy = context.get("completion_strategy", "smart")
+                        
+                        # Apply iteration limits based on strategy
+                        if not adaptive and max_iterations and next_iteration > max_iterations:
+                            self.logger.info(f"Non-adaptive mode: reached max iterations ({max_iterations}), stopping despite analysis suggesting continuation")
+                            return
+                        
+                        if completion_strategy == "smart" and adaptive:
+                            # Smart + adaptive: trust the analysis decision regardless of initial max_iterations
+                            self.logger.info(f"Smart adaptive mode: continuing to iteration {next_iteration} based on analysis decision")
+                        elif max_iterations and next_iteration > max_iterations * 2:
+                            # Safety limit: even in adaptive mode, don't exceed 2x the initial estimate
+                            self.logger.info(f"Safety limit reached: stopping at iteration {next_iteration} (2x initial estimate)")
+                            return
+                        
+                        # Get evolved goal from the analysis result
+                        evolved_goal = result.get("evolved_goal")
+                        if evolved_goal:
+                            context["goal"] = evolved_goal
+                            context["evolved_goal"] = evolved_goal
+                            self.logger.info(f"Updated context with evolved goal for iteration {next_iteration}")
+                        
+                        # Update iteration count in context
+                        context["iteration_count"] = next_iteration
+                        
+                        # Create new workflow execution cycle
+                        self._create_iteration_cycle(workflow_id, base_execution, context, next_iteration)
+                        
+                        self.logger.info(f"Started iteration cycle {next_iteration} for execution {base_execution}")
+                    else:
+                        self.logger.info(f"Analysis determined workflow is complete: {continuation_decision.get('reason', 'No reason provided')}")
+                
                 return
             
-            task_id = task.get("task_id", "")
-            
-            # Check if this is an implementation task that completes an iteration cycle
-            iteration_task_names = [
-                "improvement_implementation",
-                "strategic_implementation"  # New enhanced iteration workflow task name
-            ]
-            
-            if any(task_name in task_id for task_name in iteration_task_names):
-                execution_id = task.get("execution_id")
-                workflow_id = task.get("workflow_id")
-                context = task.get("context", {}).copy()  # Copy context to avoid mutation
+            # Legacy support: also check development tasks for backward compatibility
+            elif task.get("agent_type") == "development":
+                task_id = task.get("task_id", "")
                 
-                # Extract cycle information
-                if "_cycle_" in execution_id:
-                    # This is already a cycle execution, extract the cycle number
-                    base_execution = execution_id.split('_cycle_')[0]
-                    current_cycle = int(execution_id.split('_cycle_')[1])
-                    next_iteration = current_cycle + 1
-                else:
-                    # This is the initial execution, next will be cycle 1
-                    base_execution = execution_id
-                    next_iteration = 1
+                # Check if this is an implementation task that completes an iteration cycle
+                iteration_task_names = [
+                    "improvement_implementation",
+                    "strategic_implementation",  # Enhanced iteration workflow task name
+                    "smart_implementation"       # Standard iteration workflow task name
+                ]
                 
-                # Check if we should continue iterations
-                max_iterations = context.get("max_iterations")
-                if max_iterations and next_iteration > max_iterations:
-                    self.logger.info(f"Reached max iterations ({max_iterations}), stopping iteration cycles")
-                    return
-                
-                # Get evolved goal from the most recent analysis task in this execution family
-                evolved_goal = self._get_most_recent_evolved_goal(base_execution, execution_id)
-                if evolved_goal:
-                    context["goal"] = evolved_goal
-                    context["evolved_goal"] = evolved_goal
-                    self.logger.info(f"Updated context with evolved goal for iteration {next_iteration}")
-                
-                # Update iteration count in context
-                context["iteration_count"] = next_iteration
-                
-                # Create new workflow execution cycle
-                self._create_iteration_cycle(workflow_id, base_execution, context, next_iteration)
-                
-                self.logger.info(f"Started iteration cycle {next_iteration} for execution {base_execution}")
+                if any(task_name in task_id for task_name in iteration_task_names):
+                    # For development tasks, check if there's no analysis task to handle continuation
+                    execution_id = task.get("execution_id")
+                    
+                    # Look for completion_evaluation analysis task in same execution
+                    has_completion_analysis = any(
+                        t.get("execution_id") == execution_id and 
+                        t.get("agent_type") == "analysis" and 
+                        "completion_evaluation" in t.get("task_id", "")
+                        for t in self.tasks.values()
+                    )
+                    
+                    if not has_completion_analysis:
+                        # No analysis task found, fall back to legacy behavior
+                        self.logger.info("No completion evaluation analysis found, using legacy development-based continuation")
+                        # [Legacy logic would go here, but for now we'll just log and return]
+                        return
                 
         except Exception as e:
             self.logger.error(f"Error checking workflow continuation: {e}")

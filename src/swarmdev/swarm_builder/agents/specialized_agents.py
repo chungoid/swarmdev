@@ -7,6 +7,7 @@ import json
 import os
 from typing import Dict, List, Optional, Any
 from datetime import datetime
+from pathlib import Path
 
 from .base_agent import BaseAgent
 
@@ -858,58 +859,49 @@ class PlanningAgent(BaseAgent):
 class DevelopmentAgent(BaseAgent):
     """
     Development agent for implementing code and creating files.
-    Uses project investigation and LLM-driven development.
+    Uses planning results from PlanningAgent and implements using MCP filesystem tools.
     """
     
     def __init__(self, agent_id: str, agent_type: str, llm_provider=None, mcp_manager=None, config: Optional[Dict] = None):
         super().__init__(agent_id, agent_type, llm_provider, mcp_manager, config)
     
     def process_task(self, task: Dict) -> Dict:
-        """Process development tasks using project investigation and intelligent implementation."""
+        """Process development tasks by implementing the planning results."""
         try:
             self.status = "processing"
             goal = task.get("goal", "")
             context = task.get("context", {})
-            project_dir = context.get("project_dir")
-            
-            # NEW: Extract enhanced workflow parameters for file management
-            implementation_style = task.get("implementation_style", "adaptive")
-            use_planning_results = task.get("use_planning_results", False)
-            maintain_compatibility = task.get("maintain_compatibility", True)
-            optimize_for_maintainability = task.get("optimize_for_maintainability", True)
-            prefer_modification_over_creation = task.get("prefer_modification_over_creation", True)
-            cleanup_obsolete_files = task.get("cleanup_obsolete_files", False)
+            project_dir = context.get("project_dir", ".")
             
             self.logger.info(f"DEVELOPMENT: Implementing goal: {goal[:100]}...")
-            self.logger.info(f"Implementation style: {implementation_style}, Prefer modification: {prefer_modification_over_creation}")
             
-            # Analyze existing files to understand modification opportunities
-            existing_files_analysis = {}
-            if project_dir and prefer_modification_over_creation:
-                existing_files_analysis = self._analyze_existing_files_for_modification(project_dir, goal)
+            # Get results from previous agents in the workflow
+            planning_results = context.get("planning_results", {})
+            research_results = context.get("research_results", {})
+            analysis_results = context.get("analysis_results", {})
             
-            # Investigate project before implementation
-            project_analysis = self._investigate_project_for_development(project_dir) if project_dir else {}
+            # Extract task breakdown from planning results
+            task_breakdown = planning_results.get("task_breakdown", [])
+            execution_strategy = planning_results.get("execution_strategy", {})
             
-            # Enhanced planning with file management awareness
-            implementation_plan = self._plan_implementation_enhanced(
-                goal, context, project_analysis, existing_files_analysis,
-                implementation_style, prefer_modification_over_creation
-            )
+            if not task_breakdown:
+                raise Exception("No task breakdown from planning results - DevelopmentAgent requires planning from PlanningAgent")
             
-            # Generate code and files with enhanced file management
-            implementation_results = self._implement_solution_enhanced(
-                implementation_plan, project_dir, prefer_modification_over_creation, cleanup_obsolete_files
+            self.logger.info(f"Implementing {len(task_breakdown)} tasks from planning results")
+            
+            # Implement the planned tasks directly using MCP tools
+            implementation_results = self._implement_planned_tasks(
+                task_breakdown, project_dir, goal, planning_results, research_results
             )
             
             self.status = "completed"
             return {
                 "status": "success",
                 "agent_type": self.agent_type,
-                "project_analysis": project_analysis,
-                "implementation_plan": implementation_plan,
-                "implementation_results": implementation_results,
-                "existing_files_analysis": existing_files_analysis,
+                "files_created": implementation_results["files_created"],
+                "files_modified": implementation_results["files_modified"],
+                "implementation_summary": implementation_results["summary"],
+                "tasks_completed": len(task_breakdown),
                 "timestamp": datetime.now().isoformat()
             }
             
@@ -917,399 +909,283 @@ class DevelopmentAgent(BaseAgent):
             self.logger.error(f"DEVELOPMENT: Failed to process task: {e}")
             return self.handle_error(e, task)
     
-    def _investigate_project_for_development(self, project_dir: str) -> Dict:
-        """Investigate project specifically for development context."""
-        try:
-            project_path = self.investigate_project(project_dir)
+    def _implement_planned_tasks(self, task_breakdown: List[Dict], project_dir: str, 
+                               goal: str, planning_results: Dict, research_results: Dict) -> Dict:
+        """Implement the planned tasks directly using MCP filesystem tools."""
+        files_created = []
+        files_modified = []
+        implementation_summary = []
+        
+        self.logger.info(f"Starting implementation of {len(task_breakdown)} tasks")
+        
+        for i, task in enumerate(task_breakdown):
+            task_name = task.get("task", f"Task {i+1}")
+            task_type = task.get("type", "development")
             
-            if self.llm_provider:
-                dev_investigation_prompt = f"""
-                Investigate this project for development planning:
-                
-                PROJECT DIRECTORY: {project_path}
-                
-                Focus on:
-                1. Existing code structure and patterns
-                2. Technologies, frameworks, and dependencies
-                3. File organization and naming conventions
-                4. Integration points and architecture
-                5. Development environment and tooling
-                
-                Provide insights relevant to implementing new functionality.
-                """
-                
-                analysis = self.llm_provider.generate_text(dev_investigation_prompt, temperature=0.2)
-                return {"analysis": analysis, "project_dir": project_path}
-                
-        except Exception as e:
-            self.logger.warning(f"Development investigation failed: {e}")
-            
-        return {"analysis": "No project analysis available", "project_dir": project_dir}
-    
-    def _analyze_existing_files_for_modification(self, project_dir: str, goal: str) -> Dict:
-        """Analyze existing files to understand modification opportunities instead of creating duplicates."""
-        try:
-            # Use filesystem MCP tool to get file list
-            result = self.call_mcp_tool("filesystem", "list_files", {
-                "path": project_dir,
-                "recursive": True,
-                "include_hidden": False
-            })
-            
-            if not result.get("success"):
-                return {"modifiable_files": [], "analysis": "Failed to analyze existing files"}
-            
-            files = result.get("files", [])
-            
-            # Filter for code files that might be relevant to the goal
-            code_files = [f for f in files if f.endswith(('.py', '.js', '.ts', '.java', '.cpp', '.h', '.go', '.rs'))]
-            
-            if not code_files or not self.llm_provider:
-                return {"modifiable_files": [], "analysis": "No code files found or no LLM provider"}
-            
-            # Analyze files for modification potential
-            analysis_prompt = f"""
-            Analyze these existing files to understand which could be modified instead of creating new ones:
-            
-            GOAL: {goal}
-            EXISTING FILES: {', '.join(code_files[:20])}  # Limit to avoid token overflow
-            
-            For each relevant file, assess:
-            1. Whether it could be extended/modified to support the goal
-            2. Risk level of modification (low/medium/high)
-            3. What specific modifications would be needed
-            4. Whether creating a new file would be better
-            
-            Focus on identifying files that could be safely enhanced rather than duplicated.
-            Return analysis focusing on modification opportunities.
-            """
-            
-            analysis = self.llm_provider.generate_text(analysis_prompt, temperature=0.2)
-            
-            # Extract modifiable files from analysis
-            modifiable_files = self._extract_modifiable_files_from_analysis(analysis, code_files)
-            
-            return {
-                "modifiable_files": modifiable_files,
-                "total_files": len(code_files),
-                "analysis": analysis
-            }
-            
-        except Exception as e:
-            self.logger.error(f"Error analyzing existing files: {e}")
-            return {"modifiable_files": [], "analysis": f"Analysis error: {e}"}
-    
-    def _extract_modifiable_files_from_analysis(self, analysis: str, code_files: List[str]) -> List[Dict]:
-        """Extract modifiable files information from LLM analysis."""
-        modifiable = []
-        
-        # Simple extraction based on file mentions in analysis
-        for file_path in code_files:
-            filename = os.path.basename(file_path)
-            if filename in analysis and ("modify" in analysis.lower() or "extend" in analysis.lower()):
-                modifiable.append({
-                    "file": file_path,
-                    "confidence": "medium",  # Could be enhanced with better parsing
-                    "reason": "Mentioned in modification analysis"
-                })
-        
-        return modifiable[:5]  # Limit to avoid overwhelming the system
-    
-    def _plan_implementation_enhanced(self, goal: str, context: Dict, project_analysis: Dict, 
-                                    existing_files_analysis: Dict, implementation_style: str,
-                                    prefer_modification: bool) -> Dict:
-        """Enhanced implementation planning with file management awareness."""
-        enhanced_context = {
-            "goal": goal,
-            "context": context,
-            "project_analysis": project_analysis,
-            "existing_files_analysis": existing_files_analysis,
-            "implementation_style": implementation_style,
-            "prefer_modification": prefer_modification
-        }
-        
-        result = self.execute_enhanced_task(
-            task_description="Plan implementation approach with awareness of existing files and preference for modification over creation",
-            context=enhanced_context,
-            fallback_method=self._basic_implementation_planning_enhanced
-        )
-        
-        # Process result for backward compatibility
-        if result.get("status") == "success":
-            plan_content = result.get("result", "Enhanced implementation plan completed")
-            
-            # Extract files with modification/creation decisions
-            file_decisions = self._extract_file_decisions_from_plan(plan_content, existing_files_analysis)
-            
-            return {
-                "approach": plan_content,
-                "file_decisions": file_decisions,
-                "method": result.get("method", "enhanced"),
-                "tools_used": result.get("tools_used", []),
-                "prefer_modification": prefer_modification
-            }
-        else:
-            return {
-                "approach": "Enhanced implementation planning failed", 
-                "file_decisions": [],
-                "prefer_modification": prefer_modification
-            }
-    
-    def _basic_implementation_planning_enhanced(self, task_description: str, context: Dict) -> Dict:
-        """Enhanced fallback planning with file management awareness."""
-        goal = context.get("goal", "")
-        dev_context = context.get("context", {})
-        project_analysis = context.get("project_analysis", {})
-        existing_files_analysis = context.get("existing_files_analysis", {})
-        prefer_modification = context.get("prefer_modification", True)
-        
-        if not self.llm_provider:
-            return {
-                "status": "error",
-                "result": "Enhanced implementation planning requires LLM provider"
-            }
-        
-        modifiable_files = existing_files_analysis.get("modifiable_files", [])
-        
-        planning_prompt = f"""
-        Plan the implementation for this development goal with file management awareness:
-        
-        GOAL: {goal}
-        CONTEXT: {dev_context}
-        PROJECT ANALYSIS: {project_analysis.get('analysis', 'None')}
-        
-        EXISTING FILES ANALYSIS:
-        Modifiable files: {', '.join([f['file'] for f in modifiable_files])}
-        Total existing files: {existing_files_analysis.get('total_files', 0)}
-        
-        FILE MANAGEMENT STRATEGY: {"Prefer modifying existing files over creating new ones" if prefer_modification else "Create new files as needed"}
-        
-        Plan with these priorities:
-        1. MODIFICATION FIRST: Check if existing files can be enhanced instead of creating new ones
-        2. AVOID DUPLICATION: Don't create files with similar names to existing ones (e.g., avoid base.py if base_agent.py exists)
-        3. CONSOLIDATION: Consider consolidating functionality into existing files where appropriate
-        4. CLEAN ARCHITECTURE: Ensure file organization makes sense
-        
-        For each file needed:
-        - Specify whether to MODIFY existing file or CREATE new file
-        - If creating new, explain why modification wasn't suitable
-        - If modifying, specify what changes are needed
-        - Avoid names that duplicate existing functionality
-        
-        Focus on practical, implementable solutions that minimize file duplication.
-        """
-        
-        try:
-            plan = self.llm_provider.generate_text(planning_prompt, temperature=0.3)
-            return {
-                "status": "success",
-                "method": "enhanced_llm",
-                "result": plan,
-                "tools_used": []
-            }
-        except Exception as e:
-            return {
-                "status": "error",
-                "result": f"Enhanced implementation planning failed: {e}"
-            }
-    
-    def _extract_file_decisions_from_plan(self, plan: str, existing_files_analysis: Dict) -> List[Dict]:
-        """Extract file modification/creation decisions from the enhanced plan."""
-        if not self.llm_provider:
-            return []
-        
-        extraction_prompt = f"""
-        From this implementation plan, extract the file decisions in JSON format:
-        
-        PLAN: {plan[:1500]}...
-        
-        Return a JSON array of objects with this structure:
-        [
-            {
-                "file": "path/to/file.py",
-                "action": "modify" or "create",
-                "reason": "brief explanation",
-                "priority": "high/medium/low"
-            }
-        ]
-        
-        Only return valid JSON. Focus on files explicitly mentioned in the plan.
-        """
-        
-        try:
-            response = self.llm_provider.generate_text(extraction_prompt, temperature=0.1)
-            # Try to parse JSON from response
-            import json
-            
-            # Clean response in case there are markdown artifacts
-            cleaned_response = response.strip()
-            if cleaned_response.startswith('```json'):
-                cleaned_response = cleaned_response[7:]
-            if cleaned_response.endswith('```'):
-                cleaned_response = cleaned_response[:-3]
-            
-            file_decisions = json.loads(cleaned_response.strip())
-            return file_decisions if isinstance(file_decisions, list) else []
-            
-        except Exception as e:
-            self.logger.warning(f"Could not extract file decisions: {e}")
-            return []
-    
-    def _implement_solution_enhanced(self, implementation_plan: Dict, project_dir: str, 
-                                   prefer_modification: bool, cleanup_obsolete: bool) -> Dict:
-        """Enhanced solution implementation with file management capabilities."""
-        if not self.llm_provider:
-            return {"status": "error", "message": "No LLM provider for implementation"}
-        
-        results = {
-            "files_created": [],
-            "files_modified": [],
-            "files_removed": [],
-            "code_generated": {},
-            "errors": [],
-            "cleanup_performed": cleanup_obsolete
-        }
-        
-        file_decisions = implementation_plan.get("file_decisions", [])
-        approach = implementation_plan.get("approach", "")
-        
-        # Process file decisions with modification preferences
-        for decision in file_decisions:
-            file_path = decision.get("file", "")
-            action = decision.get("action", "create")
-            reason = decision.get("reason", "")
+            self.logger.info(f"Implementing task {i+1}/{len(task_breakdown)}: {task_name}")
             
             try:
-                if action == "modify" and prefer_modification:
-                    self._modify_existing_file(file_path, approach, reason, project_dir, results)
-                else:
-                    self._create_new_file(file_path, approach, reason, project_dir, results)
-                    
+                # Generate implementation for this specific task
+                task_result = self._implement_single_task(task, project_dir, goal, planning_results)
+                
+                files_created.extend(task_result.get("files_created", []))
+                files_modified.extend(task_result.get("files_modified", []))
+                implementation_summary.append({
+                    "task": task_name,
+                    "status": "completed",
+                    "files": task_result.get("files_created", []) + task_result.get("files_modified", [])
+                })
+                
             except Exception as e:
-                error_msg = f"Failed to {action} {file_path}: {e}"
-                self.logger.error(error_msg)
-                results["errors"].append(error_msg)
+                self.logger.error(f"Failed to implement task '{task_name}': {e}")
+                implementation_summary.append({
+                    "task": task_name,
+                    "status": "failed",
+                    "error": str(e)
+                })
         
-        # Cleanup obsolete files if requested
-        if cleanup_obsolete and project_dir:
-            cleanup_results = self._cleanup_obsolete_files(project_dir, results)
-            results["files_removed"].extend(cleanup_results.get("removed", []))
-            results["errors"].extend(cleanup_results.get("errors", []))
+        self.logger.info(f"Implementation complete: {len(files_created)} files created, {len(files_modified)} files modified")
         
-        results["status"] = "success" if (results["files_created"] or results["files_modified"]) else "partial"
-        return results
+        return {
+            "files_created": files_created,
+            "files_modified": files_modified,
+            "summary": implementation_summary
+        }
     
-    def _modify_existing_file(self, file_path: str, approach: str, reason: str, project_dir: str, results: Dict):
-        """Modify an existing file instead of creating a new one."""
-        if not project_dir:
-            raise Exception("No project directory specified")
+    def _implement_single_task(self, task: Dict, project_dir: str, goal: str, planning_results: Dict) -> Dict:
+        """Implement a single task from the task breakdown."""
+        task_name = task.get("task", "")
+        task_type = task.get("type", "development")
         
-        full_file_path = os.path.join(project_dir, file_path)
+        # Determine file path and content based on task
+        file_info = self._determine_file_for_task(task, project_dir, goal)
         
-        if not os.path.exists(full_file_path):
-            # File doesn't exist, fall back to creation
-            self._create_new_file(file_path, approach, reason, project_dir, results)
-            return
+        if not file_info:
+            return {"files_created": [], "files_modified": []}
         
-        # Read existing file content
-        with open(full_file_path, 'r', encoding='utf-8') as f:
-            existing_content = f.read()
+        file_path = file_info["path"]
+        file_content = file_info["content"]
+        action = file_info["action"]  # "create" or "modify"
         
-        # Generate modifications using LLM
-        modification_prompt = f"""
-        Modify this existing file to support the implementation approach:
+        # Convert to workspace path for MCP filesystem
+        workspace_file_path = self._to_workspace_path(file_path)
         
-        FILE PATH: {file_path}
-        EXISTING CONTENT:
-        {existing_content}
+        # Ensure directory exists (create recursively if needed)
+        dir_path = os.path.dirname(workspace_file_path)
+        if dir_path and dir_path != "." and dir_path != "/workspace":
+            self._create_directory_recursive(dir_path)
         
-        IMPLEMENTATION APPROACH: {approach}
-        MODIFICATION REASON: {reason}
+        # Write the file
+        write_result = self.call_mcp_tool("filesystem", "write_file", {
+            "path": workspace_file_path,
+            "content": file_content
+        })
         
-        Generate the complete modified file content that:
-        1. Preserves existing functionality where possible
-        2. Adds new functionality as needed
-        3. Maintains code style and structure
-        4. Includes proper imports and error handling
-        5. Is production-ready and well-structured
+        if not self._is_mcp_error(write_result):
+            self.logger.info(f"Successfully {action}d file: {file_path}")
+            if action == "create":
+                return {"files_created": [file_path], "files_modified": []}
+            else:
+                return {"files_created": [], "files_modified": [file_path]}
+        else:
+            error_msg = self._extract_mcp_error(write_result)
+            raise Exception(f"Failed to write file {file_path}: {error_msg}")
+    
+    def _to_workspace_path(self, file_path: str) -> str:
+        """Convert a relative or absolute path to a workspace path for MCP filesystem."""
+        # If already a workspace path, return as-is
+        if file_path.startswith("/workspace/"):
+            return file_path
         
-        IMPORTANT: Return ONLY the complete modified file content without any markdown formatting or explanations.
+        # If absolute path, make it relative to workspace
+        if os.path.isabs(file_path):
+            # Convert absolute path to relative from current directory
+            try:
+                file_path = os.path.relpath(file_path, os.getcwd())
+            except ValueError:
+                # If paths are on different drives (Windows), use basename
+                file_path = os.path.basename(file_path)
+        
+        # Remove leading ./ if present
+        if file_path.startswith("./"):
+            file_path = file_path[2:]
+        
+        # Prepend /workspace/
+        return f"/workspace/{file_path}"
+    
+    def _is_mcp_error(self, mcp_result: Dict) -> bool:
+        """Check if an MCP result indicates an error."""
+        # Check for direct error key
+        if mcp_result.get("error"):
+            return True
+        
+        # Check for result.isError pattern
+        result = mcp_result.get("result", {})
+        if isinstance(result, dict) and result.get("isError", False):
+            return True
+        
+        # If no result key at all, consider it an error
+        if "result" not in mcp_result:
+            return True
+        
+        return False
+    
+    def _extract_mcp_error(self, mcp_result: Dict) -> str:
+        """Extract error message from MCP result."""
+        # Check for direct error
+        if mcp_result.get("error"):
+            return str(mcp_result["error"])
+        
+        # Check for result.content error pattern
+        result = mcp_result.get("result", {})
+        if isinstance(result, dict) and "content" in result:
+            content = result["content"]
+            if isinstance(content, list) and len(content) > 0:
+                first_content = content[0]
+                if isinstance(first_content, dict) and "text" in first_content:
+                    return first_content["text"]
+        
+        # Fallback
+        return "Unknown MCP error"
+    
+    def _determine_file_for_task(self, task: Dict, project_dir: str, goal: str) -> Optional[Dict]:
+        """Determine what file to create/modify for a given task."""
+        if not self.llm_provider:
+            return None
+        
+        task_name = task.get("task", "")
+        task_type = task.get("type", "development")
+        
+        # Generate file content and path
+        file_prompt = f"""
+        Determine the file to create for this development task:
+        
+        TASK: {task_name}
+        TASK TYPE: {task_type}
+        GOAL: {goal}
+        PROJECT DIRECTORY: {project_dir}
+        
+        Create a single file for this task. Respond with EXACTLY this format:
+        
+        FILE_PATH: relative/path/to/file.py
+        ACTION: create
+        CONTENT:
+        [actual file content here - RAW CODE ONLY, NO MARKDOWN FORMATTING]
+        
+        Rules:
+        - Use appropriate file extensions (.py, .js, .md, etc.)
+        - Place files in logical directories (src/, tests/, docs/, etc.)
+        - Generate complete, functional code
+        - Include necessary imports and proper structure
+        - Make the code production-ready
+        - DO NOT use markdown code fences (```) in the file content
+        - DO NOT include language identifiers like ```python
+        - Provide ONLY the raw file content after CONTENT:
+        
+        Focus on implementing the specific task functionality.
         """
-        
-        modified_content = self.llm_provider.generate_text(modification_prompt, temperature=0.2)
-        
-        # Clean up any markdown artifacts
-        cleaned_content = self._clean_generated_code(modified_content)
-        
-        # Write modified content
-        with open(full_file_path, 'w', encoding='utf-8') as f:
-            f.write(cleaned_content)
-        
-        results["code_generated"][file_path] = cleaned_content
-        results["files_modified"].append(file_path)
-        self.logger.info(f"Modified existing file: {file_path}")
-    
-    def _create_new_file(self, file_path: str, approach: str, reason: str, project_dir: str, results: Dict):
-        """Create a new file (fallback from modification or explicit creation)."""
-        # Use existing implementation
-        self._write_file_to_disk(file_path, self._generate_file_content(file_path, approach, reason), project_dir, results)
-    
-    def _generate_file_content(self, file_path: str, approach: str, reason: str) -> str:
-        """Generate content for a new file."""
-        if file_path == '__init__.py' or file_path.endswith('/__init__.py'):
-            return self._generate_init_file_content(file_path, approach)
-        
-        content_prompt = f"""
-        Generate code for this new file:
-        
-        FILE PATH: {file_path}
-        IMPLEMENTATION APPROACH: {approach}
-        CREATION REASON: {reason}
-        
-        Generate complete, functional code that:
-        1. Implements the planned functionality
-        2. Follows best practices for the detected technology
-        3. Integrates well with the existing project structure
-        4. Includes appropriate imports, error handling, and documentation
-        5. Is production-ready and well-structured
-        
-        IMPORTANT: Return ONLY the raw code content without any markdown formatting or explanations.
-        """
-        
-        generated_code = self.llm_provider.generate_text(content_prompt, temperature=0.2)
-        return self._clean_generated_code(generated_code)
-    
-    def _cleanup_obsolete_files(self, project_dir: str, current_results: Dict) -> Dict:
-        """Clean up files that may have been made obsolete by the current implementation."""
-        cleanup_results = {"removed": [], "errors": []}
         
         try:
-            # Get list of files that were just created/modified
-            active_files = set(current_results["files_created"] + current_results["files_modified"])
-            
-            # Use the base agent's cleanup capabilities
-            duplicate_analysis = self.analyze_file_duplicates(project_dir)
-            
-            if duplicate_analysis.get("potential_duplicates", 0) > 0:
-                # Only auto-remove obvious duplicates, be conservative
-                cleanup_result = self.cleanup_duplicate_files(
-                    project_dir, 
-                    duplicate_analysis, 
-                    auto_confirm=True  # Only removes obvious patterns like _old, _backup, etc.
-                )
-                
-                cleanup_results["removed"].extend(cleanup_result.get("removed", []))
-                cleanup_results["errors"].extend(cleanup_result.get("errors", []))
-                
-                if cleanup_result.get("removed"):
-                    self.logger.info(f"Cleaned up {len(cleanup_result['removed'])} obsolete files")
-        
+            response = self.llm_provider.generate_text(file_prompt, temperature=0.2)
+            return self._parse_file_response(response, project_dir)
         except Exception as e:
-            self.logger.error(f"Error during cleanup: {e}")
-            cleanup_results["errors"].append(f"Cleanup error: {e}")
+            self.logger.error(f"Failed to determine file for task '{task_name}': {e}")
+            return None
+    
+    def _parse_file_response(self, response: str, project_dir: str) -> Optional[Dict]:
+        """Parse the LLM response to extract file information."""
+        lines = response.strip().split('\n')
         
-        return cleanup_results
-
+        file_path = None
+        action = "create"
+        content_start = -1
+        
+        for i, line in enumerate(lines):
+            if line.startswith("FILE_PATH:"):
+                file_path = line.replace("FILE_PATH:", "").strip()
+            elif line.startswith("ACTION:"):
+                action = line.replace("ACTION:", "").strip()
+            elif line.startswith("CONTENT:"):
+                content_start = i + 1
+                break
+        
+        if not file_path or content_start == -1:
+            return None
+        
+        # Extract content
+        content_lines = lines[content_start:]
+        content = '\n'.join(content_lines).strip()
+        
+        # Clean up any markdown formatting that might have slipped through
+        content = self._clean_file_content(content)
+        
+        # Make path absolute if relative
+        if not os.path.isabs(file_path):
+            if project_dir == "." or project_dir.startswith("./"):
+                full_path = file_path
+            else:
+                full_path = os.path.join(project_dir, file_path)
+        else:
+            full_path = file_path
+        
+        return {
+            "path": full_path,
+            "content": content,
+            "action": action
+        }
+    
+    def _clean_file_content(self, content: str) -> str:
+        """Clean file content by removing markdown formatting and other artifacts."""
+        lines = content.split('\n')
+        cleaned_lines = []
+        
+        for line in lines:
+            # Skip markdown code fence lines
+            if line.strip().startswith('```') and (
+                line.strip() == '```' or 
+                line.strip().startswith('```python') or
+                line.strip().startswith('```javascript') or
+                line.strip().startswith('```json') or
+                line.strip().startswith('```yaml') or
+                line.strip().startswith('```markdown') or
+                line.strip().startswith('```bash') or
+                line.strip().startswith('```sh')
+            ):
+                continue
+            
+            cleaned_lines.append(line)
+        
+        return '\n'.join(cleaned_lines).strip()
+    
+    def _create_directory_recursive(self, dir_path: str) -> None:
+        """Create directory recursively, ensuring all parent directories exist."""
+        # Normalize the path
+        dir_path = dir_path.rstrip('/')
+        
+        # Skip if it's the workspace root
+        if dir_path == "/workspace" or dir_path == "":
+            return
+            
+        # Check if directory already exists
+        check_result = self.call_mcp_tool("filesystem", "list_files", {"path": dir_path})
+        if not self._is_mcp_error(check_result):
+            # Directory exists, we're done
+            return
+            
+        # Get parent directory
+        parent_dir = os.path.dirname(dir_path)
+        
+        # Recursively create parent if needed
+        if parent_dir and parent_dir != "/workspace" and parent_dir != dir_path:
+            self._create_directory_recursive(parent_dir)
+        
+        # Now create this directory
+        create_result = self.call_mcp_tool("filesystem", "create_directory", {"path": dir_path})
+        if self._is_mcp_error(create_result):
+            error_msg = self._extract_mcp_error(create_result)
+            raise Exception(f"Failed to create directory {dir_path}: {error_msg}")
+        
+        self.logger.debug(f"Created directory: {dir_path}")
 
 class DocumentationAgent(BaseAgent):
     """
@@ -1537,8 +1413,10 @@ class AnalysisAgent(BaseAgent):
             task_data = task.get("data", {})
             analysis_depth = task_data.get("analysis_depth", "standard")
             workflow_type = task_data.get("workflow_type", "unknown")
-            iteration_count = task_data.get("iteration_count", 0)
-            max_iterations = task_data.get("max_iterations")
+            
+            # Check both locations for iteration_count (orchestrator puts it directly on task, workflow puts it in data)
+            iteration_count = task.get("iteration_count", task_data.get("iteration_count", 0))
+            max_iterations = task.get("initial_iterations", task_data.get("max_iterations"))
             
             # Perform comprehensive project analysis
             project_state = self._analyze_project_state_enhanced(project_dir, analysis_depth) if project_dir else {}
@@ -1590,6 +1468,10 @@ class AnalysisAgent(BaseAgent):
             
             if result.get("status") == "success":
                 analysis = result.get("result", {})
+                
+                # Ensure analysis is a dict, not a string
+                if isinstance(analysis, str):
+                    analysis = {"comprehensive_analysis": analysis}
                 
                 # Add file structure analysis
                 analysis["file_analysis"] = self._analyze_file_structure(project_path)
@@ -1796,13 +1678,18 @@ class AnalysisAgent(BaseAgent):
         should_continue = False
         reason = ""
         
+        self.logger.info(f"Determining continuation: workflow_type={workflow_type}, iteration_count={iteration_count}, max_iterations={max_iterations}")
+        
         # Check max iterations limit
         if max_iterations is not None and iteration_count >= max_iterations:
             reason = f"Maximum iterations ({max_iterations}) reached"
+            self.logger.info(f"Stopping: {reason}")
         else:
             # Check if there are meaningful improvements to make
             improvements = improvement_analysis.get("improvements", [])
             high_priority = improvement_analysis.get("high_priority", 0)
+            
+            self.logger.info(f"Found {len(improvements)} improvements, {high_priority} high-priority")
             
             if workflow_type == "indefinite":
                 should_continue = len(improvements) > 0
@@ -1813,6 +1700,8 @@ class AnalysisAgent(BaseAgent):
             else:
                 should_continue = len(improvements) > 0
                 reason = f"Found {len(improvements)} improvements for {workflow_type} workflow"
+            
+            self.logger.info(f"Continuation decision: should_continue={should_continue}, reason={reason}")
         
         return {
             "should_continue": should_continue,

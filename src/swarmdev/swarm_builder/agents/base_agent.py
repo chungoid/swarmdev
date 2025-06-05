@@ -607,5 +607,21 @@ class BaseAgent(ABC):
         self.logger.info("=== END MCP USAGE SUMMARY ===")
 
 
-    
 
+    def _clean_generated_code(self, code: str) -> str:
+        """Clean generated code by removing markdown artifacts and extra formatting."""
+        # Remove markdown code blocks
+        if code.startswith('```'):
+            lines = code.split('\n')
+            # Remove first line if it's markdown (e.g., ```python)
+            if lines[0].startswith('```'):
+                lines = lines[1:]
+            # Remove last line if it's markdown closing
+            if lines and lines[-1].strip() == '```':
+                lines = lines[:-1]
+            code = '\n'.join(lines)
+        
+        # Remove extra leading/trailing whitespace
+        code = code.strip()
+        
+        return code
