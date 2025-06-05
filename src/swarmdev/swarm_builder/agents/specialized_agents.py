@@ -1284,8 +1284,31 @@ class DevelopmentAgent(BaseAgent):
         cleanup_results = {"removed": [], "errors": []}
         
         try:
-            self.logger.error(f"Goal evolution failed: {e}")
-            return original_goal
+            # Get list of files that were just created/modified
+            active_files = set(current_results["files_created"] + current_results["files_modified"])
+            
+            # Use the base agent's cleanup capabilities
+            duplicate_analysis = self.analyze_file_duplicates(project_dir)
+            
+            if duplicate_analysis.get("potential_duplicates", 0) > 0:
+                # Only auto-remove obvious duplicates, be conservative
+                cleanup_result = self.cleanup_duplicate_files(
+                    project_dir, 
+                    duplicate_analysis, 
+                    auto_confirm=True  # Only removes obvious patterns like _old, _backup, etc.
+                )
+                
+                cleanup_results["removed"].extend(cleanup_result.get("removed", []))
+                cleanup_results["errors"].extend(cleanup_result.get("errors", []))
+                
+                if cleanup_result.get("removed"):
+                    self.logger.info(f"Cleaned up {len(cleanup_result['removed'])} obsolete files")
+        
+        except Exception as e:
+            self.logger.error(f"Error during cleanup: {e}")
+            cleanup_results["errors"].append(f"Cleanup error: {e}")
+        
+        return cleanup_results
 
 
 class DocumentationAgent(BaseAgent):
@@ -1488,4 +1511,346 @@ class DocumentationAgent(BaseAgent):
             
         except Exception as e:
             self.logger.error(f"Documentation structure planning failed: {e}")
-            return {"structure_plan": "Standard docs structure", "recommended_files": ["README.md"]} 
+            return {"structure_plan": "Standard docs structure", "recommended_files": ["README.md"]}
+
+
+class AnalysisAgent(BaseAgent):
+    """
+    Analysis agent for project state analysis and improvement recommendations.
+    Central to iteration workflows and continuous improvement processes.
+    """
+    
+    def __init__(self, agent_id: str, agent_type: str, llm_provider=None, mcp_manager=None, config: Optional[Dict] = None):
+        super().__init__(agent_id, agent_type, llm_provider, mcp_manager, config)
+    
+    def process_task(self, task: Dict) -> Dict:
+        """Process analysis tasks."""
+        try:
+            self.status = "processing"
+            goal = task.get("goal", "")
+            context = task.get("context", {})
+            project_dir = context.get("project_dir")
+            
+            self.logger.info(f"ANALYSIS: Analyzing project for goal: {goal[:100]}...")
+            
+            # Get task-specific parameters
+            task_data = task.get("data", {})
+            analysis_depth = task_data.get("analysis_depth", "standard")
+            workflow_type = task_data.get("workflow_type", "unknown")
+            iteration_count = task_data.get("iteration_count", 0)
+            max_iterations = task_data.get("max_iterations")
+            
+            # Perform comprehensive project analysis
+            project_state = self._analyze_project_state_enhanced(project_dir, analysis_depth) if project_dir else {}
+            
+            # Analyze file duplicates as part of project health
+            duplicate_analysis = self.analyze_file_duplicates(project_dir) if project_dir else {}
+            
+            # Generate improvement analysis
+            improvement_analysis = self._analyze_improvements(goal, context, project_state, duplicate_analysis)
+            
+            # Determine if workflow should continue (for iteration workflows)
+            continuation_decision = self._determine_continuation(
+                workflow_type, iteration_count, max_iterations, improvement_analysis
+            )
+            
+            # Generate evolved goal if continuing
+            evolved_goal = None
+            if continuation_decision.get("should_continue", False):
+                evolved_goal = self._evolve_goal(goal, improvement_analysis, iteration_count)
+            
+            self.status = "completed"
+            return {
+                "status": "success",
+                "agent_type": self.agent_type,
+                "project_state": project_state,
+                "duplicate_analysis": duplicate_analysis,
+                "improvement_analysis": improvement_analysis,
+                "improvements_suggested": improvement_analysis.get("improvements", []),
+                "continuation_decision": continuation_decision,
+                "evolved_goal": evolved_goal,
+                "timestamp": datetime.now().isoformat()
+            }
+            
+        except Exception as e:
+            self.logger.error(f"ANALYSIS: Failed to process task: {e}")
+            return self.handle_error(e, task)
+    
+    def _analyze_project_state_enhanced(self, project_dir: str, analysis_depth: str = "standard") -> Dict:
+        """Perform enhanced project state analysis."""
+        try:
+            project_path = self.investigate_project(project_dir)
+            
+            # Use enhanced task execution for comprehensive analysis
+            result = self.execute_enhanced_task(
+                task_description=f"Analyze project state with {analysis_depth} depth",
+                context={"project_dir": project_path, "analysis_depth": analysis_depth},
+                fallback_method=self._basic_project_analysis
+            )
+            
+            if result.get("status") == "success":
+                analysis = result.get("result", {})
+                
+                # Add file structure analysis
+                analysis["file_analysis"] = self._analyze_file_structure(project_path)
+                
+                # Add technology stack analysis  
+                analysis["tech_stack"] = self._analyze_technology_stack(project_path)
+                
+                return {
+                    "analysis": analysis,
+                    "analysis_method": result.get("method", "enhanced"),
+                    "tools_used": result.get("tools_used", []),
+                    "project_dir": project_path
+                }
+            else:
+                return {"analysis": "Project analysis failed", "project_dir": project_path}
+                
+        except Exception as e:
+            self.logger.error(f"Enhanced project analysis failed: {e}")
+            return {"analysis": f"Analysis error: {e}", "project_dir": project_dir}
+    
+    def _basic_project_analysis(self, task_description: str, context: Dict) -> Dict:
+        """Fallback basic project analysis using LLM only."""
+        project_dir = context.get("project_dir", "")
+        analysis_depth = context.get("analysis_depth", "standard")
+        
+        if not self.llm_provider:
+            return {
+                "status": "error",
+                "result": "Basic project analysis requires LLM provider"
+            }
+        
+        analysis_prompt = f"""
+        Analyze this project directory for current state and improvement opportunities:
+        
+        PROJECT DIRECTORY: {project_dir}
+        ANALYSIS DEPTH: {analysis_depth}
+        
+        Provide comprehensive analysis including:
+        1. Project structure and organization
+        2. Code quality and architecture assessment
+        3. Technology stack and dependencies
+        4. Current functionality and features
+        5. Potential improvement areas
+        6. Technical debt and maintenance needs
+        7. Performance and scalability considerations
+        
+        Focus on providing actionable insights for project improvement.
+        """
+        
+        try:
+            analysis = self.llm_provider.generate_text(analysis_prompt, temperature=0.2)
+            return {
+                "status": "success",
+                "method": "llm_only",
+                "result": {"comprehensive_analysis": analysis},
+                "tools_used": []
+            }
+        except Exception as e:
+            return {
+                "status": "error",
+                "result": f"Analysis generation failed: {e}"
+            }
+    
+    def _analyze_file_structure(self, project_dir: str) -> Dict:
+        """Analyze project file structure and organization."""
+        try:
+            result = self.call_mcp_tool("filesystem", "list_files", {
+                "path": project_dir,
+                "recursive": True,
+                "include_hidden": False
+            })
+            
+            if not result.get("success"):
+                return {"structure": "Unable to analyze file structure"}
+            
+            files = result.get("files", [])
+            
+            # Categorize files
+            file_types = {}
+            for file_path in files:
+                ext = os.path.splitext(file_path)[1].lower()
+                if ext not in file_types:
+                    file_types[ext] = 0
+                file_types[ext] += 1
+            
+            return {
+                "total_files": len(files),
+                "file_types": file_types,
+                "top_level_structure": [f for f in files if '/' not in f.strip('./')][:10]
+            }
+            
+        except Exception as e:
+            return {"structure": f"File structure analysis error: {e}"}
+    
+    def _analyze_technology_stack(self, project_dir: str) -> Dict:
+        """Analyze technology stack and dependencies."""
+        try:
+            # Look for common dependency files
+            stack_indicators = {
+                "requirements.txt": "Python",
+                "package.json": "Node.js/JavaScript",
+                "pom.xml": "Java/Maven",
+                "build.gradle": "Java/Gradle",
+                "Cargo.toml": "Rust",
+                "go.mod": "Go"
+            }
+            
+            detected_stack = []
+            
+            for indicator_file, tech in stack_indicators.items():
+                file_result = self.call_mcp_tool("filesystem", "read_file", {
+                    "path": os.path.join(project_dir, indicator_file)
+                })
+                
+                if file_result.get("success"):
+                    detected_stack.append(tech)
+            
+            return {
+                "detected_technologies": detected_stack,
+                "analysis": f"Detected {len(detected_stack)} technology indicators"
+            }
+            
+        except Exception as e:
+            return {"detected_technologies": [], "analysis": f"Tech stack analysis error: {e}"}
+    
+    def _analyze_improvements(self, goal: str, context: Dict, project_state: Dict, duplicate_analysis: Dict) -> Dict:
+        """Analyze potential improvements based on current project state."""
+        if not self.llm_provider:
+            return {"improvements": [], "analysis": "No LLM provider for improvement analysis"}
+        
+        improvement_prompt = f"""
+        Based on the project analysis, identify specific improvements that could be made:
+        
+        GOAL: {goal}
+        PROJECT STATE: {str(project_state)[:1000]}...
+        DUPLICATE FILES: {duplicate_analysis.get('potential_duplicates', 0)} potential duplicates found
+        
+        Identify improvements in these categories:
+        1. Code quality and structure enhancements
+        2. File organization and cleanup opportunities
+        3. Feature additions or enhancements
+        4. Performance optimizations
+        5. Architecture improvements
+        6. Documentation improvements
+        7. Testing enhancements
+        
+        For each improvement, provide:
+        - What: Specific improvement description
+        - Why: Benefit or rationale
+        - Priority: high/medium/low
+        - Effort: small/medium/large
+        
+        Focus on actionable, specific improvements.
+        """
+        
+        try:
+            analysis = self.llm_provider.generate_text(improvement_prompt, temperature=0.3)
+            
+            # Extract structured improvements
+            improvements = self._extract_improvements_from_analysis(analysis)
+            
+            return {
+                "analysis": analysis,
+                "improvements": improvements,
+                "total_improvements": len(improvements),
+                "high_priority": len([i for i in improvements if i.get("priority") == "high"])
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Improvement analysis failed: {e}")
+            return {"improvements": [], "analysis": f"Analysis error: {e}"}
+    
+    def _extract_improvements_from_analysis(self, analysis: str) -> List[Dict]:
+        """Extract structured improvements from analysis text."""
+        improvements = []
+        
+        # Simple extraction - could be enhanced with better parsing
+        lines = analysis.split('\n')
+        current_improvement = {}
+        
+        for line in lines:
+            line = line.strip()
+            if line.startswith(('What:', '- What:', '1.', '2.', '3.', '4.', '5.')):
+                if current_improvement:
+                    improvements.append(current_improvement)
+                current_improvement = {"what": line.replace("What:", "").strip()}
+            elif line.startswith(('Why:', '- Why:')):
+                current_improvement["why"] = line.replace("Why:", "").strip()
+            elif line.startswith(('Priority:', '- Priority:')):
+                priority = line.replace("Priority:", "").strip().lower()
+                current_improvement["priority"] = priority
+            elif line.startswith(('Effort:', '- Effort:')):
+                effort = line.replace("Effort:", "").strip().lower()
+                current_improvement["effort"] = effort
+        
+        if current_improvement:
+            improvements.append(current_improvement)
+        
+        return improvements[:10]  # Limit to avoid overwhelming
+    
+    def _determine_continuation(self, workflow_type: str, iteration_count: int, 
+                              max_iterations: Optional[int], improvement_analysis: Dict) -> Dict:
+        """Determine if workflow should continue based on analysis."""
+        should_continue = False
+        reason = ""
+        
+        # Check max iterations limit
+        if max_iterations is not None and iteration_count >= max_iterations:
+            reason = f"Maximum iterations ({max_iterations}) reached"
+        else:
+            # Check if there are meaningful improvements to make
+            improvements = improvement_analysis.get("improvements", [])
+            high_priority = improvement_analysis.get("high_priority", 0)
+            
+            if workflow_type == "indefinite":
+                should_continue = len(improvements) > 0
+                reason = f"Found {len(improvements)} potential improvements" if should_continue else "No improvements identified"
+            elif workflow_type == "iteration":
+                should_continue = high_priority > 0 or len(improvements) > 2
+                reason = f"Found {high_priority} high-priority and {len(improvements)} total improvements" if should_continue else "Insufficient improvements to continue"
+            else:
+                should_continue = len(improvements) > 0
+                reason = f"Found {len(improvements)} improvements for {workflow_type} workflow"
+        
+        return {
+            "should_continue": should_continue,
+            "reason": reason,
+            "improvements_count": len(improvement_analysis.get("improvements", [])),
+            "iteration_count": iteration_count,
+            "max_iterations": max_iterations
+        }
+    
+    def _evolve_goal(self, original_goal: str, improvement_analysis: Dict, iteration_count: int) -> str:
+        """Evolve the goal based on improvement analysis for next iteration."""
+        if not self.llm_provider:
+            return original_goal
+        
+        improvements = improvement_analysis.get("improvements", [])
+        if not improvements:
+            return original_goal
+        
+        evolution_prompt = f"""
+        Evolve this goal for the next iteration based on identified improvements:
+        
+        ORIGINAL GOAL: {original_goal}
+        ITERATION: {iteration_count + 1}
+        IDENTIFIED IMPROVEMENTS: {str(improvements[:5])}  # Top 5 improvements
+        
+        Create an evolved goal that:
+        1. Builds upon the original goal
+        2. Incorporates the most important improvements
+        3. Is specific and actionable
+        4. Maintains the overall project direction
+        
+        Return a clear, focused goal for the next iteration.
+        """
+        
+        try:
+            evolved_goal = self.llm_provider.generate_text(evolution_prompt, temperature=0.4)
+            self.logger.info(f"Evolved goal for iteration {iteration_count + 1}")
+            return evolved_goal.strip()
+        except Exception as e:
+            self.logger.error(f"Goal evolution failed: {e}")
+            return original_goal 
