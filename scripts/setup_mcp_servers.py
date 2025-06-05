@@ -263,135 +263,6 @@ def build_server(server_config):
             os.rename(workspace_backup, workspace_pkg)
 
 
-def verify_docker_images(server_configs):
-    """Verify that all Docker images were built successfully."""
-    print("\n=== Verifying Docker Images ===")
-    
-    for server_config in server_configs:
-        docker_tag = server_config["docker_tag"]
-        cmd = ["docker", "images", "--format", "table {{.Repository}}:{{.Tag}}", "--filter", f"reference={docker_tag}"]
-        
-        try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-            if result.returncode == 0 and docker_tag in result.stdout:
-                print(f"VERIFIED: {docker_tag}")
-            else:
-                print(f"MISSING: {docker_tag} - Image not found")
-        except Exception as e:
-            print(f"ERROR: {docker_tag} - Verification failed: {e}")
-
-
-def create_mcp_config(server_configs):
-    """Create MCP configuration for MCP Manager."""
-    print("\n=== Creating MCP Configuration ===")
-    
-    mcp_servers = {}
-    
-    for server_config in server_configs:
-        server_name = server_config["name"]
-        server_docker_tag = server_config["docker_tag"]
-        language = server_config.get("language", "unknown") # Get language
-        
-        server_command_list = []
-
-        # Use simple docker run commands, relying on image's default entrypoint.
-        server_command_list = ["docker", "run", "-i", "--rm"]
-
-        if server_name == "git":
-            # Git server needs project root mounted
-            server_command_list.extend(["-v", f"{PROJECT_ROOT.resolve()}:/workspace"])
-            server_command_list.append(server_docker_tag)
-            print(f"  Configuring '{server_name}' (Python) with volume mount and default image entrypoint.")
-        
-        elif language == "python": # For other python servers like time, fetch
-            server_command_list.append(server_docker_tag)
-            print(f"  Configuring '{server_name}' (Python) with default image entrypoint.")
-        
-        elif server_name == "filesystem":
-            server_command_list.extend([
-                "-v", f"{PROJECT_ROOT.resolve()}:/workspace", 
-                server_docker_tag,
-                "/workspace" # Argument to the filesystem server
-            ])
-            print(f"  Configuring '{server_name}' with volume mount: {PROJECT_ROOT.resolve()}:/workspace and arg /workspace")
-        
-        elif server_name == "context7":
-            server_command_list.extend([
-                "-e", "MCP_TRANSPORT=stdio",
-                server_docker_tag
-            ])
-            print(f"  Configuring '{server_name}' with MCP_TRANSPORT=stdio")
-            
-        else: # Default for other Node.js servers (memory, sequential-thinking, everything)
-            server_command_list.append(server_docker_tag)
-            print(f"  Configuring '{server_name}' ({language}) with basic docker run command using image default entrypoint.")
-
-        mcp_servers[server_name] = {
-            "command": server_command_list,
-            "timeout": 60 if server_name == "sequential-thinking" else 30,
-            "enabled": True,
-            "description": f"{language.capitalize()} MCP server for {server_name}"
-        }
-
-    # Default settings for MCP Manager
-    mcp_settings = {
-        "defaultTimeout": 40, # Increased default slightly
-        "persistentConnections": True,
-        "autoDiscovery": True, # Enable capability discovery
-        "retryCount": 2,
-        "retryDelay": 1.5
-    }
-    
-    config = {
-        "mcpSettings": mcp_settings,
-        "mcpServers": mcp_servers
-    }
-    
-    # Ensure the .swarmdev directory exists in the user's home
-    swarmdev_home_dir = Path.home() / ".swarmdev"
-    swarmdev_home_dir.mkdir(exist_ok=True)
-    
-    config_file_path = swarmdev_home_dir / "mcp_config.json"
-    
-    try:
-        with open(config_file_path, 'w') as f:
-            json.dump(config, f, indent=2)
-        print(f"SUCCESS: MCP configuration written to {config_file_path}")
-        return True
-    except Exception as e:
-        print(f"FAILED: Could not write MCP config to {config_file_path}: {e}")
-        return False
-
-
-def run_mcp_tests():
-    """Run the comprehensive MCP installation test suite."""
-    try:
-        # Find the test script
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        test_script = os.path.join(script_dir, "test_mcp_installation.py")
-        
-        if not os.path.exists(test_script):
-            print(f"FAILED: Test script not found: {test_script}")
-            return False
-        
-        # Run the test script
-        print(f"Running: python {test_script}")
-        result = subprocess.run(
-            [sys.executable, test_script],
-            cwd=os.path.dirname(script_dir),  # Run from swarmdev root
-            timeout=300  # 5 minute timeout
-        )
-        
-        return result.returncode == 0
-        
-    except subprocess.TimeoutExpired:
-        print(f"FAILED: MCP tests timed out after 5 minutes")
-        return False
-    except Exception as e:
-        print(f"FAILED: Failed to run MCP tests: {e}")
-        return False
-
-
 def main():
     """Main setup function."""
     print("=== Generic MCP Server Setup ===")
@@ -420,41 +291,10 @@ def main():
         print("FAILED: No servers built successfully")
         return False
     
-    # Verify built images
-    verify_docker_images(server_configs)
-    
-    # Create MCP configuration for successfully built servers
-    successful_configs = []
-    for server_config in server_configs:
-        # Quick check if image exists
-        docker_tag = server_config["docker_tag"]
-        try:
-            result = subprocess.run(
-                ["docker", "images", "-q", docker_tag], 
-                capture_output=True, text=True, timeout=10
-            )
-            if result.returncode == 0 and result.stdout.strip():
-                successful_configs.append(server_config)
-        except:
-            pass
-    
-    if successful_configs:
-        create_mcp_config(successful_configs)
-        print(f"\nSUCCESS: Setup complete! {len(successful_configs)} MCP servers ready to use.")
-        
-        # Run comprehensive MCP installation test
-        print(f"\nRunning MCP Installation Test Suite...")
-        test_success = run_mcp_tests()
-        
-        if test_success:
-            print(f"\nAll done! Your SwarmDev MCP installation is ready to use.")
-        else:
-            print(f"\nSetup completed but some tests failed. Check output above.")
-            
-        return test_success
-    else:
-        print("\nFAILED: No servers available for configuration")
-        return False
+    print(f"\nSUCCESS: Image build process complete for {success_count} MCP servers.")
+    print("These images can now be used by SwarmDev if they are defined in MCPManager's default configuration.")
+    print("You can run 'swarmdev test-mcp' to verify the overall MCP installation and server availability.")
+    return True
 
 
 # Helper function to ensure paths are absolute from project root
@@ -467,8 +307,11 @@ def ensure_absolute_path(path_str):
 # Update server configurations to use absolute paths
 def make_paths_absolute_in_config(config):
     for server in config.get("servers", []):
-        if "directory" in server:
+        if "directory" in server: # Keep this for potential other uses of 'directory'
             server["directory"] = ensure_absolute_path(server["directory"])
+        # Ensure server_src_path and docker_build_dir are absolute
+        if "server_src_path" in server:
+            server["server_src_path"] = ensure_absolute_path(server["server_src_path"])
         if "docker_build_dir" in server:
             server["docker_build_dir"] = ensure_absolute_path(server["docker_build_dir"])
     return config

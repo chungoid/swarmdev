@@ -122,41 +122,39 @@ class MCPManager:
         self.mcp_logger.info("=== MCP LOGGING INITIALIZED ===")
     
     def _load_mcp_config(self):
-        """Load MCP configuration with hierarchical merging: global config + project overrides."""
+        """Load MCP configuration with hierarchical merging: built-in defaults + global overrides + project overrides + constructor overrides."""
         try:
-            # Step 1: Load global configuration first
+            # Step 1: ALWAYS start with built-in defaults
+            merged_config = self._get_default_mcp_config()
+            self.mcp_logger.info(f"Initialized with built-in default MCP config ({len(merged_config.get('servers', {}))} servers)")
+
+            # Step 2: Load global configuration from ~/.swarmdev/mcp_config.json and merge if it exists
             global_config_path = os.path.expanduser("~/.swarmdev/mcp_config.json")
-            merged_config = {}
-            
             if os.path.exists(global_config_path):
-                self.mcp_logger.info(f"Loading global MCP config from: {global_config_path}")
+                self.mcp_logger.info(f"Loading global MCP config from: {global_config_path} to merge over defaults")
                 with open(global_config_path, 'r') as f:
-                    global_config = json.load(f)
+                    global_config_from_file = json.load(f)
                 
-                # Handle both legacy format (servers at root) and new format (servers under key)
-                if 'servers' in global_config or 'mcpServers' in global_config:
-                    # New format: servers under specific key
-                    merged_config = global_config.copy()
-                    servers_count = len(global_config.get('mcpServers', global_config.get('servers', {})))
-                else:
-                    # Legacy format: servers directly at root level (like current global config)
-                    # Convert to new format
-                    merged_config = {"servers": global_config.copy()}
-                    servers_count = len(global_config)
-                
-                self.mcp_logger.info(f"Global config loaded with {servers_count} servers")
+                # Merge global_config_from_file ON TOP of merged_config (which is currently the defaults)
+                merged_config = self._merge_mcp_configs(merged_config, global_config_from_file)
+                servers_in_global_file = len(global_config_from_file.get('mcpServers', global_config_from_file.get('servers', {})))
+                self.mcp_logger.info(f"Global config merged, {servers_in_global_file} server definitions processed from global file.")
             else:
-                self.mcp_logger.info(f"Global MCP config not found at: {global_config_path}, using built-in defaults")
-                # Use built-in default configuration
-                merged_config = self._get_default_mcp_config()
+                self.mcp_logger.info(f"Global MCP config not found at: {global_config_path}, continuing with built-in defaults.")
             
-            # Step 2: Look for project-specific config and merge
+            # Step 3: Look for project-specific config and merge
             project_config_paths = [
-                "./.swarmdev/mcp_config.json",  # Preferred location
-                "./mcp_config.json",           # Legacy fallback
-                self.config.get("config_file") # Explicit override
+                os.path.join(self.project_dir, ".swarmdev", "mcp_config.json"), # Preferred location in project_dir
+                os.path.join(self.project_dir, "mcp_config.json"),           # Legacy fallback in project_dir
             ]
-            
+            # Add explicit config file from constructor if provided and different
+            explicit_config_file = self.config.get("config_file")
+            if explicit_config_file and os.path.isabs(explicit_config_file) and explicit_config_file not in project_config_paths:
+                 project_config_paths.append(explicit_config_file)
+            elif explicit_config_file and not os.path.isabs(explicit_config_file) and os.path.join(self.project_dir, explicit_config_file) not in project_config_paths:
+                 project_config_paths.append(os.path.join(self.project_dir, explicit_config_file))
+
+
             project_config_found = False
             for config_path in project_config_paths:
                 if config_path and os.path.exists(config_path):
@@ -164,50 +162,51 @@ class MCPManager:
                     with open(config_path, 'r') as f:
                         project_config = json.load(f)
                     
-                    # Merge project config over global config
+                    # Merge project config over current merged_config
                     merged_config = self._merge_mcp_configs(merged_config, project_config)
                     project_servers = len(project_config.get('mcpServers', project_config.get('servers', {})))
-                    self.mcp_logger.info(f"Project config merged with {project_servers} servers")
+                    self.mcp_logger.info(f"Project config merged with {project_servers} server definitions.")
                     project_config_found = True
-                    break
+                    break # Stop after finding the first valid project config
             
             if not project_config_found:
-                self.mcp_logger.info("No project-specific MCP config found, using global/default config")
+                self.mcp_logger.info("No project-specific MCP config found, using current merged config (defaults + optional global).")
             
-            # Step 3: Fallback if still no configuration
-            if not merged_config:
-                self.mcp_logger.warning("No MCP configuration found anywhere, using built-in defaults")
-                merged_config = self._get_default_mcp_config()
-
-            # Step 3.5: Merge server configurations from self.config (constructor argument) if provided
+            # Step 4: Merge server configurations from self.config (constructor argument) if provided
             # This allows programmatic override of server definitions, e.g., for testing.
             if "mcpServers" in self.config:
                 self.mcp_logger.info("Merging mcpServers from constructor config over loaded/default config.")
                 constructor_servers = self.config.get("mcpServers", {})
-                # Ensure merged_config has an mcpServers key to merge into
+                
+                # Ensure merged_config has a valid structure to merge into
                 if "mcpServers" not in merged_config:
-                    # If merged_config used legacy 'servers' key, adapt or initialize
                     if "servers" in merged_config and isinstance(merged_config["servers"], dict):
                         merged_config["mcpServers"] = merged_config.pop("servers")
-                    else:
+                    else: # Ensure "mcpServers" key exists for merging
                         merged_config["mcpServers"] = {}
                 
                 for server_id, server_conf in constructor_servers.items():
                     self.mcp_logger.debug(f"  Overriding/setting server '{server_id}' from constructor config.")
-                    merged_config["mcpServers"][server_id] = server_conf
-            
-            # Step 4: Process the merged configuration
-            # Load server configurations (support both old and new format)
+                    merged_config["mcpServers"][server_id] = server_conf # Merge/override
+
+            # Step 5: Process the final merged configuration
             servers = merged_config.get("servers", merged_config.get("mcpServers", {}))
             settings = merged_config.get("settings", merged_config.get("mcpSettings", {}))
             
-            self.mcp_logger.info(f"Final configuration contains {len(servers)} MCP servers")
+            self.mcp_logger.info(f"Final configuration processing {len(servers)} MCP servers")
             
-            # Update global settings
+            # Update global settings from the final merged settings
             self.default_timeout = settings.get("defaultTimeout", settings.get("globalTimeout", self.default_timeout))
             self.persistent_connections = settings.get("persistentConnections", self.persistent_connections)
+            self.init_timeout = settings.get("initializationTimeout", self.init_timeout) # Ensure this is also updated
+            self.discovery_timeout = settings.get("discoveryTimeout", self.discovery_timeout) # And this
             
-            # Initialize servers from configuration
+            # Clear existing servers before registering from the new config, to avoid duplicates if _load_mcp_config is called multiple times
+            self.servers.clear()
+            self.connections.clear()
+            self.capabilities.clear()
+
+            # Initialize servers from the final merged configuration
             for server_id, server_config in servers.items():
                 if not server_config.get("disabled", False):
                     self.mcp_logger.debug(f"Registering server: {server_id}")
@@ -215,7 +214,7 @@ class MCPManager:
                 else:
                     self.mcp_logger.info(f"Skipping disabled server: {server_id}")
             
-            self.mcp_logger.info(f"Successfully loaded {len(self.servers)} MCP servers from configuration")
+            self.mcp_logger.info(f"Successfully loaded and registered {len(self.servers)} MCP servers from final configuration.")
             
         except Exception as e:
             self.mcp_logger.error(f"Failed to load MCP configuration: {e}", exc_info=True)
@@ -272,6 +271,18 @@ class MCPManager:
                     "timeout": 30,
                     "enabled": True,
                     "description": "Context-aware library and dependency resolution (stdio transport)"
+                },
+                "tmux-mcp": {
+                    "command": ["docker", "run", "-i", "--rm", 
+                                "-v", "$(pwd):/workspace",
+                                "-v", "/tmp/tmux-1000:/tmp/tmux-1000",
+                                "-e", "TMUX_TMPDIR=/tmp/tmux-1000",
+                                "-p", "127.0.0.1:13008:3000", 
+                                "ghcr.io/chungoid/tmux-mcp:latest"],
+                    "timeout": 30,
+                    "enabled": True,
+                    "description": "TMUX Memory Context Protocol Server for session management",
+                    "init_delay": 0.5
                 },
                 "everything": {
                     "command": ["docker", "run", "-i", "--rm", "ghcr.io/chungoid/everything:latest"],
