@@ -62,6 +62,18 @@ TEST_MCP_CONFIG = {
                     # Add other known methods if you want to test them via tools/call
                 ]
             }
+        },
+        "tmux-mcp": { # Added tmux-mcp server
+            "enabled": True,
+            "command": ["docker", "run", "-i", "--rm",
+                        "-v", "$(pwd):/workspace",
+                        "-v", "/tmp/tmux-1000:/tmp/tmux-1000", # Assuming host tmux socket setup
+                        "-e", "TMUX_TMPDIR=/tmp/tmux-1000",    # Environment variable for tmux socket
+                        "-p", "127.0.0.1:13008:3000",         # Port mapping
+                        "ghcr.io/chungoid/tmux-mcp:latest"],
+            "timeout": 30,
+            "init_delay": 0.5, # Standard init_delay
+            "discover_capabilities": True # Let MCPManager discover its tools
         }
     }
 }
@@ -169,6 +181,46 @@ def run_tests():
 
         except Exception as e:
             logger.error(f"Exception during 'tools/call' to filesystem (name: list_directory): {e}", exc_info=True)
+
+        # --- Test 4: tmux-mcp Server ---
+        logger.info("\n--- Test 4: tmux-mcp Server - 'tools/call' Wrapped Style (method: 'tools/call', name: 'list-sessions') ---")
+        try:
+            # Ensure a tmux session is running for the test
+            # This is a host command, assumes tmux is installed and accessible
+            # For a more robust test, this might need to be handled differently or ensured by user
+            # For now, we assume a session like 'swarmdev_test_session' might exist from previous work
+            # os.system("tmux new-session -d -s test_mcp_tmux_session") # Example: ensure session for test
+
+            tmux_params = {
+                "name": "list-sessions", # The tool name registered in tmux-mcp
+                "arguments": {} # list-sessions takes no arguments
+            }
+            tmux_result = mcp_manager.call_tool("tmux-mcp", "tools/call", tmux_params)
+            logger.info(f"'tools/call' to tmux-mcp (name: list-sessions) result: {json.dumps(tmux_result, indent=2)}")
+            
+            if tmux_result and not tmux_result.get("error"):
+                result_content = tmux_result.get("result", {}).get("content")
+                is_error_flag = tmux_result.get("result", {}).get("isError") # Check for application-level error
+
+                if result_content and not is_error_flag:
+                    logger.info("CONCLUSION Test 4: 'tools/call' to tmux-mcp server (list-sessions) succeeded.")
+                    # Further validation: try to parse the JSON from result_content[0]['text']
+                    try:
+                        sessions_list = json.loads(result_content[0]['text'])
+                        logger.info(f"Successfully parsed sessions list: {sessions_list}")
+                    except json.JSONDecodeError:
+                        logger.warning("CONCLUSION Test 4: tmux-mcp call succeeded, but session list JSON was malformed.")
+                elif is_error_flag:
+                     logger.warning(f"CONCLUSION Test 4: tmux-mcp server (list-sessions) reported an application error: {result_content}")
+                else:
+                    logger.warning(f"CONCLUSION Test 4: tmux-mcp call succeeded but returned unexpected structure: {tmux_result}")
+            elif tmux_result and tmux_result.get("error"): # This is a JSON-RPC level error
+                logger.warning(f"CONCLUSION Test 4: 'tools/call' to tmux-mcp server (list-sessions) failed with JSON-RPC error: {tmux_result.get('error')}")
+            else: # This means the call_tool itself returned None or an empty dict, indicating a lower-level issue
+                logger.warning(f"CONCLUSION Test 4: 'tools/call' to tmux-mcp server (list-sessions) failed at a low level, result: {tmux_result}")
+
+        except Exception as e:
+            logger.error(f"Exception during 'tools/call' to tmux-mcp (name: list-sessions): {e}", exc_info=True)
 
     finally:
         if mcp_manager:

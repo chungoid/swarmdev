@@ -476,28 +476,22 @@ class MCPManager:
 
             # MCP Initialization Handshake
             init_request_id = str(uuid.uuid4())
-            init_payload = {
+            handshake_request = {
                 "jsonrpc": "2.0",
+                "id": init_request_id,
                 "method": "initialize",
                 "params": {
-                    "processId": os.getpid(), # Client process ID
-                    "protocolVersion": "1.0", # Added protocolVersion
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": {},
                     "clientInfo": {
-                        "name": "SwarmDevMCPManager",
-                        "version": "1.0.0", 
-                        # Client capabilities can be an empty object if not detailed
-                        "capabilities": {}
-                    },
-                    # Server capabilities expected by the initialize handshake
-                    "capabilities": {}, # Added server capabilities placeholder
-                    # "rootUri": Path(self.project_dir).as_uri(),
-                    # "trace": "off" # Optional trace setting
+                        "name": "swarmdev-mcp-manager",
+                        "version": "1.0.0"
+                    }
                 },
-                "id": init_request_id
             }
             
             self.mcp_logger.info(f"Sending 'initialize' handshake to {server_id} (PID: {process.pid}), request_id: {init_request_id}")
-            payload_str = json.dumps(init_payload) + "\n"
+            payload_str = json.dumps(handshake_request) + "\n"
             process.stdin.write(payload_str.encode('utf-8'))
             process.stdin.flush()
 
