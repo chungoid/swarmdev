@@ -1,8 +1,6 @@
 /.env
 /.venv
-/scanner_test
-/example_project
-/simple_project
+/datacenter_scraping
 /test_simple
 /swarmdev.log
 /src/swarmdev.egg-info

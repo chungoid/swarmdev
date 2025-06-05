@@ -8,9 +8,17 @@ import os
 import threading
 import time
 from datetime import datetime
-from typing import Dict, List, Optional, Any, Callable
+from typing import Dict, List, Optional, Any, Callable, TYPE_CHECKING
+import queue
+import uuid
+from concurrent.futures import ThreadPoolExecutor
 
 from ..agents import BaseAgent
+from ...utils.agent_logger import AgentLogger
+
+if TYPE_CHECKING:
+    from ...utils.mcp_manager import MCPManager
+    from ...utils.memory_context_manager import MemoryContextManager
 
 
 class Orchestrator:
@@ -21,21 +29,35 @@ class Orchestrator:
     the activities of multiple specialized agents.
     """
     
-    def __init__(self, config: Optional[Dict] = None):
+    def __init__(self, 
+                 config: Optional[Dict] = None, 
+                 mcp_manager: Optional['MCPManager'] = None, 
+                 memory_manager: Optional['MemoryContextManager'] = None):
         """
         Initialize the orchestrator.
         
         Args:
             config: Optional configuration dictionary
+            mcp_manager: MCPManager instance
+            memory_manager: Pre-initialized MemoryContextManager instance
         """
         self.config = config or {}
-        self.agents = {}
-        self.workflows = {}
-        self.tasks = {}
-        self.task_queue = []
-        self.running = False
-        self.thread = None
+        self.agents: Dict[str, BaseAgent] = {}
+        self.workflows: Dict[str, Dict] = {}
+        self.tasks: Dict[str, Dict] = {}
+        self.task_queue = queue.Queue()
+        self.active_executions: Dict[str, Dict] = {}
+        self.task_results: Dict[str, Dict] = {}
+        self.task_dependencies: Dict[str, List[str]] = {}
+        self.execution_threads: Dict[str, threading.Thread] = {}
+        self.stop_event = threading.Event()
         self.logger = logging.getLogger("swarmdev.orchestrator")
+        self.thread_pool = ThreadPoolExecutor(max_workers=self.config.get("max_concurrent_tasks", 5))
+        self.project_structure_cache: Dict[str, Dict] = {}
+        self.mcp_manager = mcp_manager
+        self.memory_manager = memory_manager
+        self.running = False
+        self.thread: Optional[threading.Thread] = None
     
     def register_agent(self, agent: BaseAgent) -> bool:
         """
@@ -113,30 +135,34 @@ class Orchestrator:
     
     def execute_workflow(self, workflow_id: str, context: Dict) -> str:
         """
-        Execute a workflow.
-        
+        Execute a registered workflow.
+
         Args:
-            workflow_id: Workflow identifier
-            context: Execution context
-            
+            workflow_id: ID of the workflow to execute
+            context: Context for the workflow (e.g., goal, project_dir)
+
         Returns:
             str: Execution ID
-            
-        Raises:
-            ValueError: If workflow is not found
         """
         if workflow_id not in self.workflows:
-            raise ValueError(f"Workflow {workflow_id} not found")
+            self.logger.error(f"Workflow {workflow_id} not registered.")
+            raise ValueError(f"Workflow {workflow_id} not registered.")
+
+        execution_id = f"exec_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"
+        workflow_definition = self.workflows[workflow_id]
+
+        self.active_executions[execution_id] = {
+            "status": "starting",
+            "tasks": {},
+            "context": context,
+            "workflow_id": workflow_id,
+            "start_time": time.time(),
+            "total_tasks_in_workflow": len(workflow_definition.get("tasks", {}))
+        }
+        self.logger.info(f"Workflow {workflow_id} starting with execution ID: {execution_id}")
+
+        self._create_initial_tasks(workflow_definition, execution_id, context)
         
-        workflow = self.workflows[workflow_id]
-        
-        # Generate execution ID
-        execution_id = f"exec_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-        
-        # Create initial tasks
-        self._create_initial_tasks(workflow, execution_id, context)
-        
-        self.logger.info(f"Started execution {execution_id} of workflow {workflow_id}")
         return execution_id
     
     def get_execution_status(self, execution_id: str) -> Dict:
@@ -210,21 +236,28 @@ class Orchestrator:
     
     def _process_task_queue(self):
         """Process the task queue."""
-        if not self.task_queue:
+        if self.task_queue.empty():
             return
         
         # Get the next task
-        task_id = self.task_queue[0]
+        try:
+            task_id = self.task_queue.get_nowait()
+        except queue.Empty:
+            return
+            
         task = self.tasks.get(task_id)
         
         if not task:
-            # Task not found, remove from queue
-            self.task_queue.pop(0)
+            # Task not found, it might have been removed or is an error
+            self.logger.warning(f"Task ID {task_id} retrieved from queue but not found in self.tasks.")
             return
         
         if task.get("status") != "ready":
-            # Task not ready, remove from queue
-            self.task_queue.pop(0)
+            # Task not ready, put it back if it's not already completed or failed
+            # This scenario should ideally be handled by _check_task_dependencies ensuring only ready tasks are processed.
+            # However, if a task was put on the queue and its status changed, this handles it.
+            if task.get("status") not in ["completed", "failed"]:
+                 self.task_queue.put(task_id) # Put back if not terminally processed
             return
         
         # Get the agent - try agent_id first, then find by agent_type
@@ -234,42 +267,110 @@ class Orchestrator:
         if not agent:
             # Try to find agent by type
             agent_type = task.get("agent_type")
+            self.logger.debug(f"Agent ID {agent_id} not found directly for task {task_id}. Trying by type: {agent_type}")
             for aid, a in self.agents.items():
                 if a.agent_type == agent_type:
                     agent = a
-                    agent_id = aid
+                    # Update agent_id in the task if found by type, for logging/consistency
+                    task["agent_id"] = aid 
+                    agent_id = aid # Update agent_id for subsequent logging
+                    self.logger.debug(f"Found agent by type: {aid} for task {task_id}")
                     break
         
         if not agent:
-            # Agent not found, mark task as failed
+            # Agent not found by ID or type, mark task as failed
             task["status"] = "failed"
-            task["error"] = f"Agent with ID {agent_id} or type {task.get('agent_type')} not found"
-            self.task_queue.pop(0)
+            task["error"] = f"Agent with ID '{agent_id}' or type '{task.get('agent_type')}' not found for task '{task_id}'."
+            # Task was already removed by get_nowait(), and it's failed, so do not put back.
+            self.logger.error(task["error"])
             return
         
-                    # Execute the task
+        # Execute the task
         try:
             task["status"] = "processing"
-            result = agent.process_task(task)
+            AgentLogger.log_task_start(agent.logger, task) # Logging task start
+            start_time = time.time()
+
+            result = agent.process_task(task) # Agent processes task
+
+            duration = time.time() - start_time
+            AgentLogger.log_task_complete(agent.logger, task, result, duration) # Logging task completion
+
             task["result"] = result
-            task["status"] = "completed"
+            task["status"] = "completed" # Task marked completed
             task["completed_at"] = datetime.now().isoformat()
             
             # Artifacts are now saved directly by the agents using tools
+
+            # Store task completion in memory
+            if self.memory_manager:
+                iteration_count_from_task_attr = task.get("iteration_count") # Check direct attribute first
+                iteration_count_from_context = task.get("context", {}).get("iteration_count")
+                iteration_count = 0 # Default
+
+                if iteration_count_from_task_attr is not None:
+                    try:
+                        iteration_count = int(iteration_count_from_task_attr)
+                    except ValueError:
+                        self.logger.warning(f"Could not parse iteration_count '{iteration_count_from_task_attr}' from task attribute.")
+                        iteration_count = 0 
+                elif iteration_count_from_context is not None:
+                    try:
+                        iteration_count = int(iteration_count_from_context)
+                    except ValueError:
+                        self.logger.warning(f"Could not parse iteration_count '{iteration_count_from_context}' from task context.")
+                        iteration_count = 0
+                else:
+                    # Fallback to parsing from execution_id if not explicitly provided
+                    execution_id_str = task.get("execution_id", "")
+                    if "_cycle_" in execution_id_str:
+                        try:
+                            # e.g., exec_..._cycle_1 or exec_..._cycle_1_completion_evaluation
+                            cycle_part = execution_id_str.split("_cycle_")[1]
+                            iteration_count = int(cycle_part.split("_")[0])
+                        except (IndexError, ValueError) as e_parse:
+                            self.logger.warning(f"Could not parse iteration_count from execution_id '{execution_id_str}': {e_parse}")
+                            iteration_count = 0 # Fallback
+                    # If no _cycle_, it's part of the main flow or iteration 0 implicitly
+                
+                files_created = result.get("files_created", [])
+                files_modified = result.get("files_modified", [])
+                files_affected = list(set(files_created + files_modified)) # Use set to avoid duplicates, then list
+
+                agent_type_for_memory = task.get("agent_type", "unknown_agent")
+                
+                # Extract the short task ID from the full task ID
+                # task["execution_id"] is the specific execution ID for this task (e.g., exec_datetime_uuid_cycle_N)
+                # task_id is the full unique ID (e.g., exec_datetime_uuid_cycle_N_short_task_name)
+                task_execution_id_prefix = task.get("execution_id", "") + "_"
+                short_task_id_for_memory = task_id.replace(task_execution_id_prefix, "", 1) if task_id.startswith(task_execution_id_prefix) else task_id
+                
+                # If replacement didn't change anything and execution_id is part of task_id, try splitting
+                if short_task_id_for_memory == task_id and task.get("execution_id","") in task_id :
+                     parts = task_id.split(task.get("execution_id","") + "_")
+                     if len(parts) > 1:
+                         short_task_id_for_memory = parts[1]
+
+
+                self.logger.debug(f"Storing task completion in memory: iteration={iteration_count}, short_task_id='{short_task_id_for_memory}', full_task_id='{task_id}', agent='{agent_type_for_memory}'")
+                self.memory_manager.store_task_completion(
+                    iteration_count=iteration_count,
+                    task_id=short_task_id_for_memory, 
+                    agent_type=agent_type_for_memory,
+                    result=result, 
+                    files_affected=files_affected
+                )
             
             # Check if this is an analysis task that should trigger workflow continuation
-            self._check_workflow_continuation(task)
+            self._check_workflow_continuation(task) 
             
             # Check for dependent tasks
-            self._handle_task_completion(task_id)
+            self._handle_task_completion(task_id) 
             
         except Exception as e:
             task["status"] = "failed"
             task["error"] = str(e)
             self.logger.error(f"Error executing task {task_id}: {e}")
-        
-        # Remove from queue
-        self.task_queue.pop(0)
     
     def _check_task_dependencies(self):
         """Check for tasks with satisfied dependencies."""
@@ -285,7 +386,7 @@ class Orchestrator:
                 if all_completed:
                     # All dependencies completed, mark as ready
                     task["status"] = "ready"
-                    self.task_queue.append(task_id)
+                    self.task_queue.put(task_id)
     
     def _handle_task_completion(self, task_id: str):
         """
@@ -315,7 +416,7 @@ class Orchestrator:
                     
                     # All dependencies completed, mark as ready
                     dependent["status"] = "ready"
-                    self.task_queue.append(dependent_id)
+                    self.task_queue.put(dependent_id)
         
         # Check if this completed task should trigger workflow continuation
         completed_task = self.tasks.get(task_id)
@@ -357,7 +458,7 @@ class Orchestrator:
             
             # Add to tasks and queue
             self.tasks[task_id] = task
-            self.task_queue.append(task_id)
+            self.task_queue.put(task_id)
             self.logger.info(f"Created initial task: {task_id} (agent_type: {task_def.get('agent_type')})")
         
         # Create dependent tasks
@@ -937,7 +1038,7 @@ class Orchestrator:
             
             # Add task to execution
             self.tasks[task_id] = analysis_task
-            self.task_queue.append(task_id)
+            self.task_queue.put(task_id)
             
             # If analysis suggests improvements, create planning and implementation tasks
             planning_task_id = f"{cycle_execution_id}_strategic_planning"  # Enhanced workflow task name

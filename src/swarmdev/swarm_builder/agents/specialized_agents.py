@@ -18,8 +18,8 @@ class ResearchAgent(BaseAgent):
     Uses MCP tools for documentation lookup and sequential thinking.
     """
     
-    def __init__(self, agent_id: str, agent_type: str, llm_provider=None, mcp_manager=None, config: Optional[Dict] = None):
-        super().__init__(agent_id, agent_type, llm_provider, mcp_manager, config)
+    def __init__(self, agent_id: str, agent_type: str, llm_provider=None, mcp_manager=None, config: Optional[Dict] = None, memory_manager=None):
+        super().__init__(agent_id, agent_type, llm_provider, mcp_manager, config, memory_manager)
     
     def process_task(self, task: Dict) -> Dict:
         """Process research tasks using LLM and MCP tools."""
@@ -207,8 +207,8 @@ class PlanningAgent(BaseAgent):
     Uses sequential thinking for complex planning tasks.
     """
     
-    def __init__(self, agent_id: str, agent_type: str, llm_provider=None, mcp_manager=None, config: Optional[Dict] = None):
-        super().__init__(agent_id, agent_type, llm_provider, mcp_manager, config)
+    def __init__(self, agent_id: str, agent_type: str, llm_provider=None, mcp_manager=None, config: Optional[Dict] = None, memory_manager=None):
+        super().__init__(agent_id, agent_type, llm_provider, mcp_manager, config, memory_manager)
     
     def process_task(self, task: Dict) -> Dict:
         """Process planning tasks using sequential thinking and project analysis with enhanced workflow parameters."""
@@ -218,68 +218,105 @@ class PlanningAgent(BaseAgent):
             context = task.get("context", {})
             project_dir = context.get("project_dir")
             
-            # NEW: Extract planning workflow parameters
-            planning_type = task.get("planning_type", "standard")
-            use_analysis_results = task.get("use_analysis_results", False)
-            use_research_results = task.get("use_research_results", False)
-            preserve_functionality = task.get("preserve_functionality", False)
-            plan_incremental_steps = task.get("plan_incremental_steps", False)
-            risk_assessment = task.get("risk_assessment", False)
+            # Extract planning parameters from task.data or task directly
+            task_data = task.get("data", {})
+            planning_type = task_data.get("planning_type", task.get("planning_type", "standard"))
+            use_analysis_results = task_data.get("use_analysis_results", task.get("use_analysis_results", False))
+            use_research_results = task_data.get("use_research_results", task.get("use_research_results", False))
+            preserve_functionality = task_data.get("preserve_functionality", task.get("preserve_functionality", False))
+            plan_incremental_steps = task_data.get("plan_incremental_steps", task.get("plan_incremental_steps", False))
+            risk_assessment = task_data.get("risk_assessment", task.get("risk_assessment", False))
             
-            # Version-aware planning parameters
-            target_version = task.get("target_version")
-            scope_to_current_version = task.get("scope_to_current_version", False)
-            plan_version_increment = task.get("plan_version_increment", False)
-            define_completion_criteria = task.get("define_completion_criteria", False)
-            create_version_blueprint = task.get("create_version_blueprint", False)
+            target_version = task_data.get("target_version", task.get("target_version"))
+            scope_to_current_version = task_data.get("scope_to_current_version", task.get("scope_to_current_version", False))
+            plan_version_increment = task_data.get("plan_version_increment", task.get("plan_version_increment", False))
+            define_completion_criteria = task_data.get("define_completion_criteria", task.get("define_completion_criteria", False))
+            create_version_blueprint = task_data.get("create_version_blueprint", task.get("create_version_blueprint", False))
+            plan_iteration_roadmap = task_data.get("plan_iteration_roadmap", task.get("plan_iteration_roadmap", False))
+            estimate_effort_distribution = task_data.get("estimate_effort_distribution", task.get("estimate_effort_distribution", False))
+            plan_completion_sequence = task_data.get("plan_completion_sequence", task.get("plan_completion_sequence", False))
+
+
+            self.logger.info(f"PLANNING: Creating '{planning_type}' plan for goal: {goal[:100]}...")
+            self.logger.info(f"Use analysis: {use_analysis_results}, Use research: {use_research_results}, Iteration Roadmap: {plan_iteration_roadmap}")
+
+            current_iteration_count = 0 
+            iteration_count_from_data = task_data.get("iteration_count")
+            iteration_count_from_task_attr = task.get("iteration_count")
+            execution_id_str = task.get("execution_id", "")
+
+            if iteration_count_from_data is not None:
+                try: current_iteration_count = int(iteration_count_from_data)
+                except ValueError: self.logger.warning(f"Could not parse iteration_count '{iteration_count_from_data}' from task.data.")
+            elif iteration_count_from_task_attr is not None:
+                try: current_iteration_count = int(iteration_count_from_task_attr)
+                except ValueError: self.logger.warning(f"Could not parse iteration_count '{iteration_count_from_task_attr}' from task attribute.")
+            elif "_cycle_" in execution_id_str:
+                try:
+                    cycle_part = execution_id_str.split("_cycle_")[1]
+                    current_iteration_count = int(cycle_part.split("_")[0])
+                except (IndexError, ValueError) as e_parse:
+                    self.logger.warning(f"Could not parse iteration_count from execution_id '{execution_id_str}': {e_parse}")
             
-            # Adaptive iteration planning parameters
-            plan_iteration_roadmap = task.get("plan_iteration_roadmap", False)
-            estimate_effort_distribution = task.get("estimate_effort_distribution", False)
-            plan_completion_sequence = task.get("plan_completion_sequence", False)
+            retrieved_previous_iteration_insights: Optional[Dict] = None
+            effective_goal = goal 
+
+            if current_iteration_count > 0 and self.memory_manager:
+                previous_iteration_count = current_iteration_count - 1
+                self.logger.info(f"Retrieving context from previous iteration {previous_iteration_count} for planning.")
+                retrieved_iteration_context = self.memory_manager.retrieve_iteration_context(previous_iteration_count)
+                
+                if retrieved_iteration_context and retrieved_iteration_context.get("analysis_insights"):
+                    retrieved_previous_iteration_insights = retrieved_iteration_context.get("analysis_insights")
+                    self.logger.debug(f"Retrieved insights from iter {previous_iteration_count}: {str(retrieved_previous_iteration_insights)[:200]}...")
+                    evolved_goal_from_memory = retrieved_previous_iteration_insights.get("evolved_goal")
+                    if evolved_goal_from_memory:
+                        self.logger.info(f"Using evolved goal from previous iteration {previous_iteration_count}: '{evolved_goal_from_memory[:100]}...'")
+                        effective_goal = evolved_goal_from_memory 
+                    else:
+                        self.logger.info(f"No evolved goal found in memory for iter {previous_iteration_count}. Using original goal for this cycle.")
+                else:
+                    self.logger.warning(f"Could not retrieve analysis insights from previous iteration {previous_iteration_count}.")
             
-            self.logger.info(f"PLANNING: Creating plan for goal: {goal[:100]}...")
-            self.logger.info(f"Planning type: {planning_type}, Use analysis: {use_analysis_results}, Use research: {use_research_results}")
-            
-            # Enhanced project investigation based on parameters
-            project_context = self._investigate_project_context_enhanced(
+            project_context_analysis = self._investigate_project_context_enhanced(
                 project_dir, preserve_functionality, planning_type
             ) if project_dir else {}
             
-            # Retrieve analysis results if requested
-            analysis_context = {}
+            analysis_results_context = {}
             if use_analysis_results:
-                analysis_context = self._retrieve_analysis_results(context)
+                analysis_results_context = self._retrieve_analysis_results(context) 
             
-            # Retrieve research results if requested  
-            research_context = {}
+            research_results_context = {}
             if use_research_results:
-                research_context = self._retrieve_research_results(context)
+                research_results_context = self._retrieve_research_results(context)
             
-            # Enhanced detailed planning with workflow parameters
             detailed_plan = self._create_detailed_plan_enhanced(
-                goal, context, project_context, analysis_context, research_context,
-                planning_type, target_version, preserve_functionality
+                effective_goal, 
+                context, 
+                project_context_analysis, 
+                analysis_results_context, 
+                research_results_context, 
+                retrieved_previous_iteration_insights, 
+                planning_type, 
+                target_version, 
+                preserve_functionality,
+                current_iteration_count 
             )
             
-            # Enhanced task breakdown based on planning type
             task_breakdown = self._break_down_tasks_enhanced(
-                detailed_plan, goal, planning_type, plan_incremental_steps
+                detailed_plan, effective_goal, planning_type, plan_incremental_steps
             )
             
-            # Enhanced execution strategy with risk assessment
             execution_strategy = self._plan_execution_strategy_enhanced(
-                task_breakdown, risk_assessment, estimate_effort_distribution
+                task_breakdown, risk_assessment, estimate_effort_distribution # ensure correct param passed
             )
             
-            # Version planning if requested
             version_plan = {}
             if target_version and (plan_version_increment or create_version_blueprint):
                 version_plan = self._create_version_plan(
                     detailed_plan, target_version, scope_to_current_version
                 )
             
-            # Completion planning if requested
             completion_plan = {}
             if define_completion_criteria or plan_completion_sequence:
                 completion_plan = self._create_completion_plan(
@@ -293,25 +330,25 @@ class PlanningAgent(BaseAgent):
                 "detailed_plan": detailed_plan,
                 "task_breakdown": task_breakdown,
                 "execution_strategy": execution_strategy,
-                "project_context": project_context,
+                "project_context": project_context_analysis,
                 "timestamp": datetime.now().isoformat(),
-                
-                # NEW: Enhanced planning results
                 "planning_type": planning_type,
-                "analysis_context": analysis_context,
-                "research_context": research_context,
+                "analysis_context": analysis_results_context,
+                "research_context": research_results_context,
                 "version_plan": version_plan,
                 "completion_plan": completion_plan,
                 "workflow_parameters": {
                     "preserve_functionality": preserve_functionality,
                     "plan_incremental_steps": plan_incremental_steps,
                     "risk_assessment": risk_assessment,
-                    "target_version": target_version
+                    "target_version": target_version,
+                    "current_iteration_count": current_iteration_count,
+                    "retrieved_previous_insights": bool(retrieved_previous_iteration_insights)
                 }
             }
             
         except Exception as e:
-            self.logger.error(f"PLANNING: Failed to process task: {e}")
+            self.logger.error(f"PLANNING: Failed to process task: {e}", exc_info=True)
             return self.handle_error(e, task)
     
     def _investigate_project_context(self, project_dir: str) -> Dict:
@@ -571,8 +608,10 @@ class PlanningAgent(BaseAgent):
     
     def _create_detailed_plan_enhanced(self, goal: str, context: Dict, project_context: Dict, 
                                      analysis_context: Dict, research_context: Dict,
+                                     retrieved_previous_iteration_insights: Optional[Dict], 
                                      planning_type: str, target_version: Optional[str], 
-                                     preserve_functionality: bool) -> Dict:
+                                     preserve_functionality: bool,
+                                     current_iteration_count: int) -> Dict:
         """Create enhanced detailed plan using all available context and workflow parameters."""
         enhanced_context = {
             "goal": goal,
@@ -862,8 +901,8 @@ class DevelopmentAgent(BaseAgent):
     Uses planning results from PlanningAgent and implements using MCP filesystem tools.
     """
     
-    def __init__(self, agent_id: str, agent_type: str, llm_provider=None, mcp_manager=None, config: Optional[Dict] = None):
-        super().__init__(agent_id, agent_type, llm_provider, mcp_manager, config)
+    def __init__(self, agent_id: str, agent_type: str, llm_provider=None, mcp_manager=None, config: Optional[Dict] = None, memory_manager=None):
+        super().__init__(agent_id, agent_type, llm_provider, mcp_manager, config, memory_manager)
     
     def process_task(self, task: Dict) -> Dict:
         """Process development tasks by implementing the planning results."""
@@ -875,24 +914,66 @@ class DevelopmentAgent(BaseAgent):
             
             self.logger.info(f"DEVELOPMENT: Implementing goal: {goal[:100]}...")
             
-            # Get results from previous agents in the workflow
+            # Determine iteration_count
+            iteration_count = 0 # Default
+            iteration_count_from_data = task.get("data", {}).get("iteration_count")
+            iteration_count_from_task_attr = task.get("iteration_count")
+            execution_id_str = task.get("execution_id", "")
+
+            if iteration_count_from_data is not None:
+                try:
+                    iteration_count = int(iteration_count_from_data)
+                except ValueError:
+                    self.logger.warning(f"Could not parse iteration_count '{iteration_count_from_data}' from task.data.")
+            elif iteration_count_from_task_attr is not None:
+                try:
+                    iteration_count = int(iteration_count_from_task_attr)
+                except ValueError:
+                    self.logger.warning(f"Could not parse iteration_count '{iteration_count_from_task_attr}' from task attribute.")
+            elif "_cycle_" in execution_id_str:
+                try:
+                    cycle_part = execution_id_str.split("_cycle_")[1]
+                    iteration_count = int(cycle_part.split("_")[0])
+                except (IndexError, ValueError) as e_parse:
+                    self.logger.warning(f"Could not parse iteration_count from execution_id '{execution_id_str}': {e_parse}")
+            
+            # Determine short_parent_task_id (e.g., "smart_implementation")
+            full_task_id = task.get("task_id", "") # Orchestrator sets this to the full unique task ID
+            task_execution_id_prefix = execution_id_str + "_"
+            short_parent_task_id = full_task_id.replace(task_execution_id_prefix, "", 1) if full_task_id.startswith(task_execution_id_prefix) else full_task_id
+            if short_parent_task_id == full_task_id and execution_id_str in full_task_id:
+                parts = full_task_id.split(execution_id_str + "_")
+                if len(parts) > 1:
+                    short_parent_task_id = parts[1]
+
+            self.logger.debug(f"Dev task context: iteration_count={iteration_count}, short_parent_task_id='{short_parent_task_id}'")
+
             planning_results = context.get("planning_results", {})
             research_results = context.get("research_results", {})
-            analysis_results = context.get("analysis_results", {})
             
-            # Extract task breakdown from planning results
             task_breakdown = planning_results.get("task_breakdown", [])
-            execution_strategy = planning_results.get("execution_strategy", {})
             
             if not task_breakdown:
-                raise Exception("No task breakdown from planning results - DevelopmentAgent requires planning from PlanningAgent")
-            
-            self.logger.info(f"Implementing {len(task_breakdown)} tasks from planning results")
-            
-            # Implement the planned tasks directly using MCP tools
-            implementation_results = self._implement_planned_tasks(
-                task_breakdown, project_dir, goal, planning_results, research_results
-            )
+                # If no breakdown, attempt to generate a single implementation task based on the goal
+                self.logger.critical("CRITICAL: No task breakdown from planning results. Development cannot proceed without a plan. Task will fail.")
+                # This is a simplified fallback. Ideally, planning should always provide tasks.
+                # Create a pseudo task for _determine_file_for_task
+                # pseudo_task_for_file_gen = {
+                # "task": goal, # Use the main goal as the task description
+                # "type": "development"
+                # }
+                # file_info = self._determine_file_for_task(pseudo_task_for_file_gen, project_dir, goal, iteration_count)
+                # if file_info:
+                # implementation_results = self._implement_single_task(file_info, project_dir, goal, planning_results, iteration_count, short_parent_task_id, is_direct_info=True)
+                # else:
+                # raise Exception("No task breakdown from planning results and failed to generate direct file info.")
+                raise Exception("No task breakdown from planning results. Development cannot proceed.")
+            else:
+                self.logger.info(f"Implementing {len(task_breakdown)} tasks from planning results")
+                implementation_results = self._implement_planned_tasks(
+                    task_breakdown, project_dir, goal, planning_results, research_results,
+                    iteration_count, short_parent_task_id
+                )
             
             self.status = "completed"
             return {
@@ -910,7 +991,8 @@ class DevelopmentAgent(BaseAgent):
             return self.handle_error(e, task)
     
     def _implement_planned_tasks(self, task_breakdown: List[Dict], project_dir: str, 
-                               goal: str, planning_results: Dict, research_results: Dict) -> Dict:
+                               goal: str, planning_results: Dict, research_results: Dict,
+                               iteration_count: int, short_parent_task_id: str) -> Dict:
         """Implement the planned tasks directly using MCP filesystem tools."""
         files_created = []
         files_modified = []
@@ -926,7 +1008,18 @@ class DevelopmentAgent(BaseAgent):
             
             try:
                 # Generate implementation for this specific task
-                task_result = self._implement_single_task(task, project_dir, goal, planning_results)
+                # _determine_file_for_task needs a task dict from task_breakdown
+                file_info = self._determine_file_for_task(task, project_dir, goal, iteration_count)
+                if not file_info:
+                    self.logger.warning(f"Could not determine file for sub-task '{task_name}'. Skipping.")
+                    implementation_summary.append({
+                        "task": task_name,
+                        "status": "skipped",
+                        "reason": "Could not determine file information from LLM."
+                    })
+                    continue
+                
+                task_result = self._implement_single_task(file_info, project_dir, goal, planning_results, iteration_count, short_parent_task_id, is_direct_info=True)
                 
                 files_created.extend(task_result.get("files_created", []))
                 files_modified.extend(task_result.get("files_modified", []))
@@ -952,15 +1045,21 @@ class DevelopmentAgent(BaseAgent):
             "summary": implementation_summary
         }
     
-    def _implement_single_task(self, task: Dict, project_dir: str, goal: str, planning_results: Dict) -> Dict:
-        """Implement a single task from the task breakdown."""
-        task_name = task.get("task", "")
-        task_type = task.get("type", "development")
+    def _implement_single_task(self, file_info_or_sub_task_dict: Dict, project_dir: str, goal: str, planning_results: Dict, 
+                               iteration_count: int, short_parent_task_id: str, is_direct_info: bool = False) -> Dict:
+        """Implement a single task from the task breakdown or direct file_info."""
         
-        # Determine file path and content based on task
-        file_info = self._determine_file_for_task(task, project_dir, goal)
-        
+        if is_direct_info:
+            file_info = file_info_or_sub_task_dict
+        else:
+            # This case might be deprecated if _determine_file_for_task is always called before
+            sub_task_dict = file_info_or_sub_task_dict
+            task_name = sub_task_dict.get("task", "Unknown sub-task")
+            self.logger.debug(f"Determining file for sub-task: {task_name}")
+            file_info = self._determine_file_for_task(sub_task_dict, project_dir, goal)
+
         if not file_info:
+            self.logger.warning("No file information determined for task. Cannot implement.")
             return {"files_created": [], "files_modified": []}
         
         file_path = file_info["path"]
@@ -973,7 +1072,7 @@ class DevelopmentAgent(BaseAgent):
         # Ensure directory exists (create recursively if needed)
         dir_path = os.path.dirname(workspace_file_path)
         if dir_path and dir_path != "." and dir_path != "/workspace":
-            self._create_directory_recursive(dir_path)
+            self._create_directory_recursive(dir_path, iteration_count, short_parent_task_id)
         
         # Write the file
         write_result = self.call_mcp_tool("filesystem", "write_file", {
@@ -983,6 +1082,19 @@ class DevelopmentAgent(BaseAgent):
         
         if not self._is_mcp_error(write_result):
             self.logger.info(f"Successfully {action}d file: {file_path}")
+            
+            # Log file operation to memory
+            if self.memory_manager:
+                content_summary = (file_content[:200] + '...') if len(file_content) > 200 else file_content
+                self.memory_manager.store_file_operation(
+                    iteration_count=iteration_count,
+                    file_path=file_path, # Use the original, possibly relative path for logging consistency
+                    operation=action,
+                    task_id=short_parent_task_id, # Log against the parent dev task
+                    content_summary=content_summary
+                )
+                self.logger.debug(f"Stored file op in memory: iter={iteration_count}, path={file_path}, op={action}, task_id={short_parent_task_id}")
+
             if action == "create":
                 return {"files_created": [file_path], "files_modified": []}
             else:
@@ -1048,48 +1160,208 @@ class DevelopmentAgent(BaseAgent):
         # Fallback
         return "Unknown MCP error"
     
-    def _determine_file_for_task(self, task: Dict, project_dir: str, goal: str) -> Optional[Dict]:
-        """Determine what file to create/modify for a given task."""
+    def _determine_file_for_task(self, task: Dict, project_dir: str, goal: str, iteration_count: int) -> Optional[Dict]:
+        """Determine what file to create/modify for a given task, handling potential conflicts using memory."""
         if not self.llm_provider:
+            self.logger.warning("LLM provider not available, cannot determine file for task.")
             return None
         
         task_name = task.get("task", "")
         task_type = task.get("type", "development")
+
+        context_summary_for_llm = "None available."
+        if self.memory_manager and iteration_count > 0:
+            try:
+                self.logger.debug(f"Retrieving context from iteration {iteration_count - 1} for DevAgent task '{task_name}'.")
+                # We want insights from the analysis phase of the *previous* iteration.
+                previous_iteration_context = self.memory_manager.retrieve_iteration_context(iteration_count - 1)
+                
+                project_evolution_insights = previous_iteration_context.get("project_evolution", [])
+                target_analysis_entity_name = f"analysis_{self.memory_manager.project_id}_{iteration_count - 1}"
+                
+                found_insights = []
+                for analysis_entity_data in project_evolution_insights:
+                    if analysis_entity_data.get("entity_name") == target_analysis_entity_name:
+                        self.logger.debug(f"Found analysis entity for iteration {iteration_count - 1}: {target_analysis_entity_name}")
+                        observations = analysis_entity_data.get("observations", [])
+                        evolved_goal_obs = "Evolved Goal: Not found in observations."
+                        improvement_obs = []
+                        for obs_line in observations:
+                            if obs_line.startswith("Evolved Goal:"):
+                                evolved_goal_obs = obs_line
+                            elif obs_line.startswith("Improvement"):
+                                improvement_obs.append(obs_line)
+                        
+                        if evolved_goal_obs != "Evolved Goal: Not found in observations." or improvement_obs:
+                            found_insights.append(f"Insights from previous analysis (iteration {iteration_count - 1}):")
+                            found_insights.append(evolved_goal_obs)
+                            found_insights.extend(improvement_obs[:3]) # Max 3 improvements in prompt
+                        break 
+                
+                if found_insights:
+                    context_summary_for_llm = "\n".join(found_insights)
+                else:
+                    self.logger.debug(f"No specific analysis insights found for iter {iteration_count - 1} in project_evolution data.")
+            except Exception as e_mem_ctx:
+                self.logger.warning(f"Error retrieving context from memory for DevAgent: {e_mem_ctx}", exc_info=True)
+                context_summary_for_llm = "Error retrieving context from memory."
         
-        # Generate file content and path
-        file_prompt = f"""
-        Determine the file to create for this development task:
+        initial_file_prompt = f"""
+        Determine the file to create or modify for this development task:
         
         TASK: {task_name}
         TASK TYPE: {task_type}
         GOAL: {goal}
-        PROJECT DIRECTORY: {project_dir}
+        PROJECT DIRECTORY (base for relative paths): {project_dir}
+
+        ADDITIONAL CONTEXT FROM PREVIOUS ITERATION ANALYSIS:
+        {context_summary_for_llm}
         
-        Create a single file for this task. Respond with EXACTLY this format:
+        Suggest a single file operation. Respond with EXACTLY this format:
         
-        FILE_PATH: relative/path/to/file.py
-        ACTION: create
+        FILE_PATH: relative/path/to/file.py  (e.g., src/utils/helpers.py or README.md)
+        ACTION: create OR modify
         CONTENT:
         [actual file content here - RAW CODE ONLY, NO MARKDOWN FORMATTING]
         
         Rules:
-        - Use appropriate file extensions (.py, .js, .md, etc.)
-        - Place files in logical directories (src/, tests/, docs/, etc.)
-        - Generate complete, functional code
-        - Include necessary imports and proper structure
-        - Make the code production-ready
-        - DO NOT use markdown code fences (```) in the file content
-        - DO NOT include language identifiers like ```python
-        - Provide ONLY the raw file content after CONTENT:
+        - FILE_PATH should be relative to the PROJECT DIRECTORY.
+        - Use appropriate file extensions.
+        - Place files in logical directories (e.g. src/, tests/, docs/).
+        - If modifying, assume you have the original content and provide the new COMPLETE content.
+        - Generate complete, functional code with necessary imports and structure.
+        - Make the code production-ready.
+        - DO NOT use markdown code fences (```) in the file content.
+        - Provide ONLY the raw file content after CONTENT:.
         
         Focus on implementing the specific task functionality.
         """
         
         try:
-            response = self.llm_provider.generate_text(file_prompt, temperature=0.2)
-            return self._parse_file_response(response, project_dir)
+            raw_llm_response = self.llm_provider.generate_text(initial_file_prompt, temperature=0.2)
+            parsed_info = self._parse_file_response(raw_llm_response, project_dir)
+
+            if not parsed_info:
+                self.logger.warning(f"Could not parse initial LLM response for task '{task_name}'. Response: {raw_llm_response[:200]}...")
+                return None
+
+            prospective_file_path_abs_or_rel = parsed_info["path"] 
+            prospective_action = parsed_info["action"]
+            prospective_content = parsed_info["content"]
+
+            if self.memory_manager:
+                path_for_memory_lookup: str
+                abs_project_dir = os.path.abspath(project_dir)
+                
+                if os.path.isabs(prospective_file_path_abs_or_rel):
+                    if prospective_file_path_abs_or_rel.startswith(abs_project_dir):
+                        path_for_memory_lookup = os.path.relpath(prospective_file_path_abs_or_rel, abs_project_dir)
+                    else:
+                        self.logger.warning(f"Prospective path {prospective_file_path_abs_or_rel} is absolute but not in project dir {abs_project_dir}. Using basename for memory lookup.")
+                        path_for_memory_lookup = os.path.basename(prospective_file_path_abs_or_rel)
+                else:
+                    path_for_memory_lookup = prospective_file_path_abs_or_rel
+                
+                path_for_memory_lookup = path_for_memory_lookup.replace(os.sep, '/')
+                if path_for_memory_lookup.startswith("./"):
+                    path_for_memory_lookup = path_for_memory_lookup[2:]
+
+                self.logger.debug(f"Checking memory for file: '{path_for_memory_lookup}' (derived from: '{prospective_file_path_abs_or_rel}', project_dir: '{project_dir}')")
+                file_history = self.memory_manager.get_file_conflict_context(path_for_memory_lookup)
+
+                if file_history.get("exists"):
+                    if prospective_action == "create":
+                        self.logger.info(f"Conflict: Task '{task_name}' wants to CREATE '{path_for_memory_lookup}' which exists. History: {file_history}")
+                        
+                        conflict_resolution_prompt = f"""
+                        You are an intelligent development agent. You planned to CREATE the file '{path_for_memory_lookup}' for the task '{task_name}'.
+                        However, this file ALREADY EXISTS.
+                        
+                        File History from Memory:
+                        - Path: {path_for_memory_lookup}
+                        - Last Operation: {file_history.get('last_operation', 'N/A')}
+                        - Last Modified Iteration: {file_history.get('last_iteration', 'N/A')}
+                        - Previous Content Summary (if available): {file_history.get('content_summary', 'N/A')}
+                        
+                        Your original suggested content for CREATION was:
+                        ---
+                        {prospective_content}
+                        ---
+                        
+                        How do you want to resolve this conflict? The project goal is: {goal}
+                        Respond with EXACTLY this format (path relative to project root):
+                        
+                        FILE_PATH: relative/path/to/file.py
+                        ACTION: overwrite OR modify OR rename_new OR skip
+                        CONTENT:
+                        [Your new content here. If skipping, write SKIP_CONTENT. If renaming, this is content for the NEW file.]
+                        
+                        Options:
+                        - overwrite: Replace existing file with new content.
+                        - modify: Provide NEW FULL content for '{path_for_memory_lookup}', considering its history.
+                        - rename_new: Create a NEW file (e.g., '{os.path.splitext(path_for_memory_lookup)[0]}_new{os.path.splitext(path_for_memory_lookup)[1]}'). Provide its content.
+                        - skip: Do not create or modify this file.
+                        """
+                        self.logger.debug(f"Sending conflict resolution prompt for {path_for_memory_lookup}")
+                        conflict_llm_response = self.llm_provider.generate_text(conflict_resolution_prompt, temperature=0.3)
+                        resolved_info = self._parse_file_response(conflict_llm_response, project_dir)
+
+                        if not resolved_info or resolved_info.get("action") == "skip" or resolved_info.get("content","").strip().upper() == "SKIP_CONTENT":
+                            self.logger.info(f"Skipping file operation for '{path_for_memory_lookup}' based on conflict resolution.")
+                            return None 
+                        
+                        self.logger.info(f"Conflict for '{path_for_memory_lookup}' resolved. New action: '{resolved_info.get('action')}', New path (abs/rel from parse): '{resolved_info.get('path')}'")
+                        return resolved_info 
+
+                    elif prospective_action == "modify":
+                        self.logger.info(f"Task '{task_name}' intends to MODIFY existing file '{path_for_memory_lookup}'. History available: {file_history}. Re-prompting LLM for context-aware modification.")
+                        
+                        modification_with_history_prompt = f"""
+                        You are an intelligent development agent. Your task is '{task_name}' and you initially decided to MODIFY the file '{path_for_memory_lookup}'.
+                        
+                        File History from Memory:
+                        - Path: {path_for_memory_lookup}
+                        - Last Operation: {file_history.get('last_operation', 'N/A')}
+                        - Last Modified Iteration: {file_history.get('last_iteration', 'N/A')}
+                        - Previous Content Summary (if available): {file_history.get('content_summary', 'N/A')}
+                        
+                        Your initial suggested new content for the file was:
+                        ---
+                        {prospective_content}
+                        ---
+                        
+                        Considering the file's history and your initial plan, provide the FINAL new and complete content for '{path_for_memory_lookup}'.
+                        The project goal is: {goal}
+                        
+                        Respond with EXACTLY this format (path relative to project root):
+                        
+                        FILE_PATH: {path_for_memory_lookup}
+                        ACTION: modify
+                        CONTENT:
+                        [Your final, complete new content here, taking history into account.]
+                        
+                        Ensure the content is complete and production-ready.
+                        """
+                        self.logger.debug(f"Sending modification-with-history prompt for {path_for_memory_lookup}")
+                        modification_llm_response = self.llm_provider.generate_text(modification_with_history_prompt, temperature=0.25)
+                        # Parse the response. The FILE_PATH and ACTION should ideally remain the same.
+                        modified_info = self._parse_file_response(modification_llm_response, project_dir)
+
+                        if not modified_info or modified_info.get("action") == "skip" or modified_info.get("content","").strip().upper() == "SKIP_CONTENT":
+                            self.logger.warning(f"LLM decided to skip modification for '{path_for_memory_lookup}' after reviewing history, or response was invalid.")
+                            return None
+                        
+                        # Ensure the action is still 'modify' and path hasn't unexpectedly changed
+                        if modified_info.get("action") != "modify" or modified_info.get("path") != prospective_file_path_abs_or_rel:
+                             self.logger.warning(f"LLM changed action/path unexpectedly during context-aware modify. Expected: modify '{prospective_file_path_abs_or_rel}', Got: {modified_info.get('action')} '{modified_info.get('path')}'. Proceeding with LLM's decision.")
+                        
+                        self.logger.info(f"Modification for '{path_for_memory_lookup}' refined with history. Action: '{modified_info.get('action')}', Path: '{modified_info.get('path')}'")
+                        return modified_info # Return the content refined with history
+
+            return parsed_info # No memory manager, or no conflict, or file didn't exist for modify intent
+
         except Exception as e:
-            self.logger.error(f"Failed to determine file for task '{task_name}': {e}")
+            self.logger.error(f"Failed to determine file for task '{task_name}': {e}", exc_info=True)
             return None
     
     def _parse_file_response(self, response: str, project_dir: str) -> Optional[Dict]:
@@ -1157,7 +1429,7 @@ class DevelopmentAgent(BaseAgent):
         
         return '\n'.join(cleaned_lines).strip()
     
-    def _create_directory_recursive(self, dir_path: str) -> None:
+    def _create_directory_recursive(self, dir_path: str, iteration_count: int, task_id_for_memory: str) -> None:
         """Create directory recursively, ensuring all parent directories exist."""
         # Normalize the path
         dir_path = dir_path.rstrip('/')
@@ -1177,7 +1449,7 @@ class DevelopmentAgent(BaseAgent):
         
         # Recursively create parent if needed
         if parent_dir and parent_dir != "/workspace" and parent_dir != dir_path:
-            self._create_directory_recursive(parent_dir)
+            self._create_directory_recursive(parent_dir, iteration_count, task_id_for_memory)
         
         # Now create this directory
         create_result = self.call_mcp_tool("filesystem", "create_directory", {"path": dir_path})
@@ -1187,13 +1459,32 @@ class DevelopmentAgent(BaseAgent):
         
         self.logger.debug(f"Created directory: {dir_path}")
 
+        if self.memory_manager:
+            relative_dir_path = dir_path
+            if relative_dir_path.startswith("/workspace/"):
+                relative_dir_path = relative_dir_path[len("/workspace/"):]
+            elif relative_dir_path.startswith("workspace/"):
+                relative_dir_path = relative_dir_path[len("workspace/"):]
+            relative_dir_path = relative_dir_path.strip('/')
+
+            if relative_dir_path:
+                self.memory_manager.store_directory_operation(
+                    iteration_count=iteration_count,
+                    dir_path=relative_dir_path,
+                    operation="create",
+                    task_id=task_id_for_memory
+                )
+                self.logger.debug(f"Stored directory creation in memory: iter={iteration_count}, path={relative_dir_path}, task_id={task_id_for_memory}")
+            else:
+                self.logger.warning(f"Skipping memory log for root-level directory creation: {dir_path}")
+
 class DocumentationAgent(BaseAgent):
     """
     Documentation agent for creating and maintaining project documentation.
     """
     
-    def __init__(self, agent_id: str, agent_type: str, llm_provider=None, mcp_manager=None, config: Optional[Dict] = None):
-        super().__init__(agent_id, agent_type, llm_provider, mcp_manager, config)
+    def __init__(self, agent_id: str, agent_type: str, llm_provider=None, mcp_manager=None, config: Optional[Dict] = None, memory_manager=None):
+        super().__init__(agent_id, agent_type, llm_provider, mcp_manager, config, memory_manager)
     
     def process_task(self, task: Dict) -> Dict:
         """Process documentation tasks."""
@@ -1396,8 +1687,8 @@ class AnalysisAgent(BaseAgent):
     Central to iteration workflows and continuous improvement processes.
     """
     
-    def __init__(self, agent_id: str, agent_type: str, llm_provider=None, mcp_manager=None, config: Optional[Dict] = None):
-        super().__init__(agent_id, agent_type, llm_provider, mcp_manager, config)
+    def __init__(self, agent_id: str, agent_type: str, llm_provider=None, mcp_manager=None, config: Optional[Dict] = None, memory_manager=None):
+        super().__init__(agent_id, agent_type, llm_provider, mcp_manager, config, memory_manager)
     
     def process_task(self, task: Dict) -> Dict:
         """Process analysis tasks."""
@@ -1409,34 +1700,75 @@ class AnalysisAgent(BaseAgent):
             
             self.logger.info(f"ANALYSIS: Analyzing project for goal: {goal[:100]}...")
             
-            # Get task-specific parameters
             task_data = task.get("data", {})
             analysis_depth = task_data.get("analysis_depth", "standard")
-            workflow_type = task_data.get("workflow_type", "unknown")
+            workflow_type = task_data.get("workflow_type", task.get("context", {}).get("workflow_type", "unknown"))
             
-            # Check both locations for iteration_count (orchestrator puts it directly on task, workflow puts it in data)
-            iteration_count = task.get("iteration_count", task_data.get("iteration_count", 0))
-            max_iterations = task.get("initial_iterations", task_data.get("max_iterations"))
+            # Determine iteration_count (also check task.get("iteration_count") for direct pass-through from orchestrator)
+            iteration_count = 0 # Default
+            iteration_count_from_data = task_data.get("iteration_count")
+            iteration_count_from_task_attr = task.get("iteration_count")
+            execution_id_str = task.get("execution_id", "")
+
+            if iteration_count_from_data is not None:
+                try:
+                    iteration_count = int(iteration_count_from_data)
+                except ValueError:
+                    self.logger.warning(f"Could not parse iteration_count '{iteration_count_from_data}' from task.data.")
+            elif iteration_count_from_task_attr is not None:
+                try:
+                    iteration_count = int(iteration_count_from_task_attr)
+                except ValueError:
+                    self.logger.warning(f"Could not parse iteration_count '{iteration_count_from_task_attr}' from task attribute.")
+            elif "_cycle_" in execution_id_str:
+                try:
+                    cycle_part = execution_id_str.split("_cycle_")[1]
+                    iteration_count = int(cycle_part.split("_")[0])
+                except (IndexError, ValueError) as e_parse:
+                    self.logger.warning(f"Could not parse iteration_count from execution_id '{execution_id_str}': {e_parse}")
             
-            # Perform comprehensive project analysis
+            # Max iterations might be in task.data or task.config or context.config
+            max_iterations_from_data = task_data.get("max_iterations")
+            max_iterations_from_task_config = task.get("config", {}).get("max_iterations")
+            max_iterations_from_context_config = context.get("config", {}).get("max_iterations")
+            max_iterations = max_iterations_from_data or max_iterations_from_task_config or max_iterations_from_context_config
+
             project_state = self._analyze_project_state_enhanced(project_dir, analysis_depth) if project_dir else {}
-            
-            # Analyze file duplicates as part of project health
             duplicate_analysis = self.analyze_file_duplicates(project_dir) if project_dir else {}
-            
-            # Generate improvement analysis
             improvement_analysis = self._analyze_improvements(goal, context, project_state, duplicate_analysis)
             
-            # Determine if workflow should continue (for iteration workflows)
             continuation_decision = self._determine_continuation(
-                workflow_type, iteration_count, max_iterations, improvement_analysis
+                workflow_type, iteration_count, max_iterations, improvement_analysis, goal, context
             )
             
-            # Generate evolved goal if continuing
             evolved_goal = None
             if continuation_decision.get("should_continue", False):
-                evolved_goal = self._evolve_goal(goal, improvement_analysis, iteration_count)
+                evolved_goal = self._evolve_goal(goal, improvement_analysis, iteration_count, context)
             
+            # Store analysis insights in memory
+            if self.memory_manager:
+                project_state_analysis = project_state.get("analysis", {})
+                comprehensive_analysis = "Not available"
+                if isinstance(project_state_analysis, dict):
+                    comprehensive_analysis = project_state_analysis.get("comprehensive_analysis", "Not available")
+                elif isinstance(project_state_analysis, str):
+                    comprehensive_analysis = project_state_analysis
+
+                insights_payload = {
+                    "project_id": context.get("project_id", "unknown_project"),
+                    "iteration_count": iteration_count,
+                    "project_state_analysis_summary": comprehensive_analysis[:500] + ("..." if len(comprehensive_analysis) > 500 else ""),
+                    "duplicate_file_count": duplicate_analysis.get('potential_duplicates', 0),
+                    "improvements_suggested": improvement_analysis.get("improvements", []),
+                    "continuation_decision": continuation_decision,
+                    "evolved_goal": evolved_goal,
+                    "raw_improvement_analysis_text": improvement_analysis.get("analysis", "")[:1000] + ("..." if len(improvement_analysis.get("analysis", "")) > 1000 else "")
+                }
+                if self.memory_manager.store_analysis_insights(iteration_count, insights_payload):
+                    self.logger.debug(f"Stored analysis insights in memory for iteration {iteration_count}")
+                else:
+                    self.logger.warning(f"Failed to store analysis insights in memory for iteration {iteration_count}")
+
             self.status = "completed"
             return {
                 "status": "success",
@@ -1673,35 +2005,88 @@ class AnalysisAgent(BaseAgent):
         return improvements[:10]  # Limit to avoid overwhelming
     
     def _determine_continuation(self, workflow_type: str, iteration_count: int, 
-                              max_iterations: Optional[int], improvement_analysis: Dict) -> Dict:
+                              max_iterations: Optional[int], improvement_analysis: Dict,
+                              goal: str, context: Dict) -> Dict:
         """Determine if workflow should continue based on analysis."""
         should_continue = False
         reason = ""
-        
-        self.logger.info(f"Determining continuation: workflow_type={workflow_type}, iteration_count={iteration_count}, max_iterations={max_iterations}")
-        
-        # Check max iterations limit
-        if max_iterations is not None and iteration_count >= max_iterations:
-            reason = f"Maximum iterations ({max_iterations}) reached"
-            self.logger.info(f"Stopping: {reason}")
-        else:
-            # Check if there are meaningful improvements to make
-            improvements = improvement_analysis.get("improvements", [])
-            high_priority = improvement_analysis.get("high_priority", 0)
-            
-            self.logger.info(f"Found {len(improvements)} improvements, {high_priority} high-priority")
-            
-            if workflow_type == "indefinite":
-                should_continue = len(improvements) > 0
-                reason = f"Found {len(improvements)} potential improvements" if should_continue else "No improvements identified"
-            elif workflow_type == "iteration":
-                should_continue = high_priority > 0 or len(improvements) > 2
-                reason = f"Found {high_priority} high-priority and {len(improvements)} total improvements" if should_continue else "Insufficient improvements to continue"
+        completion_strategy = context.get("config", {}).get("completion_strategy", "smart")
+        adaptive_enabled = context.get("config", {}).get("adaptive", True)
+        target_version = context.get("config", {}).get("target_version")
+
+        self.logger.info(f"Determining continuation: workflow='{workflow_type}', iter={iteration_count}, max_iter={max_iterations}, strategy='{completion_strategy}', adaptive={adaptive_enabled}")
+
+        # Core improvement data
+        improvements = improvement_analysis.get("improvements", [])
+        high_priority_improvements = [imp for imp in improvements if imp.get("priority") == "high"]
+        medium_priority_improvements = [imp for imp in improvements if imp.get("priority") == "medium"]
+
+        # Smart Strategy (Default for iteration)
+        if completion_strategy == "smart":
+            significant_improvements_exist = len(high_priority_improvements) > 0 or len(medium_priority_improvements) >= 2
+            if significant_improvements_exist:
+                if max_iterations is not None and iteration_count >= max_iterations:
+                    if adaptive_enabled:
+                        should_continue = True
+                        reason = f"Max iterations ({max_iterations}) reached, but adaptive mode enabled with significant improvements found ({len(high_priority_improvements)} high, {len(medium_priority_improvements)} medium)."
+                    else:
+                        should_continue = False
+                        reason = f"Max iterations ({max_iterations}) reached, and adaptive mode disabled. Stopping despite improvements."
+                else:
+                    should_continue = True
+                    reason = f"Significant improvements found ({len(high_priority_improvements)} high, {len(medium_priority_improvements)} medium). Continuing to iteration {iteration_count + 1}."
             else:
-                should_continue = len(improvements) > 0
-                reason = f"Found {len(improvements)} improvements for {workflow_type} workflow"
-            
-            self.logger.info(f"Continuation decision: should_continue={should_continue}, reason={reason}")
+                should_continue = False
+                reason = "No significant high or medium priority improvements identified for smart strategy."
+
+        # Fixed Iteration Strategy
+        elif completion_strategy == "fixed":
+            if max_iterations is not None and iteration_count >= max_iterations:
+                should_continue = False
+                reason = f"Fixed strategy: Maximum iterations ({max_iterations}) reached."
+            else:
+                # Continue if improvements exist, otherwise stop early to avoid empty cycles
+                if improvements:
+                    should_continue = True
+                    reason = f"Fixed strategy: Continuing to iteration {iteration_count + 1} of {max_iterations} (improvements found)."
+                else:
+                    should_continue = False
+                    reason = f"Fixed strategy: No improvements found. Stopping early before iteration {iteration_count + 1} of {max_iterations}."
+        
+        # Version Driven Strategy
+        elif completion_strategy == "version_driven" and target_version:
+            # This strategy implies AnalysisAgent needs to assess if target_version is met.
+            # For now, we'll assume it continues if improvements exist and max_iterations not hit.
+            # A more sophisticated check would involve analyzing project_state against target_version requirements.
+            self.logger.info(f"Version-driven strategy: Target is {target_version}. (Current check is placeholder)")
+            if max_iterations is not None and iteration_count >= max_iterations:
+                should_continue = False
+                reason = f"Version-driven strategy: Max iterations ({max_iterations}) reached for target {target_version}."
+            elif not improvements: # Stop if no improvements, even if version not met (to avoid empty cycles)
+                should_continue = False
+                reason = f"Version-driven strategy: No improvements identified to progress towards {target_version}."
+            else:
+                should_continue = True # Placeholder: Assume we continue if improvements and not at max_iter
+                reason = f"Version-driven strategy: Continuing towards {target_version} (iteration {iteration_count + 1})."
+
+        # Indefinite Workflow Type (overrides completion_strategy for this type)
+        elif workflow_type == "indefinite":
+            should_continue = len(improvements) > 0
+            reason = f"Indefinite workflow: Found {len(improvements)} potential improvements." if should_continue else "Indefinite workflow: No improvements identified."
+        
+        # Fallback for other workflow types or misconfigurations
+        else:
+            if max_iterations is not None and iteration_count >= max_iterations:
+                should_continue = False
+                reason = f"Fallback: Max iterations ({max_iterations}) reached for workflow type '{workflow_type}'."
+            elif not improvements:
+                should_continue = False
+                reason = f"Fallback: No improvements identified for workflow type '{workflow_type}'."
+            else:
+                should_continue = True
+                reason = f"Fallback: Found {len(improvements)} improvements. Continuing for workflow '{workflow_type}'."
+
+        self.logger.info(f"Continuation decision: {should_continue}. Reason: {reason}")
         
         return {
             "should_continue": should_continue,
@@ -1711,7 +2096,7 @@ class AnalysisAgent(BaseAgent):
             "max_iterations": max_iterations
         }
     
-    def _evolve_goal(self, original_goal: str, improvement_analysis: Dict, iteration_count: int) -> str:
+    def _evolve_goal(self, original_goal: str, improvement_analysis: Dict, iteration_count: int, context: Dict) -> str:
         """Evolve the goal based on improvement analysis for next iteration."""
         if not self.llm_provider:
             return original_goal

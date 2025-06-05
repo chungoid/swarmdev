@@ -6,11 +6,17 @@ This module provides the base agent class that all specialized agents inherit fr
 import json
 import logging
 from abc import ABC, abstractmethod
-from typing import Dict, List, Optional, Any, Callable
+from typing import Dict, List, Optional, Any, Callable, TYPE_CHECKING
 from datetime import datetime
 import os
+import time
 
 from ...utils.agent_logger import AgentLogger
+
+if TYPE_CHECKING:
+    from ...utils.llm_provider import LLMProviderInterface
+    from ...utils.mcp_manager import MCPManager
+    from ...utils.memory_context_manager import MemoryContextManager
 
 class BaseAgent(ABC):
     """
@@ -20,13 +26,29 @@ class BaseAgent(ABC):
     where the LLM can discover and use any tool without hardcoded patterns.
     """
     
-    def __init__(self, agent_id: str, agent_type: str, llm_provider=None, mcp_manager=None, config: Optional[Dict] = None):
-        """Initialize a base agent with LLM and natural MCP capabilities."""
+    def __init__(self, agent_id: str, agent_type: str, 
+                 llm_provider: Optional['LLMProviderInterface'] = None, 
+                 mcp_manager: Optional['MCPManager'] = None, 
+                 config: Optional[Dict] = None,
+                 memory_manager: Optional['MemoryContextManager'] = None):
+        """
+        Initialize the agent.
+        
+        Args:
+            agent_id: Unique identifier for the agent
+            agent_type: Type of the agent (e.g., research, planning)
+            llm_provider: LLM provider instance
+            mcp_manager: MCPManager instance for tool access
+            config: Agent-specific configuration dictionary
+            memory_manager: MemoryContextManager instance
+        """
         self.agent_id = agent_id
         self.agent_type = agent_type
+        self.status = "idle"  # idle, processing, completed, failed
         self.llm_provider = llm_provider
         self.mcp_manager = mcp_manager
         self.config = config or {}
+        self.memory_manager = memory_manager
         
         # Agent state
         self.current_task = None
@@ -62,6 +84,11 @@ class BaseAgent(ABC):
         else:
             self.mcp_tool_catalog = {}
             self.logger.info("No MCP manager - agent will work without external tools")
+        
+        # Initialize MCP tool catalog and usage stats
+        self.mcp_usage_stats: Dict[str, Dict[str, int]] = {}
+        self.mcp_call_log: List[Dict[str, Any]] = []
+        self._build_tool_catalog()
     
     def _build_tool_catalog(self) -> Dict:
         """Build a catalog of all available MCP tools with their schemas."""

@@ -7,14 +7,17 @@ import os
 import json
 import logging
 from datetime import datetime
-from typing import Dict, Optional, List
+from typing import Dict, Optional, List, TYPE_CHECKING
 
 from .storage import GoalStorage
 from ..utils.llm_provider import ProviderRegistry, LLMProviderInterface
 from swarmdev.swarm_builder.orchestration import Orchestrator
 from swarmdev.swarm_builder.agents import ResearchAgent, PlanningAgent, DevelopmentAgent, DocumentationAgent, AnalysisAgent
 from swarmdev.swarm_builder.workflows import get_workflow_by_id
+from ..utils.memory_context_manager import MemoryContextManager
 
+if TYPE_CHECKING:
+    from ..utils.mcp_manager import MCPManager
 
 class SwarmBuilder:
     """
@@ -107,11 +110,28 @@ class SwarmBuilder:
             # Initialize MCP manager
             self._setup_mcp_manager()
             
-            # Initialize orchestrator
-            self.orchestrator = Orchestrator(self.config)
+            # Create MemoryContextManager instance
+            # Ensure self.mcp_manager is initialized by _setup_mcp_manager()
+            memory_manager_instance: Optional[MemoryContextManager] = None
+            if self.mcp_manager and self.mcp_manager.is_enabled():
+                memory_manager_instance = MemoryContextManager(
+                    mcp_manager=self.mcp_manager, 
+                    project_id=project_id, 
+                    logger=self.logger
+                )
+                self.logger.info(f"MemoryContextManager created for project {project_id}")
+            else:
+                self.logger.info("MCP Manager not available or disabled, MemoryContextManager not created.")
+
+            # Initialize orchestrator, passing the memory_manager_instance
+            self.orchestrator = Orchestrator(
+                config=self.config, 
+                mcp_manager=self.mcp_manager, 
+                memory_manager=memory_manager_instance
+            )
             
-            # Register specialized agents with LLM provider
-            self._register_agents()
+            # Register specialized agents with LLM provider, MCP manager, and memory_manager_instance
+            self._register_agents(memory_manager_instance)
             
             # Register workflow
             self._register_workflow()
@@ -201,23 +221,19 @@ class SwarmBuilder:
         try:
             from ..utils.mcp_manager import MCPManager
             
-            # Simplified MCP configuration - MCPManager now handles hierarchical loading
-            # Global config: ~/.swarmdev/mcp_config.json  
-            # Project config: ./.swarmdev/mcp_config.json (optional override)
             mcp_config = self.config.get('mcp', {
                 'enabled': True,
                 'docker_enabled': True,
-                'docker_network': None  # Don't use a specific network by default
+                'docker_network': None
             })
             
-            # Initialize MCP manager with project directory
-            # MCPManager will automatically load global config + project overrides
             self.mcp_manager = MCPManager(mcp_config, self.project_dir)
             
-            # Initialize tools if enabled
             if self.mcp_manager.is_enabled():
-                self.mcp_manager.initialize_tools()
-                self.logger.info("MCP manager initialized successfully with hierarchical configuration")
+                if not self.mcp_manager.initialize_tools():
+                    self.logger.warning("MCP manager enabled, but failed to initialize all tools. Some MCP functionalities may be impaired.")
+                else:
+                    self.logger.info("MCP manager initialized successfully with tools.")
             else:
                 self.logger.info("MCP tools are disabled")
                 
@@ -225,28 +241,32 @@ class SwarmBuilder:
             self.logger.warning(f"Failed to initialize MCP manager: {e}")
             self.mcp_manager = None
     
-    def _register_agents(self):
+    def _register_agents(self, memory_manager: Optional[MemoryContextManager]):
         """Register specialized agents with the orchestrator."""
         try:
-            # Set up agent logging for the project directory
             from ..utils.agent_logger import AgentLogger
             AgentLogger.set_project_dir(self.project_dir)
             
-            # Create specialized agents with LLM provider and MCP manager
-            research_agent = ResearchAgent("research_agent_1", "research", self.llm_provider, self.mcp_manager, self.config)
-            planning_agent = PlanningAgent("planning_agent_1", "planning", self.llm_provider, self.mcp_manager, self.config)
-            development_agent = DevelopmentAgent("development_agent_1", "development", self.llm_provider, self.mcp_manager, self.config)
-            documentation_agent = DocumentationAgent("documentation_agent_1", "documentation", self.llm_provider, self.mcp_manager, self.config)
-            analysis_agent = AnalysisAgent("analysis_agent_1", "analysis", self.llm_provider, self.mcp_manager, self.config)
+            common_agent_args = {
+                "llm_provider": self.llm_provider,
+                "mcp_manager": self.mcp_manager,
+                "config": self.config,
+                "memory_manager": memory_manager
+            }
             
-            # Register agents with orchestrator
+            research_agent = ResearchAgent("research_agent_1", "research", **common_agent_args)
+            planning_agent = PlanningAgent("planning_agent_1", "planning", **common_agent_args)
+            development_agent = DevelopmentAgent("development_agent_1", "development", **common_agent_args)
+            documentation_agent = DocumentationAgent("documentation_agent_1", "documentation", **common_agent_args)
+            analysis_agent = AnalysisAgent("analysis_agent_1", "analysis", **common_agent_args)
+            
             self.orchestrator.register_agent(research_agent)
             self.orchestrator.register_agent(planning_agent)
             self.orchestrator.register_agent(development_agent)
             self.orchestrator.register_agent(documentation_agent)
             self.orchestrator.register_agent(analysis_agent)
             
-            self.logger.info("All specialized agents registered successfully")
+            self.logger.info("All specialized agents registered successfully with memory manager.")
             
         except Exception as e:
             self.logger.error(f"Failed to register agents: {e}")

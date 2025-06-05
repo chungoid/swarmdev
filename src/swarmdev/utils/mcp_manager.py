@@ -440,6 +440,20 @@ class MCPManager:
                 cwd=cwd,
                 env=env_vars
             )
+
+            # Add check for process and its pipes immediately after Popen
+            if process is None or process.stdin is None or process.stdout is None:
+                self.mcp_logger.error(f"Popen failed to create a valid process or stdio pipes for {server_id}. PID: {process.pid if process else 'N/A'}. Terminating if possible.")
+                if process: # Try to clean up if process object exists but pipes are bad
+                    try: process.terminate()
+                    except: pass # Best effort
+                    try: process.wait(timeout=0.5)
+                    except: pass # Best effort
+                    try: process.kill()
+                    except: pass # Best effort
+                self.servers[server_id]['status'] = 'failed_popen_io'
+                self.servers[server_id]['last_error'] = "Popen failed to establish valid process or stdio pipes."
+                return False
             
             # self.mcp_logger.debug(f"Started {server_id} server with PID: {process.pid if process else 'None'}")
             self.mcp_logger.info(f"Subprocess for {server_id} started. PID: {process.pid}")
@@ -522,6 +536,11 @@ class MCPManager:
                 if self.auto_discovery:
                     self.mcp_logger.info(f"Performing capability discovery for {server_id} after successful handshake.")
                     self._discover_capabilities(server_id)
+                    # Check if discovery failed and update server status accordingly
+                    if self.servers[server_id].get('status') == 'discovery_failed':
+                        self.mcp_logger.error(f"Server {server_id} handshake successful, but capability discovery failed. Marking as unusable.")
+                        # No need to change status again, _discover_capabilities already set it.
+                        return False # Initialization is not fully successful
                 
                 return True
             else:
@@ -586,11 +605,17 @@ class MCPManager:
                 self.mcp_logger.error(f"Failed to discover capabilities for {server_id} using {discovery_method_name}. Error: {error_detail}. Setting empty capabilities.")
                 self.metrics["discovery_failures"] += 1
                 capabilities_data = {"tools": [], "discovery_failed": True, "error_details": error_detail}
+                if server_id in self.servers: # Ensure server_id exists
+                    self.servers[server_id]['status'] = 'discovery_failed' # Update server status
+                    self.servers[server_id]['last_error'] = f"Capability discovery failed: {error_detail}"
 
         except Exception as e:
             self.mcp_logger.error(f"Exception during capability discovery ({discovery_method_name}) for {server_id}: {e}", exc_info=True)
             self.metrics["discovery_failures"] += 1
             capabilities_data = {"tools": [], "discovery_failed": True, "exception_details": str(e)}
+            if server_id in self.servers: # Ensure server_id exists
+                self.servers[server_id]['status'] = 'discovery_failed' # Update server status
+                self.servers[server_id]['last_error'] = f"Capability discovery exception: {str(e)}"
         
         with self._lock:
             self.capabilities[server_id] = capabilities_data
@@ -622,6 +647,13 @@ class MCPManager:
             self.mcp_logger.error(f"MCP server '{tool_id}' not found")
             return {"error": f"Server '{tool_id}' not found"}
         
+        # Check if server had a discovery failure
+        server_info = self.servers[tool_id]
+        if server_info.get('status') == 'discovery_failed':
+            error_msg = f"Server {tool_id} tools are unknown due to a previous capability discovery failure. Last error: {server_info.get('last_error', 'N/A')}"
+            self.mcp_logger.error(error_msg)
+            return {"error": error_msg}
+            
         # Generate unique call ID
         call_id = str(uuid.uuid4())[:8]
         start_time = time.time()
@@ -1071,15 +1103,41 @@ class MCPManager:
         # Close connections
         if self.connections:
             self.mcp_logger.info(f"Closing {len(self.connections)} connections")
-            for server_id, connection in self.connections.items():
+            for server_id, connection_obj in self.connections.items(): # Renamed to connection_obj for clarity
                 try:
-                    process = connection["process"]
-                    process.stdin.close()
-                    process.terminate()
-                    process.wait(timeout=5)
-                    self.mcp_logger.debug(f"Gracefully closed connection for {server_id}")
+                    process = None
+                    # Check if connection_obj is the Popen process itself or a dict containing it
+                    if isinstance(connection_obj, subprocess.Popen):
+                        process = connection_obj
+                    elif isinstance(connection_obj, dict) and "process" in connection_obj and isinstance(connection_obj["process"], subprocess.Popen):
+                        process = connection_obj["process"]
+                    else:
+                        self.mcp_logger.warning(f"Unexpected connection object type for {server_id}: {type(connection_obj)}. Skipping shutdown for this connection.")
+                        continue
+                    
+                    if process.stdin:
+                        try:
+                            process.stdin.close()
+                        except OSError as e_stdin:
+                            self.mcp_logger.debug(f"Error closing stdin for {server_id} (PID: {process.pid}): {e_stdin}")
+                    
+                    if process.poll() is None: # Check if process is still running
+                        process.terminate()
+                        try:
+                            process.wait(timeout=2) # Reduced timeout slightly
+                            self.mcp_logger.debug(f"Gracefully terminated process for {server_id} (PID: {process.pid})")
+                        except subprocess.TimeoutExpired:
+                            self.mcp_logger.warning(f"Timeout terminating {server_id} (PID: {process.pid}), attempting to kill.")
+                            process.kill()
+                            process.wait(timeout=1) # Wait for kill
+                            self.mcp_logger.debug(f"Killed process for {server_id} (PID: {process.pid})")
+                        except Exception as e_wait:
+                            self.mcp_logger.error(f"Error during process wait for {server_id} (PID: {process.pid}): {e_wait}")
+                    else:
+                        self.mcp_logger.debug(f"Process for {server_id} (PID: {process.pid}) already terminated with code: {process.returncode}")
+
                 except Exception as e:
-                    self.mcp_logger.error(f"Error closing connection to '{server_id}': {e}")
+                    self.mcp_logger.error(f"Error closing connection to '{server_id}': {e}", exc_info=True)
         
         self.connections.clear()
         self.mcp_logger.info("MCP Manager shutdown complete") 
