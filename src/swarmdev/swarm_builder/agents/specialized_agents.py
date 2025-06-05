@@ -210,36 +210,103 @@ class PlanningAgent(BaseAgent):
         super().__init__(agent_id, agent_type, llm_provider, mcp_manager, config)
     
     def process_task(self, task: Dict) -> Dict:
-        """Process planning tasks using sequential thinking and project analysis."""
+        """Process planning tasks using sequential thinking and project analysis with enhanced workflow parameters."""
         try:
             self.status = "processing"
             goal = task.get("goal", "")
             context = task.get("context", {})
             project_dir = context.get("project_dir")
             
+            # NEW: Extract planning workflow parameters
+            planning_type = task.get("planning_type", "standard")
+            use_analysis_results = task.get("use_analysis_results", False)
+            use_research_results = task.get("use_research_results", False)
+            preserve_functionality = task.get("preserve_functionality", False)
+            plan_incremental_steps = task.get("plan_incremental_steps", False)
+            risk_assessment = task.get("risk_assessment", False)
+            
+            # Version-aware planning parameters
+            target_version = task.get("target_version")
+            scope_to_current_version = task.get("scope_to_current_version", False)
+            plan_version_increment = task.get("plan_version_increment", False)
+            define_completion_criteria = task.get("define_completion_criteria", False)
+            create_version_blueprint = task.get("create_version_blueprint", False)
+            
+            # Adaptive iteration planning parameters
+            plan_iteration_roadmap = task.get("plan_iteration_roadmap", False)
+            estimate_effort_distribution = task.get("estimate_effort_distribution", False)
+            plan_completion_sequence = task.get("plan_completion_sequence", False)
+            
             self.logger.info(f"PLANNING: Creating plan for goal: {goal[:100]}...")
+            self.logger.info(f"Planning type: {planning_type}, Use analysis: {use_analysis_results}, Use research: {use_research_results}")
             
-            # Investigate project if directory provided
-            project_context = self._investigate_project_context(project_dir) if project_dir else {}
+            # Enhanced project investigation based on parameters
+            project_context = self._investigate_project_context_enhanced(
+                project_dir, preserve_functionality, planning_type
+            ) if project_dir else {}
             
-            # Use sequential thinking for complex planning
-            detailed_plan = self._create_detailed_plan(goal, context, project_context)
+            # Retrieve analysis results if requested
+            analysis_context = {}
+            if use_analysis_results:
+                analysis_context = self._retrieve_analysis_results(context)
             
-            # Break down into actionable tasks
-            task_breakdown = self._break_down_tasks(detailed_plan, goal)
+            # Retrieve research results if requested  
+            research_context = {}
+            if use_research_results:
+                research_context = self._retrieve_research_results(context)
             
-            # Identify dependencies and timeline
-            execution_strategy = self._plan_execution_strategy(task_breakdown)
+            # Enhanced detailed planning with workflow parameters
+            detailed_plan = self._create_detailed_plan_enhanced(
+                goal, context, project_context, analysis_context, research_context,
+                planning_type, target_version, preserve_functionality
+            )
+            
+            # Enhanced task breakdown based on planning type
+            task_breakdown = self._break_down_tasks_enhanced(
+                detailed_plan, goal, planning_type, plan_incremental_steps
+            )
+            
+            # Enhanced execution strategy with risk assessment
+            execution_strategy = self._plan_execution_strategy_enhanced(
+                task_breakdown, risk_assessment, estimate_effort_distribution
+            )
+            
+            # Version planning if requested
+            version_plan = {}
+            if target_version and (plan_version_increment or create_version_blueprint):
+                version_plan = self._create_version_plan(
+                    detailed_plan, target_version, scope_to_current_version
+                )
+            
+            # Completion planning if requested
+            completion_plan = {}
+            if define_completion_criteria or plan_completion_sequence:
+                completion_plan = self._create_completion_plan(
+                    task_breakdown, execution_strategy, target_version
+                )
             
             self.status = "completed"
             return {
-                "status": "success",
+                "status": "success", 
                 "agent_type": self.agent_type,
                 "detailed_plan": detailed_plan,
                 "task_breakdown": task_breakdown,
                 "execution_strategy": execution_strategy,
                 "project_context": project_context,
-                "timestamp": datetime.now().isoformat()
+                "timestamp": datetime.now().isoformat(),
+                
+                # NEW: Enhanced planning results
+                "planning_type": planning_type,
+                "analysis_context": analysis_context,
+                "research_context": research_context,
+                "version_plan": version_plan,
+                "completion_plan": completion_plan,
+                "workflow_parameters": {
+                    "preserve_functionality": preserve_functionality,
+                    "plan_incremental_steps": plan_incremental_steps,
+                    "risk_assessment": risk_assessment,
+                    "target_version": target_version
+                }
             }
             
         except Exception as e:
@@ -412,6 +479,380 @@ class PlanningAgent(BaseAgent):
         except Exception as e:
             self.logger.error(f"Execution strategy planning failed: {e}")
             return {"strategy": "Execute tasks sequentially", "total_tasks": len(task_breakdown)}
+    
+    # NEW: Enhanced planning methods for iteration workflow
+    
+    def _investigate_project_context_enhanced(self, project_dir: str, preserve_functionality: bool, planning_type: str) -> Dict:
+        """Enhanced project context investigation based on planning parameters."""
+        try:
+            project_path = self.investigate_project(project_dir)
+            
+            if self.llm_provider:
+                # Build investigation prompt based on parameters
+                investigation_focus = []
+                if preserve_functionality:
+                    investigation_focus.append("- Existing functionality that must be preserved")
+                    investigation_focus.append("- Critical components and dependencies")
+                    investigation_focus.append("- Integration points that could be affected")
+                
+                if planning_type == "strategic_iteration":
+                    investigation_focus.append("- Architectural patterns and extensibility")
+                    investigation_focus.append("- Refactoring opportunities and constraints")
+                    investigation_focus.append("- Code organization and modularity")
+                
+                investigation_prompt = f"""
+                Investigate this project directory for {planning_type} planning:
+                
+                PROJECT DIRECTORY: {project_path}
+                PLANNING TYPE: {planning_type}
+                PRESERVE FUNCTIONALITY: {preserve_functionality}
+                
+                Focus on:
+                {chr(10).join(investigation_focus) if investigation_focus else "- General project structure"}
+                
+                Also analyze:
+                1. Existing project structure and organization
+                2. Technologies and frameworks in use
+                3. Current development state
+                4. Potential integration points
+                5. Constraints or considerations for new development
+                
+                Provide a structured analysis tailored for {planning_type} planning.
+                """
+                
+                context_analysis = self.llm_provider.generate_text(investigation_prompt, temperature=0.2)
+                return {
+                    "analysis": context_analysis, 
+                    "project_dir": project_path,
+                    "planning_type": planning_type,
+                    "preserve_functionality": preserve_functionality
+                }
+                
+        except Exception as e:
+            self.logger.warning(f"Enhanced project investigation failed: {e}")
+            
+        return {
+            "analysis": "Enhanced project context not available", 
+            "project_dir": project_dir,
+            "planning_type": planning_type
+        }
+    
+    def _retrieve_analysis_results(self, context: Dict) -> Dict:
+        """Retrieve and process analysis results from previous workflow phases."""
+        # In a real implementation, this would look up analysis results from the orchestrator
+        # For now, we'll extract what we can from the context
+        analysis_results = context.get("analysis_results", {})
+        
+        if not analysis_results and self.llm_provider:
+            self.logger.info("No analysis results found in context - planning without analysis input")
+        
+        return {
+            "available": bool(analysis_results),
+            "results": analysis_results,
+            "project_state": analysis_results.get("project_state", {}),
+            "improvements": analysis_results.get("improvements_suggested", [])
+        }
+    
+    def _retrieve_research_results(self, context: Dict) -> Dict:
+        """Retrieve and process research results from previous workflow phases."""
+        # In a real implementation, this would look up research results from the orchestrator
+        research_results = context.get("research_results", {})
+        
+        if not research_results and self.llm_provider:
+            self.logger.info("No research results found in context - planning without research input")
+        
+        return {
+            "available": bool(research_results),
+            "results": research_results,
+            "findings": research_results.get("findings", {}),
+            "synthesis": research_results.get("synthesis", "")
+        }
+    
+    def _create_detailed_plan_enhanced(self, goal: str, context: Dict, project_context: Dict, 
+                                     analysis_context: Dict, research_context: Dict,
+                                     planning_type: str, target_version: Optional[str], 
+                                     preserve_functionality: bool) -> Dict:
+        """Create enhanced detailed plan using all available context and workflow parameters."""
+        enhanced_context = {
+            "goal": goal,
+            "context": context,
+            "project_context": project_context,
+            "analysis_context": analysis_context,
+            "research_context": research_context,
+            "planning_type": planning_type,
+            "target_version": target_version,
+            "preserve_functionality": preserve_functionality
+        }
+        
+        result = self.execute_enhanced_task(
+            task_description=f"Create a {planning_type} development plan with comprehensive context awareness",
+            context=enhanced_context,
+            fallback_method=self._basic_detailed_planning_enhanced
+        )
+        
+        # Extract plan from enhanced result
+        if result.get("status") == "success":
+            plan_content = result.get("result", result)
+            return {
+                "plan": plan_content, 
+                "method": result.get("method", "enhanced"),
+                "planning_type": planning_type,
+                "context_used": {
+                    "analysis_available": analysis_context.get("available", False),
+                    "research_available": research_context.get("available", False),
+                    "project_context": bool(project_context.get("analysis")),
+                    "target_version": target_version
+                }
+            }
+        else:
+            return {"plan": "Enhanced planning failed", "method": "error", "planning_type": planning_type}
+    
+    def _basic_detailed_planning_enhanced(self, task_description: str, context: Dict) -> Dict:
+        """Enhanced fallback detailed planning with workflow awareness."""
+        goal = context.get("goal", "")
+        planning_context = context.get("context", {})
+        project_context = context.get("project_context", {})
+        analysis_context = context.get("analysis_context", {})
+        research_context = context.get("research_context", {})
+        planning_type = context.get("planning_type", "standard")
+        target_version = context.get("target_version")
+        preserve_functionality = context.get("preserve_functionality", False)
+        
+        if not self.llm_provider:
+            return {
+                "status": "error",
+                "result": "Enhanced planning requires LLM provider"
+            }
+        
+        # Build planning guidance based on type
+        planning_guidance = {
+            "strategic_iteration": "Focus on incremental improvements and strategic refactoring. Plan for existing codebase integration.",
+            "standard": "Plan comprehensive implementation with clear phases and dependencies.",
+            "incremental": "Plan small, manageable changes that can be implemented safely."
+        }
+        
+        # Build context sections
+        context_sections = []
+        if analysis_context.get("available"):
+            context_sections.append(f"ANALYSIS RESULTS: {analysis_context.get('improvements', [])}")
+        if research_context.get("available"):
+            context_sections.append(f"RESEARCH FINDINGS: {research_context.get('synthesis', '')}")
+        
+        planning_prompt = f"""
+        Create a {planning_type} implementation plan:
+        
+        GOAL: {goal}
+        PLANNING TYPE: {planning_type}
+        GUIDANCE: {planning_guidance.get(planning_type, "Standard planning approach")}
+        {f"TARGET VERSION: {target_version}" if target_version else ""}
+        PRESERVE FUNCTIONALITY: {preserve_functionality}
+        
+        CONTEXT: {planning_context}
+        PROJECT CONTEXT: {project_context.get('analysis', 'None')}
+        
+        {chr(10).join(context_sections) if context_sections else ""}
+        
+        Include:
+        1. Architecture and design considerations {"(preserving existing functionality)" if preserve_functionality else ""}
+        2. Implementation phases {"(incremental steps)" if planning_type == "strategic_iteration" else ""}
+        3. Component requirements and integration approach
+        4. {"Risk assessment and mitigation strategies" if preserve_functionality else "Risk considerations"}
+        5. Testing and validation strategy
+        {"6. Version-specific requirements and compatibility" if target_version else ""}
+        
+        Provide a structured, actionable plan optimized for {planning_type}.
+        """
+        
+        try:
+            plan = self.llm_provider.generate_text(planning_prompt, temperature=0.3)
+            return {
+                "status": "success",
+                "method": "llm_enhanced",
+                "result": plan,
+                "tools_used": []
+            }
+        except Exception as e:
+            return {
+                "status": "error",
+                "result": f"Enhanced planning failed: {e}"
+            }
+    
+    def _break_down_tasks_enhanced(self, detailed_plan: Dict, goal: str, planning_type: str, plan_incremental_steps: bool) -> List[Dict]:
+        """Enhanced task breakdown based on planning type and parameters."""
+        if not self.llm_provider:
+            return [{"task": "Implement solution", "type": "development", "priority": "high"}]
+        
+        # Build breakdown guidance based on planning type
+        breakdown_guidance = {
+            "strategic_iteration": "Break down into incremental, safe refactoring steps that preserve existing functionality.",
+            "standard": "Create comprehensive development tasks covering all aspects of implementation.",
+            "incremental": "Focus on small, manageable incremental changes."
+        }
+        
+        breakdown_prompt = f"""
+        Break down this {planning_type} plan into specific, actionable tasks:
+        
+        GOAL: {goal}
+        PLANNING TYPE: {planning_type}
+        GUIDANCE: {breakdown_guidance.get(planning_type, "Standard task breakdown")}
+        DETAILED PLAN: {detailed_plan.get('plan', '')}
+        INCREMENTAL STEPS: {plan_incremental_steps}
+        
+        Create tasks that are:
+        1. Specific and actionable
+        2. {"Incremental and safe for existing codebase" if planning_type == "strategic_iteration" else "Appropriately scoped"}
+        3. Clearly defined with success criteria
+        4. Categorized by type (analysis, design, development, testing, refactoring)
+        5. Prioritized (critical, high, medium, low)
+        {"6. Ordered for incremental implementation" if plan_incremental_steps else ""}
+        
+        For {planning_type} planning, focus on {"incremental improvements" if planning_type == "strategic_iteration" else "comprehensive implementation"}.
+        
+        Return as a JSON array of task objects with fields: task, description, type, priority, estimated_effort, dependencies.
+        """
+        
+        try:
+            response = self.llm_provider.generate_text(breakdown_prompt, temperature=0.2)
+            
+            # Try to parse JSON response
+            try:
+                tasks = json.loads(response.strip())
+                if isinstance(tasks, list):
+                    return tasks[:12]  # Limit to 12 tasks for manageability
+            except:
+                pass
+            
+            # Fallback: parse text response with enhanced categorization
+            lines = response.strip().split('\n')
+            tasks = []
+            for i, line in enumerate(lines):
+                if line.strip() and not line.strip().startswith('#') and not line.strip().startswith('```'):
+                    task_type = "development"
+                    if any(word in line.lower() for word in ["refactor", "restructure", "reorganize"]):
+                        task_type = "refactoring"
+                    elif any(word in line.lower() for word in ["analyze", "review", "assess"]):
+                        task_type = "analysis"
+                    elif any(word in line.lower() for word in ["test", "validate", "verify"]):
+                        task_type = "testing"
+                    
+                    tasks.append({
+                        "task": line.strip(),
+                        "description": f"Task {i+1} from {planning_type} plan breakdown",
+                        "type": task_type,
+                        "priority": "high" if planning_type == "strategic_iteration" else "medium",
+                        "estimated_effort": "TBD"
+                    })
+            
+            return tasks[:12]  # Limit for manageability
+            
+        except Exception as e:
+            self.logger.error(f"Enhanced task breakdown failed: {e}")
+            return [{"task": f"Implement solution according to {planning_type} plan", "type": "development", "priority": "high"}]
+    
+    def _plan_execution_strategy_enhanced(self, task_breakdown: List[Dict], risk_assessment: bool, estimate_effort_distribution: bool) -> Dict:
+        """Enhanced execution strategy planning with risk assessment and effort estimation."""
+        if not self.llm_provider:
+            return {"strategy": "Execute tasks in order", "risk_level": "unknown"}
+        
+        strategy_prompt = f"""
+        Plan an enhanced execution strategy for these tasks:
+        
+        TASKS: {json.dumps(task_breakdown, indent=2)}
+        RISK ASSESSMENT REQUIRED: {risk_assessment}
+        EFFORT ESTIMATION REQUIRED: {estimate_effort_distribution}
+        
+        Consider:
+        1. Task dependencies and sequencing
+        2. Parallel execution opportunities
+        3. {"Risk mitigation and safety measures" if risk_assessment else "Basic risk considerations"}
+        4. Resource requirements and constraints
+        5. {"Detailed effort distribution and timeline" if estimate_effort_distribution else "Timeline estimation"}
+        6. Validation and testing integration
+        
+        {"Provide detailed risk analysis and mitigation strategies." if risk_assessment else ""}
+        {"Include effort estimates and resource allocation planning." if estimate_effort_distribution else ""}
+        
+        Provide a comprehensive execution strategy.
+        """
+        
+        try:
+            strategy = self.llm_provider.generate_text(strategy_prompt, temperature=0.3)
+            return {
+                "strategy": strategy, 
+                "total_tasks": len(task_breakdown),
+                "risk_assessment_included": risk_assessment,
+                "effort_estimation_included": estimate_effort_distribution
+            }
+        except Exception as e:
+            self.logger.error(f"Enhanced execution strategy planning failed: {e}")
+            return {"strategy": "Enhanced sequential execution with monitoring", "total_tasks": len(task_breakdown)}
+    
+    def _create_version_plan(self, detailed_plan: Dict, target_version: str, scope_to_current_version: bool) -> Dict:
+        """Create version-specific planning for target version."""
+        if not self.llm_provider:
+            return {"target_version": target_version, "plan": "Version planning not available"}
+        
+        version_prompt = f"""
+        Create a version-specific plan for reaching target version {target_version}:
+        
+        DETAILED PLAN: {detailed_plan.get('plan', '')}
+        TARGET VERSION: {target_version}
+        SCOPE TO CURRENT VERSION: {scope_to_current_version}
+        
+        Plan:
+        1. Version increment strategy (major, minor, patch)
+        2. Breaking changes assessment
+        3. Backward compatibility considerations
+        4. Version-specific requirements
+        5. Release readiness criteria
+        6. Migration path for existing users
+        
+        Provide a structured version roadmap.
+        """
+        
+        try:
+            version_plan = self.llm_provider.generate_text(version_prompt, temperature=0.2)
+            return {
+                "target_version": target_version,
+                "plan": version_plan,
+                "scope_limited": scope_to_current_version
+            }
+        except Exception as e:
+            self.logger.error(f"Version planning failed: {e}")
+            return {"target_version": target_version, "plan": "Version planning failed"}
+    
+    def _create_completion_plan(self, task_breakdown: List[Dict], execution_strategy: Dict, target_version: Optional[str]) -> Dict:
+        """Create completion criteria and sequence planning."""
+        if not self.llm_provider:
+            return {"completion_criteria": "Standard completion", "sequence": "Sequential"}
+        
+        completion_prompt = f"""
+        Create a completion plan based on the task breakdown and execution strategy:
+        
+        TASKS: {json.dumps(task_breakdown[:5], indent=2)}... (showing first 5 of {len(task_breakdown)})
+        EXECUTION STRATEGY: {execution_strategy.get('strategy', '')[:500]}...
+        {f"TARGET VERSION: {target_version}" if target_version else ""}
+        
+        Define:
+        1. Completion criteria for each phase
+        2. Success metrics and validation points
+        3. Final acceptance criteria
+        4. Completion sequence and dependencies
+        5. {"Version release criteria" if target_version else "Project completion criteria"}
+        
+        Provide clear completion planning.
+        """
+        
+        try:
+            completion_plan = self.llm_provider.generate_text(completion_prompt, temperature=0.2)
+            return {
+                "completion_criteria": completion_plan,
+                "total_tasks": len(task_breakdown),
+                "target_version": target_version
+            }
+        except Exception as e:
+            self.logger.error(f"Completion planning failed: {e}")
+            return {"completion_criteria": "Standard sequential completion", "total_tasks": len(task_breakdown)}
 
 
 class DevelopmentAgent(BaseAgent):
@@ -746,163 +1187,472 @@ class AnalysisAgent(BaseAgent):
             max_iterations = task.get("max_iterations", None)
             workflow_type = task.get("workflow_type", "indefinite")
             
+            # NEW: Extract iteration workflow parameters
+            analysis_depth = task.get("analysis_depth", "standard")
+            focus_on_existing = task.get("focus_on_existing", False)
+            analyze_architecture = task.get("analyze_architecture", False)
+            identify_pain_points = task.get("identify_pain_points", False)
+            detect_project_type = task.get("detect_project_type", False)
+            
+            # Version-aware parameters
+            target_version = task.get("target_version")
+            detect_current_version = task.get("detect_current_version", False)
+            plan_version_roadmap = task.get("plan_version_roadmap", False)
+            assess_version_completion = task.get("assess_version_completion", False)
+            
+            # Smart completion parameters
+            completion_strategy = task.get("completion_strategy", "smart")
+            adaptive_planning = task.get("adaptive_planning", True)
+            initial_iterations = task.get("initial_iterations", max_iterations or 3)
+            estimate_iteration_needs = task.get("estimate_iteration_needs", False)
+            assess_completion_scope = task.get("assess_completion_scope", False)
+            plan_completion_strategy = task.get("plan_completion_strategy", False)
+            
+            # Evaluation parameters
+            evaluate_improvements = task.get("evaluate_improvements", False)
+            assess_goal_completion = task.get("assess_goal_completion", False)
+            check_version_complete = task.get("check_version_complete", False)
+            check_target_reached = task.get("check_target_reached", False)
+            plan_next_version = task.get("plan_next_version", False)
+            evaluate_stopping_criteria = task.get("evaluate_stopping_criteria", False)
+            assess_completion_readiness = task.get("assess_completion_readiness", False)
+            calculate_remaining_effort = task.get("calculate_remaining_effort", False)
+            determine_completion_mode = task.get("determine_completion_mode", False)
+            plan_final_iteration = task.get("plan_final_iteration", False)
+            
             self.logger.info(f"ANALYSIS: Analyzing project for goal: {goal[:100]}...")
+            self.logger.info(f"Analysis depth: {analysis_depth}, Focus existing: {focus_on_existing}, Strategy: {completion_strategy}")
             
-            # Analyze current project state
-            project_state = self._analyze_project_state(project_dir) if project_dir else {}
+            # Analyze current project state with enhanced parameters
+            project_state = self._analyze_project_state_enhanced(
+                project_dir, analysis_depth, focus_on_existing, 
+                analyze_architecture, detect_project_type, target_version
+            ) if project_dir else {}
             
-            # Analyze improvements needed
-            improvement_analysis = self._analyze_improvements(goal, context, project_state)
+            # Enhanced improvement analysis based on workflow parameters
+            improvement_analysis = self._analyze_improvements_enhanced(
+                goal, context, project_state, iteration_count, 
+                completion_strategy, target_version, evaluate_improvements
+            )
+            
+            # Version analysis if requested
+            version_analysis = {}
+            if target_version and (detect_current_version or assess_version_completion):
+                version_analysis = self._analyze_version_status(project_state, target_version)
+            
+            # Smart completion assessment if requested
+            completion_assessment = {}
+            if assess_completion_readiness or estimate_iteration_needs:
+                completion_assessment = self._assess_project_completion(
+                    improvement_analysis, iteration_count, initial_iterations, 
+                    target_version, completion_strategy
+                )
             
             # Create evolved goal for next iteration if needed
             evolved_goal = None
-            if iteration_count > 0 and iteration_count < (max_iterations or 10):
+            if iteration_count > 0 and iteration_count < initial_iterations:
                 evolved_goal = self._create_evolved_goal(goal, project_state, improvement_analysis, iteration_count)
             
-            # Determine if another iteration is needed
-            should_continue = self._should_continue_iteration(
-                improvement_analysis, iteration_count, max_iterations, workflow_type
+            # Enhanced iteration continuation logic
+            continuation_result = self._should_continue_iteration_enhanced_wrapper(
+                improvement_analysis, iteration_count, initial_iterations, 
+                completion_strategy, adaptive_planning, target_version
             )
             
             self.status = "completed"
-            return {
+            
+            # Enhanced result with all new analysis data
+            result = {
                 "status": "success",
                 "agent_type": self.agent_type,
                 "project_state": project_state,
                 "improvement_analysis": improvement_analysis,
-                "should_continue": should_continue,
+                "should_continue": continuation_result.get("should_continue", False),
                 "iteration_count": iteration_count + 1,
                 "improvements_suggested": improvement_analysis.get("improvements", []),
                 "evolved_goal": evolved_goal,
-                "timestamp": datetime.now().isoformat()
+                "timestamp": datetime.now().isoformat(),
+                
+                # NEW: Enhanced analysis results
+                "analysis_depth": analysis_depth,
+                "completion_strategy": completion_strategy,
+                "version_analysis": version_analysis,
+                "completion_assessment": completion_assessment,
+                "continuation_result": continuation_result,
+                
+                # Context for other agents to use
+                "context": {
+                    "initial_iterations": initial_iterations,
+                    "target_version": target_version,
+                    "completion_strategy": completion_strategy,
+                    "adaptive_planning": adaptive_planning,
+                    "workflow_type": workflow_type
+                }
             }
+            
+            return result
             
         except Exception as e:
             self.logger.error(f"ANALYSIS: Failed to process task: {e}")
             return self.handle_error(e, task)
     
-    def _analyze_project_state(self, project_dir: str) -> Dict:
-        """Analyze current project state using LLM investigation."""
+    def _analyze_project_state_enhanced(self, project_dir: str, analysis_depth: str, focus_on_existing: bool, 
+                                       analyze_architecture: bool, detect_project_type: bool, target_version: Optional[str]) -> Dict:
+        """Analyze current project state using LLM investigation with enhanced parameters."""
         try:
             project_path = self.investigate_project(project_dir)
             
             if self.llm_provider:
+                # Build analysis prompt based on parameters
+                analysis_focus = []
+                if focus_on_existing:
+                    analysis_focus.append("- Existing codebase structure and organization")
+                    analysis_focus.append("- Current functionality and implementation patterns")
+                    analysis_focus.append("- Code quality and maintainability of existing code")
+                
+                if analyze_architecture:
+                    analysis_focus.append("- Architectural patterns and design decisions")
+                    analysis_focus.append("- Component interactions and dependencies")
+                    analysis_focus.append("- Scalability and extensibility considerations")
+                
+                if detect_project_type:
+                    analysis_focus.append("- Project type classification (web app, CLI tool, library, etc.)")
+                    analysis_focus.append("- Technology stack identification")
+                    analysis_focus.append("- Development environment and tooling")
+                
+                if target_version:
+                    analysis_focus.append(f"- Version-related files and current version indicators")
+                    analysis_focus.append(f"- Compatibility considerations for target version {target_version}")
+                
+                # Set analysis depth
+                depth_instructions = {
+                    "comprehensive": "Provide extremely detailed analysis covering all aspects",
+                    "focused": "Focus on the most critical aspects for iteration planning", 
+                    "completion_focused": "Focus specifically on completion readiness and remaining gaps",
+                    "standard": "Provide balanced analysis of key aspects"
+                }
+                
                 state_prompt = f"""
-                Analyze the current state of this project:
+                Analyze the current state of this project with {analysis_depth} depth:
                 
                 PROJECT DIRECTORY: {project_path}
                 
-                Assess:
-                1. Current functionality and features
-                2. Code structure and organization
-                3. Technologies and frameworks in use
-                4. Completeness and gaps
-                5. Quality and maintainability
-                6. Integration points and architecture
-                7. Areas for improvement or expansion within scope of the goal
+                {depth_instructions.get(analysis_depth, "Provide balanced analysis of key aspects")}
                 
-                Provide a comprehensive project state analysis.
+                Focus Areas:
+                {chr(10).join(analysis_focus) if analysis_focus else "- General project assessment"}
+                
+                Also assess:
+                1. Current functionality and features
+                2. Technologies and frameworks in use
+                3. Completeness and gaps
+                4. Integration points and architecture
+                5. Areas for improvement or expansion
+                
+                Provide a structured analysis that will inform planning and development decisions.
                 """
                 
                 analysis = self.llm_provider.generate_text(state_prompt, temperature=0.2)
-                return {"analysis": analysis, "project_dir": project_path}
+                
+                # Extract additional metadata if requested
+                metadata = {}
+                if detect_project_type:
+                    metadata.update(self._detect_project_metadata(project_path, analysis))
+                
+                return {
+                    "analysis": analysis, 
+                    "project_dir": project_path,
+                    "analysis_depth": analysis_depth,
+                    "focus_areas": analysis_focus,
+                    "metadata": metadata
+                }
                 
         except Exception as e:
-            self.logger.warning(f"Project state analysis failed: {e}")
+            self.logger.warning(f"Enhanced project state analysis failed: {e}")
             
-        return {"analysis": "Project state analysis not available", "project_dir": project_dir}
+        return {
+            "analysis": "Enhanced project state analysis not available", 
+            "project_dir": project_dir,
+            "analysis_depth": analysis_depth
+        }
     
-    def _analyze_improvements(self, goal: str, context: Dict, project_state: Dict) -> Dict:
-        """Analyze what improvements are needed using enhanced task execution."""
+    def _analyze_improvements_enhanced(self, goal: str, context: Dict, project_state: Dict, iteration_count: int, 
+                                       completion_strategy: str, target_version: Optional[str], evaluate_improvements: bool) -> Dict:
+        """Analyze what improvements are needed using enhanced task execution with workflow-aware parameters."""
+        enhanced_context = {
+            "goal": goal, 
+            "context": context, 
+            "project_state": project_state,
+            "iteration_count": iteration_count,
+            "completion_strategy": completion_strategy,
+            "target_version": target_version,
+            "evaluate_improvements": evaluate_improvements
+        }
+        
         result = self.execute_enhanced_task(
-            task_description="Analyze what improvements are needed to achieve the goal",
-            context={"goal": goal, "context": context, "project_state": project_state},
-            fallback_method=self._basic_improvement_analysis
+            task_description="Analyze what improvements are needed to achieve the goal with workflow-aware assessment",
+            context=enhanced_context,
+            fallback_method=self._basic_improvement_analysis_enhanced
         )
         
         # Process result for backward compatibility
         if result.get("status") == "success":
             analysis_content = result.get("result", "Improvement analysis completed")
             
-            # Extract improvements from analysis
-            improvements = self._extract_improvements_from_analysis(analysis_content)
+            # Extract improvements from analysis with enhanced categorization
+            improvements = self._extract_improvements_from_analysis_enhanced(
+                analysis_content, completion_strategy, target_version
+            )
             
             return {
                 "analysis": analysis_content,
                 "improvements": improvements,
                 "improvement_count": len(improvements),
                 "method": result.get("method", "enhanced"),
-                "tools_used": result.get("tools_used", [])
+                "tools_used": result.get("tools_used", []),
+                "completion_strategy": completion_strategy,
+                "target_version": target_version,
+                "context": enhanced_context  # Pass context for continuation logic
             }
         else:
-            return {"improvements": ["Analysis failed - manual review needed"], "improvement_count": 1}
+            return {
+                "improvements": ["Enhanced analysis failed - manual review needed"], 
+                "improvement_count": 1,
+                "completion_strategy": completion_strategy,
+                "context": enhanced_context
+            }
     
-    def _basic_improvement_analysis(self, task_description: str, context: Dict) -> Dict:
-        """Fallback improvement analysis using LLM only."""
+    def _basic_improvement_analysis_enhanced(self, task_description: str, context: Dict) -> Dict:
+        """Enhanced fallback improvement analysis using LLM with workflow awareness."""
         goal = context.get("goal", "")
         analysis_context = context.get("context", {})
         project_state = context.get("project_state", {})
+        iteration_count = context.get("iteration_count", 0)
+        completion_strategy = context.get("completion_strategy", "smart")
+        target_version = context.get("target_version")
+        evaluate_improvements = context.get("evaluate_improvements", False)
         
         if not self.llm_provider:
             return {
                 "status": "error",
-                "result": "Basic improvement analysis requires LLM provider"
+                "result": "Enhanced improvement analysis requires LLM provider"
             }
         
+        # Build workflow-aware prompt
+        strategy_guidance = {
+            "smart": "Focus on improvements that bring the project closer to completion. Prioritize by impact and effort.",
+            "version_driven": f"Focus on improvements needed to reach version {target_version}. Consider semantic versioning implications.",
+            "fixed": "Focus on the most critical improvements within the iteration scope."
+        }
+        
         improvement_prompt = f"""
-        Analyze what improvements are needed for this project:
+        Analyze what improvements are needed for this project (Iteration {iteration_count + 1}):
         
         GOAL: {goal}
         CONTEXT: {analysis_context}
         PROJECT STATE: {project_state.get('analysis', 'None')}
+        COMPLETION STRATEGY: {completion_strategy}
+        {f"TARGET VERSION: {target_version}" if target_version else ""}
         
-        Identify:
-        1. Gaps between current state and desired goal
-        2. Missing functionality or features
-        3. Code improvements needed
-        4. Architectural enhancements within scope of the goal
-        5. Integration requirements
-        6. Reorganization of file or code structure
-        7. Documentation needs
-        8. Testing requirements
+        STRATEGY GUIDANCE: {strategy_guidance.get(completion_strategy, "Focus on critical improvements")}
         
-        Provide specific, actionable improvement suggestions.
+        Identify and categorize improvements:
+        
+        1. CRITICAL BUGS/ISSUES:
+        - Blocking issues that prevent basic functionality
+        - Security vulnerabilities
+        - Breaking errors
+        
+        2. MAJOR FEATURES/FUNCTIONALITY:
+        - Core features missing from the goal
+        - Key functionality gaps
+        - Integration requirements
+        
+        3. ARCHITECTURAL IMPROVEMENTS:
+        - Code structure and organization
+        - Design pattern implementations
+        - Scalability considerations
+        
+        4. POLISH/OPTIMIZATION:
+        - Code quality improvements
+        - Performance optimizations
+        - User experience enhancements
+        - Documentation improvements
+        
+        {"5. VERSION-SPECIFIC REQUIREMENTS:" if target_version else ""}
+        {"- Changes needed for version " + target_version if target_version else ""}
+        {"- Compatibility considerations" if target_version else ""}
+        {"- Breaking changes if needed" if target_version else ""}
+        
+        Provide specific, actionable improvement suggestions with clear categorization.
         """
         
         try:
             analysis = self.llm_provider.generate_text(improvement_prompt, temperature=0.3)
             return {
                 "status": "success",
-                "method": "llm_only",
+                "method": "llm_enhanced",
                 "result": analysis,
                 "tools_used": []
             }
         except Exception as e:
             return {
                 "status": "error",
-                "result": f"Improvement analysis failed: {e}"
+                "result": f"Enhanced improvement analysis failed: {e}"
             }
     
-    def _extract_improvements_from_analysis(self, analysis: str) -> List[str]:
-        """Extract specific improvements from analysis."""
+    def _extract_improvements_from_analysis_enhanced(self, analysis: str, completion_strategy: str, target_version: Optional[str]) -> List[str]:
+        """Extract specific improvements from analysis with enhanced categorization."""
         if not self.llm_provider:
-            return ["Analysis completed - manual review needed"]
+            return ["Enhanced analysis completed - manual review needed"]
         
         improvements_prompt = f"""
-        From this analysis, extract specific improvement actions:
+        From this analysis, extract specific improvement actions organized by priority:
         
         ANALYSIS: {analysis}
+        COMPLETION STRATEGY: {completion_strategy}
+        {f"TARGET VERSION: {target_version}" if target_version else ""}
         
-        Return a numbered list of specific, actionable improvements.
+        Extract improvements as a prioritized list, marking each with category:
+        [CRITICAL] - Critical bugs/issues that must be fixed
+        [MAJOR] - Major features/functionality needed
+        [ARCH] - Architectural improvements
+        [POLISH] - Polish/optimization items
+        {f"[VERSION] - Version-specific requirements for {target_version}" if target_version else ""}
+        
+        Return only the numbered list with category tags.
         """
         
         try:
             improvements_response = self.llm_provider.generate_text(improvements_prompt, temperature=0.2)
-            improvements = [imp.strip() for imp in improvements_response.split('\n') if imp.strip()]
-            return improvements
+            improvements = [imp.strip() for imp in improvements_response.split('\n') if imp.strip() and not imp.strip().startswith('#')]
+            return improvements[:15]  # Limit to 15 most important improvements
         except Exception as e:
-            self.logger.error(f"Improvement extraction failed: {e}")
-            return ["Analysis completed - manual review needed"]
+            self.logger.error(f"Enhanced improvement extraction failed: {e}")
+            return ["Enhanced analysis completed - manual review needed"]
+    
+    def _detect_project_metadata(self, project_path: str, analysis: str) -> Dict:
+        """Detect project metadata from analysis for enhanced project understanding."""
+        if not self.llm_provider:
+            return {}
+        
+        metadata_prompt = f"""
+        Extract project metadata from this analysis:
+        
+        PROJECT PATH: {project_path}
+        ANALYSIS: {analysis[:1000]}...
+        
+        Identify and return as JSON:
+        {
+            "project_type": "web_app|cli_tool|library|api|desktop_app|other",
+            "primary_language": "python|javascript|java|go|rust|other",
+            "framework": "detected framework or 'none'",
+            "existing_codebase": true/false,
+            "complexity_level": "simple|moderate|complex",
+            "estimated_files": "number estimate"
+        }
+        
+        Return only valid JSON.
+        """
+        
+        try:
+            metadata_response = self.llm_provider.generate_text(metadata_prompt, temperature=0.1)
+            import json
+            return json.loads(metadata_response.strip())
+        except Exception as e:
+            self.logger.warning(f"Project metadata detection failed: {e}")
+            return {"project_type": "unknown", "existing_codebase": True}
+    
+    def _analyze_version_status(self, project_state: Dict, target_version: str) -> Dict:
+        """Analyze version-related status and requirements."""
+        if not self.llm_provider:
+            return {"current_version": "unknown", "target_version": target_version}
+        
+        version_prompt = f"""
+        Analyze version status for this project:
+        
+        PROJECT STATE: {project_state.get('analysis', '')[:1000]}...
+        TARGET VERSION: {target_version}
+        
+        Determine:
+        1. Current version (if detectable from files like package.json, setup.py, etc.)
+        2. Version gap analysis (what's needed to reach target)
+        3. Breaking changes required (if any)
+        4. Compatibility considerations
+        5. Version completion estimate (percentage)
+        
+        Provide structured version analysis.
+        """
+        
+        try:
+            version_analysis = self.llm_provider.generate_text(version_prompt, temperature=0.2)
+            return {
+                "analysis": version_analysis,
+                "target_version": target_version,
+                "current_version": "auto-detected",  # Could be enhanced with file parsing
+                "completion_estimate": 0.5  # Placeholder - could be calculated
+            }
+        except Exception as e:
+            self.logger.error(f"Version analysis failed: {e}")
+            return {"current_version": "unknown", "target_version": target_version}
+    
+    def _assess_project_completion(self, improvement_analysis: Dict, iteration_count: int, 
+                                 initial_iterations: int, target_version: Optional[str], 
+                                 completion_strategy: str) -> Dict:
+        """Assess project completion readiness and iteration needs."""
+        improvements = improvement_analysis.get("improvements", [])
+        
+        # Categorize improvements by type
+        critical_bugs = [imp for imp in improvements if "[CRITICAL]" in imp.upper()]
+        major_features = [imp for imp in improvements if "[MAJOR]" in imp.upper()]
+        architectural = [imp for imp in improvements if "[ARCH]" in imp.upper()]
+        polish_items = [imp for imp in improvements if "[POLISH]" in imp.upper()]
+        version_specific = [imp for imp in improvements if "[VERSION]" in imp.upper()]
+        
+        # Calculate completion metrics
+        total_work = len(improvements)
+        high_priority_work = len(critical_bugs) + len(major_features)
+        remaining_iterations = max(0, initial_iterations - iteration_count)
+        
+        # Completion assessment based on strategy
+        if completion_strategy == "version_driven" and target_version:
+            completion_readiness = len(version_specific) == 0 and len(critical_bugs) == 0
+            estimated_remaining = len(version_specific) + len(critical_bugs)
+        else:
+            completion_readiness = high_priority_work <= remaining_iterations and len(critical_bugs) == 0
+            estimated_remaining = high_priority_work
+        
+        return {
+            "total_improvements": total_work,
+            "critical_bugs": len(critical_bugs),
+            "major_features": len(major_features),
+            "architectural_items": len(architectural),
+            "polish_items": len(polish_items),
+            "version_specific_items": len(version_specific),
+            "completion_readiness": completion_readiness,
+            "estimated_remaining_iterations": min(estimated_remaining, 3),  # Cap at 3
+            "remaining_iterations_available": remaining_iterations,
+            "completion_strategy": completion_strategy
+        }
+    
+    def _should_continue_iteration_enhanced_wrapper(self, improvement_analysis: Dict, iteration_count: int, 
+                                                   initial_iterations: int, completion_strategy: str, 
+                                                   adaptive_planning: bool, target_version: Optional[str]) -> Dict:
+        """
+        Enhanced iteration continuation logic for the new unified iteration workflow.
+        Solves the "coat tails" problem with smart completion planning.
+        """
+        # Add the context information to improvement_analysis for the enhanced method
+        enhanced_analysis = improvement_analysis.copy()
+        enhanced_analysis["context"] = {
+            "initial_iterations": initial_iterations,
+            "target_version": target_version,
+            "completion_strategy": completion_strategy,
+            "adaptive_planning": adaptive_planning
+        }
+        
+        # Use the existing enhanced continuation logic
+        return self._should_continue_iteration_enhanced(enhanced_analysis, iteration_count)
     
     def _create_evolved_goal(self, original_goal: str, project_state: Dict, improvement_analysis: Dict, iteration_count: int) -> str:
         """Create an evolved goal for the next iteration based on current progress."""
@@ -933,222 +1683,33 @@ class AnalysisAgent(BaseAgent):
         except Exception as e:
             self.logger.error(f"Goal evolution failed: {e}")
             return original_goal
-    
-    def _should_continue_iteration(self, improvement_analysis: Dict, iteration_count: int, max_iterations: Optional[int], workflow_type: str) -> bool:
-        """Determine if another iteration should be performed."""
-        # For the new enhanced iteration workflow, use the smart continuation logic
-        if workflow_type == "iteration" and "completion_strategy" in improvement_analysis:
-            continuation_result = self._should_continue_iteration_enhanced(improvement_analysis, iteration_count)
-            return continuation_result.get("should_continue", False)
+        if not self.llm_provider:
+            return original_goal
         
-        # Legacy logic for other workflows
-        # Check max iterations limit
-        if max_iterations is not None and iteration_count >= max_iterations:
-            return False
+        evolution_prompt = f"""
+        Create an evolved goal for the next iteration based on current progress:
         
-        # For indefinite workflow, check if there are meaningful improvements
-        if workflow_type == "indefinite":
-            improvement_count = improvement_analysis.get("improvement_count", 0)
-            return improvement_count > 0
+        ORIGINAL GOAL: {original_goal}
+        CURRENT ITERATION: {iteration_count}
+        PROJECT STATE: {project_state.get('analysis', '')[:500]}...
+        IMPROVEMENTS IDENTIFIED: {improvement_analysis.get('improvements', [])}
         
-        # For iteration workflow, respect max_iterations
-        if workflow_type == "iteration":
-            return max_iterations is None or iteration_count < max_iterations
+        Create a focused, evolved goal that:
+        1. Builds on what has been accomplished
+        2. Addresses the most important remaining gaps
+        3. Is achievable in one iteration
+        4. Maintains the overall project direction
+        5. Is within scope of the original goal
         
-        # Default: continue if improvements are available
-        return improvement_analysis.get("improvement_count", 0) > 0
-
-    def _should_continue_iteration_enhanced(self, improvement_analysis: Dict, iteration_count: int) -> Dict:
+        Return only the evolved goal text.
         """
-        Enhanced iteration continuation logic for the new unified iteration workflow.
-        Solves the "coat tails" problem with smart completion planning.
-        """
-        # Extract context from the improvement analysis
-        context = improvement_analysis.get("context", {})
-        initial_iterations = context.get("initial_iterations", 3)
-        target_version = context.get("target_version")
-        completion_strategy = context.get("completion_strategy", "smart")
-        adaptive = context.get("adaptive_planning", True)
         
-        self.logger.info(f"Enhanced continuation assessment: iteration {iteration_count}/{initial_iterations}, strategy: {completion_strategy}")
-        
-        # STRATEGY 1: Version-driven completion (from VersionedWorkflow)
-        if target_version and completion_strategy == "version_driven":
-            version_status = self._assess_version_completion(improvement_analysis, target_version)
-            if version_status.get("target_reached", False):
-                self.logger.info(f"Target version {target_version} reached - stopping iterations")
-                return {
-                    "should_continue": False,
-                    "completion_reason": f"Target version {target_version} reached",
-                    "completion_mode": "version_complete"
-                }
-        
-        # STRATEGY 2: Smart completion assessment (NEW - solving "coat tails")
-        if completion_strategy == "smart":
-            completion_assessment = self._assess_smart_completion(
-                improvement_analysis, iteration_count, initial_iterations, target_version
-            )
-            
-            if completion_assessment.get("ready_for_completion", False):
-                self.logger.info(f"Smart completion triggered: {completion_assessment.get('reason', 'ready')}")
-                return {
-                    "should_continue": completion_assessment.get("needs_final_iteration", False),
-                    "completion_reason": completion_assessment.get("reason", "Project ready for completion"),
-                    "completion_mode": "smart_completion",
-                    "final_iteration_plan": completion_assessment.get("final_plan", {})
-                }
-        
-        # STRATEGY 3: Adaptive iteration adjustment (from VersionedWorkflow pattern)
-        if adaptive:
-            iteration_assessment = self._assess_adaptive_iterations(
-                improvement_analysis, iteration_count, initial_iterations
-            )
-            
-            # Can extend beyond initial estimate if valuable work remains
-            if iteration_assessment.get("should_extend", False):
-                self.logger.info(f"Adaptive extension: {iteration_assessment.get('reason', 'valuable work remains')}")
-                return {
-                    "should_continue": True,
-                    "completion_reason": f"Extending beyond initial estimate: {iteration_assessment.get('reason', 'valuable work remains')}",
-                    "completion_mode": "adaptive_extension",
-                    "estimated_remaining": iteration_assessment.get("estimated_remaining", 1)
-                }
-        
-        # STRATEGY 4: Fixed iteration respect (fallback)
-        if iteration_count >= initial_iterations:
-            self.logger.info(f"Reached initial iteration limit ({initial_iterations}) - stopping")
-            return {
-                "should_continue": False,
-                "completion_reason": f"Reached initial iteration limit ({initial_iterations})",
-                "completion_mode": "fixed_limit"
-            }
-        
-        # Default: continue if improvements available
-        improvement_count = improvement_analysis.get("improvement_count", 0)
-        should_continue = improvement_count > 0
-        self.logger.info(f"Standard continuation: {should_continue} ({improvement_count} improvements available)")
-        
-        return {
-            "should_continue": should_continue,
-            "completion_reason": "Improvements available" if should_continue else "No improvements needed",
-            "completion_mode": "standard_iteration"
-        }
-
-    def _assess_smart_completion(self, improvement_analysis: Dict, iteration_count: int, 
-                               initial_iterations: int, target_version: Optional[str]) -> Dict:
-        """
-        NEW: Smart completion assessment to avoid "coat tails".
-        Analyzes the current state to determine if the project is ready for completion.
-        """
-        improvements = improvement_analysis.get("improvements", [])
-        
-        # Categorize improvements by impact and effort
-        critical_bugs = [imp for imp in improvements if any(word in imp.lower() for word in ["bug", "error", "critical", "broken", "fix"])]
-        major_features = [imp for imp in improvements if any(word in imp.lower() for word in ["feature", "implement", "add", "create"])]
-        polish_items = [imp for imp in improvements if any(word in imp.lower() for word in ["polish", "enhance", "optimize", "clean", "refactor", "improve"])]
-        
-        # Calculate remaining capacity
-        remaining_iterations = initial_iterations - iteration_count
-        
-        self.logger.info(f"Smart completion analysis: {len(critical_bugs)} bugs, {len(major_features)} features, {len(polish_items)} polish items, {remaining_iterations} iterations remaining")
-        
-        # Smart completion logic
-        if remaining_iterations <= 1:
-            # Last iteration - focus on completion readiness
-            if not critical_bugs and len(major_features) <= 1:
-                return {
-                    "ready_for_completion": True,
-                    "needs_final_iteration": len(major_features) > 0 or len(polish_items) > 0,
-                    "reason": "Project ready for completion with optional final polish",
-                    "final_plan": {
-                        "focus": "completion_and_polish",
-                        "tasks": major_features + polish_items[:2]  # Limit polish scope
-                    }
-                }
-            elif critical_bugs:
-                return {
-                    "ready_for_completion": False,
-                    "needs_final_iteration": True,
-                    "reason": f"Critical issues must be resolved: {len(critical_bugs)} bugs",
-                    "final_plan": {
-                        "focus": "critical_fixes",
-                        "tasks": critical_bugs
-                    }
-                }
-        
-        elif remaining_iterations == 2:
-            # Second-to-last iteration - prepare for completion
-            total_remaining_work = len(critical_bugs) + len(major_features)
-            if total_remaining_work <= 2:
-                return {
-                    "ready_for_completion": True,
-                    "needs_final_iteration": True,
-                    "reason": "Entering completion sequence - preparing final iteration",
-                    "final_plan": {
-                        "focus": "prepare_completion",
-                        "tasks": critical_bugs + major_features[:1]
-                    }
-                }
-        
-        return {
-            "ready_for_completion": False,
-            "needs_final_iteration": False,
-            "reason": "Substantial work remains - continue normal iteration"
-        }
-
-    def _assess_version_completion(self, improvement_analysis: Dict, target_version: str) -> Dict:
-        """
-        Assess if the target version has been reached (borrowed from VersionedWorkflow logic).
-        """
-        # This is a simplified version - in a real implementation, this would
-        # analyze version files and semantic versioning
-        project_state = improvement_analysis.get("project_state", {})
-        analysis_text = project_state.get("analysis", "").lower()
-        
-        # Look for version indicators in the analysis
-        version_reached = target_version.lower() in analysis_text or "target version" in analysis_text
-        
-        return {
-            "target_reached": version_reached,
-            "current_version": "auto-detected",  # Placeholder
-            "progress_to_target": 0.8 if not version_reached else 1.0
-        }
-
-    def _assess_adaptive_iterations(self, improvement_analysis: Dict, iteration_count: int, 
-                                  initial_iterations: int) -> Dict:
-        """
-        Assess if iterations should be extended beyond the initial estimate (borrowed from VersionedWorkflow).
-        """
-        improvements = improvement_analysis.get("improvements", [])
-        improvement_count = len(improvements)
-        
-        # High-value work that justifies extension
-        architectural_improvements = [imp for imp in improvements if any(word in imp.lower() for word in ["architecture", "design", "structure", "framework"])]
-        security_improvements = [imp for imp in improvements if any(word in imp.lower() for word in ["security", "vulnerability", "safety"])]
-        performance_improvements = [imp for imp in improvements if any(word in imp.lower() for word in ["performance", "speed", "optimization", "efficiency"])]
-        
-        high_value_work = len(architectural_improvements) + len(security_improvements) + len(performance_improvements)
-        
-        # Extension criteria
-        should_extend = (
-            iteration_count < initial_iterations * 2 and  # Don't extend beyond 2x original estimate
-            high_value_work > 0 and  # Must have high-value work
-            improvement_count >= 3  # Must have substantial work remaining
-        )
-        
-        if should_extend:
-            estimated_remaining = min(high_value_work, 2)  # Cap extension at 2 iterations
-            reason = f"{high_value_work} high-value improvements available (architecture/security/performance)"
-        else:
-            estimated_remaining = 0
-            reason = "No high-value work justifies extension"
-        
-        return {
-            "should_extend": should_extend,
-            "estimated_remaining": estimated_remaining,
-            "reason": reason,
-            "high_value_work_count": high_value_work
-        }
+        try:
+            evolved_goal = self.llm_provider.generate_text(evolution_prompt, temperature=0.3)
+            return evolved_goal.strip()
+        except Exception as e:
+            self.logger.error(f"Goal evolution failed: {e}")
+            return original_goal
 
 
 class DocumentationAgent(BaseAgent):
