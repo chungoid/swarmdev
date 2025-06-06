@@ -120,3 +120,6 @@ src/swarmdev/bundled_mcp/*/schema/
 # - src/ directory
 # - Main README.md
 # - LICENSE
+v7_inner_status.txt; echo "TMUX_MCP_DONE_V7_SH_$?"
+sh_test_v7.txt
+SHELL_EXECUTOR_IMPLEMENTATION.md

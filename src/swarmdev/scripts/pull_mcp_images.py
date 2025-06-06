@@ -13,7 +13,7 @@ MCP_IMAGES = [
     "ghcr.io/chungoid/memory:latest",
     "ghcr.io/chungoid/sequentialthinking:latest",
     "ghcr.io/chungoid/time:latest",
-    "ghcr.io/chungoid/tmux-mcp:latest",
+
 ]
 
 def get_real_username():

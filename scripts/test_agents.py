@@ -62,6 +62,8 @@ def _get_basic_connectivity_test_for_tool(tool_id: str) -> tuple[str, dict, str]
         return "tools/call", {"name": "fetch", "arguments": {"url": "https://example.com"}}, "fetch example.com"
     elif tool_id == "filesystem":
         return "tools/call", {"name": "list_directory", "arguments": {"path": "."}}, "list_directory (.)"
+    elif tool_id == "shell":
+        return "tools/call", {"name": "execute_command", "arguments": {"command": "echo 'Shell test'", "timeout": 10}}, "execute_command (echo test)"
     elif tool_id == "everything":
         return "tools/list", {}, "tools/list (ping)"
     else:
@@ -162,7 +164,7 @@ class AgentMCPTester:
     def test_all_mcp_tools_for_agent(self):
         """Tests if the current agent can use all expected MCP tools via its MCP Manager."""
         print(f"--- Testing MCP Integration for {self.agent_type_name} ---")
-        expected_tools = ['memory', 'sequential-thinking', 'context7', 'git', 'time', 'fetch', 'filesystem']
+        expected_tools = ['memory', 'sequential-thinking', 'context7', 'git', 'time', 'fetch', 'filesystem', 'shell']
         
         # Ensure the agent's mcp_manager is the one we expect to be populated by infra checks
         if not self.agent_instance or not self.agent_instance.mcp_manager:
@@ -324,12 +326,13 @@ class TestSuiteRunner:
         return True
 
     def _check_mcp_infrastructure(self):
-        print("\nTesting MCP Docker Infrastructure (Global MCP Manager)")
+        print("\nTesting MCP Infrastructure (Global MCP Manager)")
         print("-" * 50 + "\n")
-        expected_docker_tools = ['memory', 'sequential-thinking', 'context7', 'git', 'time', 'fetch', 'filesystem']
+        expected_docker_tools = ['memory', 'sequential-thinking', 'context7', 'git', 'time', 'fetch', 'filesystem', 'shell']
 
         for tool_id in expected_docker_tools:
-            print(f"INFRA_TEST: Testing {tool_id} Docker container...")
+            container_type = "Python process" if tool_id == "shell" else "Docker container"
+            print(f"INFRA_TEST: Testing {tool_id} {container_type}...")
             print("  → Checking server capabilities (forces full init & handshake)...")
             try:
                 # This series of calls will force the global_mcp_manager to fully initialize each server.
@@ -351,7 +354,8 @@ class TestSuiteRunner:
                     response = self.global_mcp_manager.call_tool(tool_id, test_method, test_params, timeout=15)
                     
                     if response and not response.get("error"):
-                        print(f"  ✓ {tool_id} - Docker container working and basic call successful.")
+                        container_desc = "Python process" if tool_id == "shell" else "Docker container"
+                        print(f"  ✓ {tool_id} - {container_desc} working and basic call successful.")
                     else:
                         err_msg = response.get('error', 'Unknown error during connectivity test')
                         failure_detail = f"Connectivity test for {tool_id} failed or returned error: {err_msg}"
@@ -408,8 +412,8 @@ class TestSuiteRunner:
         print("=" * 70)
 
         # 1. Infrastructure Report
-        expected_docker_tools = ['memory', 'sequential-thinking', 'context7', 'git', 'time', 'fetch', 'filesystem']
-        print("\n--- MCP Docker Infrastructure Status ---")
+        expected_docker_tools = ['memory', 'sequential-thinking', 'context7', 'git', 'time', 'fetch', 'filesystem', 'shell']
+        print("\n--- MCP Infrastructure Status ---")
         working_infra_count = 0
         for tool_id in expected_docker_tools:
             if tool_id in self.infrastructure_issues:
@@ -417,7 +421,7 @@ class TestSuiteRunner:
             else: # If not in issues, it means it passed the checks
                 print(f"  ✓ {tool_id}: PASSED")
                 working_infra_count += 1
-        print(f"Infrastructure Score: {working_infra_count}/{len(expected_docker_tools)} containers working and responsive.")
+        print(f"Infrastructure Score: {working_infra_count}/{len(expected_docker_tools)} MCP servers working and responsive.")
         all_infra_ok = working_infra_count == len(expected_docker_tools)
         if not all_infra_ok:
             print("  CRITICAL: MCP Infrastructure is NOT fully operational. Agent tests may be unreliable.")

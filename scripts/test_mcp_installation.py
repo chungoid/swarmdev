@@ -242,8 +242,8 @@ class MCPInstallationTester:
         # Test git server
         overall_success &= self._test_git_server()
 
-        # Test tmux-mcp server
-        overall_success &= self._test_tmux_mcp_server()
+        # Test shell executor server
+        overall_success &= self._test_shell_executor_server()
         
         return overall_success
     
@@ -455,25 +455,24 @@ class MCPInstallationTester:
             print(f"    FAILED: Exception during git server test: {e}")
             return False
 
-    def _test_tmux_mcp_server(self) -> bool:
-        """Test tmux-mcp server functionality."""
-        print("\n  Testing tmux-mcp Server")
+    def _test_shell_executor_server(self) -> bool:
+        """Test shell executor server functionality."""
+        print("\n  Testing Shell Executor Server")
         
         if not self.mcp_manager:
-            self.results['functionality_tests']['tmux-mcp'] = {'status': 'failed', 'details': 'MCP Manager not initialized'}
+            self.results['functionality_tests']['shell'] = {'status': 'failed', 'details': 'MCP Manager not initialized'}
             print("    FAILED: MCP Manager not initialized")
             return False
 
-        # Check if tmux-mcp server is available
-        # It should be loaded by default if configured correctly in MCPManager
+        # Check if shell server is available
         available_tools = self.mcp_manager.get_available_tools()
-        if 'tmux-mcp' not in available_tools:
-            status_detail = "tmux-mcp server not listed as available by MCPManager."
+        if 'shell' not in available_tools:
+            status_detail = "shell server not listed as available by MCPManager."
             # Further check if it's in the configured list but not ready
-            if 'tmux-mcp' in self.mcp_manager.servers:
-                 status_detail = f"tmux-mcp server configured but status is: {self.mcp_manager.servers['tmux-mcp'].get('status', 'unknown')}"
+            if 'shell' in self.mcp_manager.servers:
+                 status_detail = f"shell server configured but status is: {self.mcp_manager.servers['shell'].get('status', 'unknown')}"
             
-            self.results['functionality_tests']['tmux-mcp'] = {
+            self.results['functionality_tests']['shell'] = {
                 'status': 'skipped', 
                 'details': status_detail
             }
@@ -481,51 +480,66 @@ class MCPInstallationTester:
             return True # Skipped tests don't fail the overall suite
 
         try:
-            # Attempt a generic ping or status check.
-            # Assuming a tool like 'system.ping' or similar might exist.
-            # Replace 'tmux-mcp.system.ping' with an actual simple, non-destructive tool if known.
-            print("    Attempting call to tmux-mcp.system.ping...")
-            response = self.mcp_manager.call_tool("tmux-mcp", "system.ping", {})
+            # Test a simple shell command
+            print("    Attempting call to shell.execute_command with 'echo Hello World'...")
+            response = self.mcp_manager.call_tool("shell", "tools/call", {
+                "name": "execute_command",
+                "arguments": {
+                    "command": "echo 'Hello from Shell Executor!'",
+                    "timeout": 10
+                }
+            })
             
-            if response and response.get("result"):
-                self.results['functionality_tests']['tmux-mcp'] = {
-                    'status': 'passed', 
-                    'details': {'response': response['result']}
-                }
-                print(f"    PASSED: tmux-mcp server responded: {response['result']}")
-                return True
-            elif response and response.get("error"):
-                error_details = response.get('error', 'Unknown error')
-                # If the error is "Tool not found", it's still a partial success (server is up)
-                # but the specific ping tool isn't there.
-                if isinstance(error_details, dict) and error_details.get("message", "").startswith("Tool not found"):
-                    self.results['functionality_tests']['tmux-mcp'] = {
-                        'status': 'passed', # Mark as passed because server is reachable
-                        'details': 'Server reachable, but system.ping tool not found. This is acceptable for basic installation test.'
-                    }
-                    print(f"    PASSED: tmux-mcp server reachable, but system.ping tool not found (acceptable for this test).")
-                    return True
+            if response and response.get("result") and not response.get("error"):
+                result_content = response.get("result", {}).get("content", [])
+                if result_content and len(result_content) > 0:
+                    # Parse the JSON response from the tool
+                    import json
+                    try:
+                        tool_result = json.loads(result_content[0].get("text", "{}"))
+                        if tool_result.get("success") and "Hello from Shell Executor!" in tool_result.get("stdout", ""):
+                            self.results['functionality_tests']['shell'] = {
+                                'status': 'passed', 
+                                'details': {'command_output': tool_result.get("stdout", "").strip()}
+                            }
+                            print(f"    PASSED: Shell executor responded correctly: {tool_result.get('stdout', '').strip()}")
+                            return True
+                        else:
+                            self.results['functionality_tests']['shell'] = {
+                                'status': 'failed', 
+                                'details': f'Command executed but output unexpected: {tool_result}'
+                            }
+                            print(f"    FAILED: Unexpected command output: {tool_result}")
+                            return False
+                    except json.JSONDecodeError as je:
+                        self.results['functionality_tests']['shell'] = {
+                            'status': 'failed', 
+                            'details': f'Failed to parse tool response as JSON: {je}'
+                        }
+                        print(f"    FAILED: Could not parse tool response: {je}")
+                        return False
                 else:
-                    self.results['functionality_tests']['tmux-mcp'] = {
+                    self.results['functionality_tests']['shell'] = {
                         'status': 'failed', 
-                        'details': f'tmux-mcp server call failed or returned error. Error: {error_details}'
+                        'details': 'Tool call succeeded but no content returned'
                     }
-                    print(f"    FAILED: tmux-mcp server call failed. Error: {error_details}")
+                    print("    FAILED: Tool call succeeded but no content returned")
                     return False
-            else: # No result and no error, unusual
-                self.results['functionality_tests']['tmux-mcp'] = {
+            else:
+                error_details = response.get('error', 'Unknown error')
+                self.results['functionality_tests']['shell'] = {
                     'status': 'failed', 
-                    'details': 'tmux-mcp server call returned an empty or unexpected response.'
+                    'details': f'Shell executor call failed. Error: {error_details}'
                 }
-                print("    FAILED: tmux-mcp server call returned an empty or unexpected response.")
+                print(f"    FAILED: Shell executor call failed. Error: {error_details}")
                 return False
 
         except Exception as e:
-            self.results['functionality_tests']['tmux-mcp'] = {
+            self.results['functionality_tests']['shell'] = {
                 'status': 'failed', 
-                'details': f'Exception during tmux-mcp server test: {str(e)}'
+                'details': f'Exception during shell executor test: {str(e)}'
             }
-            print(f"    FAILED: Exception during tmux-mcp server test: {e}")
+            print(f"    FAILED: Exception during shell executor test: {e}")
             return False
     
     def _test_performance(self) -> bool:

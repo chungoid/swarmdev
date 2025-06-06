@@ -3,6 +3,7 @@ import logging
 import os
 import time
 import uuid
+import subprocess
 
 # Assuming MCPManager is in src.swarmdev.utils.mcp_manager
 # Adjust the import path if your project structure is different
@@ -29,51 +30,45 @@ TEST_MCP_CONFIG = {
         "shutdown_timeout_seconds": 10,
         "default_network_mode": "bridge" # Or "host" depending on Docker setup
     },
-    "mcpServers": { # Correct key for server definitions to be merged from constructor
+    "mcpSettings": {
+        "defaultTimeout": 45,        # Increased default timeout for potentially slow operations
+        "initializationTimeout": 60, # Increased for servers that might be slow to start
+        "discoveryTimeout": 30,
+        "logLevel": "DEBUG"          # Ensure MCPManager logs verbosely
+    },
+    "mcpServers": {
         "filesystem": {
             "enabled": True,
-            # Replace structured config with explicit command for testing _register_server directly
-            "command": ["docker", "run", "-i", "--rm", "-v", "$(pwd):/workspace", "ghcr.io/chungoid/filesystem:latest", "/workspace"],
-            "timeout": 30, # Add a default timeout
-            "discover_capabilities": True # Filesystem server supports tools/list
-        },
-        "memory": { # User's memory server
-            "enabled": True,
-            # Replace structured config with explicit command
-            "command": ["docker", "run", "-i", "--rm", "ghcr.io/chungoid/memory:latest"],
-            "timeout": 30, # Add a default timeout
-            "discover_capabilities": False, # Set to False for this test
-            "capabilities": {
-                "tools": [
-                    {
-                        "name": "create_entities",
-                        "description": "Create multiple new entities in the knowledge graph",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {
-                                "entities": {
-                                    "type": "array",
-                                    "items": {"type": "object"}
-                                }
-                            },
-                            "required": ["entities"]
-                        }
-                    }
-                    # Add other known methods if you want to test them via tools/call
-                ]
-            }
-        },
-        "tmux-mcp": { # Added tmux-mcp server
-            "enabled": True,
-            "command": ["docker", "run", "-i", "--rm",
-                        "-v", "$(pwd):/workspace",
-                        "-v", "/tmp/tmux-1000:/tmp/tmux-1000", # Assuming host tmux socket setup
-                        "-e", "TMUX_TMPDIR=/tmp/tmux-1000",    # Environment variable for tmux socket
-                        "-p", "127.0.0.1:13008:3000",         # Port mapping
-                        "ghcr.io/chungoid/tmux-mcp:latest"],
+            "command": ["docker", "run", "-i", "--rm", "-v", "$(pwd):/workspace", 
+                       "ghcr.io/chungoid/filesystem:latest", "/workspace"],
             "timeout": 30,
-            "init_delay": 0.5, # Standard init_delay
-            "discover_capabilities": True # Let MCPManager discover its tools
+            "description": "Filesystem access server"
+        },
+        "memory": {
+            "enabled": True,
+            "command": ["docker", "run", "-i", "--rm", "mcp/memory"],
+            "timeout": 30,
+            "description": "MCP Memory Server (built via scripts/setup_mcp_servers.py)"
+        },
+        "tmux-mcp": {
+            "command": [
+                "docker", "run", "-i", "--rm",
+                "-v", "$(pwd):/workspace",
+                "-v", "/tmp/tmux-1000:/tmp/tmux-1000",
+                "-e", "TMUX_TMPDIR=/tmp/tmux-1000",
+                "-p", "127.0.0.1:13008:3000",
+                "ghcr.io/chungoid/tmux-mcp:debug-v4"
+            ],
+            "timeout": 45,
+            "init_delay": 1.0,
+            "enabled": True,
+            "description": "TMUX MCP Server (debug-v4)"
+        },
+        "everything": {
+            "enabled": True,
+            "command": ["docker", "run", "-i", "--rm", "ghcr.io/chungoid/everything:latest"],
+            "timeout": 30,
+            "description": "A server that has every possible MCP feature for testing purposes."
         }
     }
 }
@@ -111,6 +106,10 @@ def run_tests():
             # Log discovered capabilities for the filesystem server
             fs_caps = mcp_manager.get_server_capabilities("filesystem")
             logger.info(f"Discovered capabilities for 'filesystem' server: {json.dumps(fs_caps, indent=2)}")
+
+            # Log discovered capabilities for the everything server
+            everything_caps = mcp_manager.get_server_capabilities("everything")
+            logger.info(f"Discovered capabilities for 'everything' server: {json.dumps(everything_caps, indent=2)}")
 
         else:
             logger.error("MCPManager.initialize_tools() failed. Servers might not be running.")
@@ -182,45 +181,166 @@ def run_tests():
         except Exception as e:
             logger.error(f"Exception during 'tools/call' to filesystem (name: list_directory): {e}", exc_info=True)
 
-        # --- Test 4: tmux-mcp Server ---
-        logger.info("\n--- Test 4: tmux-mcp Server - 'tools/call' Wrapped Style (method: 'tools/call', name: 'list-sessions') ---")
+        # --- Test 4: tmux-mcp Server - Full Command Execution Flow ---
+        logger.info("\n--- Test 4: tmux-mcp Server - Full Command Execution Flow ---")
+        
+        # Step 0: Verify the correct debug-v4 image is running
+        logger.info("Attempting to call tmux-mcp.debug_v4_check_version")
         try:
-            # Ensure a tmux session is running for the test
-            # This is a host command, assumes tmux is installed and accessible
-            # For a more robust test, this might need to be handled differently or ensured by user
-            # For now, we assume a session like 'swarmdev_test_session' might exist from previous work
-            # os.system("tmux new-session -d -s test_mcp_tmux_session") # Example: ensure session for test
+            debug_check_params = {"name": "debug_v4_check_version", "arguments": {}}
+            debug_check_result = mcp_manager.call_tool("tmux-mcp", "tools/call", debug_check_params)
+            logger.info(f"tmux-mcp.debug_v4_check_version result: {json.dumps(debug_check_result, indent=2)}")
+            if debug_check_result and debug_check_result.get("result", {}).get("content", [{}])[0].get("text") == "tmux-mcp-debug-v4-active":
+                logger.info("SUCCESS: tmux-mcp.debug_v4_check_version returned 'tmux-mcp-debug-v4-active'. Correct image is running.")
+            else:
+                logger.error("FAILURE: tmux-mcp.debug_v4_check_version did NOT return 'tmux-mcp-debug-v4-active'. WRONG IMAGE OR TOOL ISSUE.")
+                # Optionally, we could raise an exception here to stop further tmux-mcp tests if the version is wrong.
+        except Exception as e_debug_check:
+            logger.error(f"EXCEPTION during tmux-mcp.debug_v4_check_version: {e_debug_check}", exc_info=True)
+            # Again, could raise to stop if this check is critical for subsequent steps
 
-            tmux_params = {
-                "name": "list-sessions", # The tool name registered in tmux-mcp
-                "arguments": {} # list-sessions takes no arguments
-            }
-            tmux_result = mcp_manager.call_tool("tmux-mcp", "tools/call", tmux_params)
-            logger.info(f"'tools/call' to tmux-mcp (name: list-sessions) result: {json.dumps(tmux_result, indent=2)}")
-            
-            if tmux_result and not tmux_result.get("error"):
-                result_content = tmux_result.get("result", {}).get("content")
-                is_error_flag = tmux_result.get("result", {}).get("isError") # Check for application-level error
+        test_session_name = f"mcp_test_session_{uuid.uuid4().hex[:6]}"
+        created_session_id = None
+        created_window_id = None
+        created_pane_id = None
 
-                if result_content and not is_error_flag:
-                    logger.info("CONCLUSION Test 4: 'tools/call' to tmux-mcp server (list-sessions) succeeded.")
-                    # Further validation: try to parse the JSON from result_content[0]['text']
-                    try:
-                        sessions_list = json.loads(result_content[0]['text'])
-                        logger.info(f"Successfully parsed sessions list: {sessions_list}")
-                    except json.JSONDecodeError:
-                        logger.warning("CONCLUSION Test 4: tmux-mcp call succeeded, but session list JSON was malformed.")
-                elif is_error_flag:
-                     logger.warning(f"CONCLUSION Test 4: tmux-mcp server (list-sessions) reported an application error: {result_content}")
+        try:
+            # Step 1: Create a new session
+            logger.info(f"Attempting to create tmux session: {test_session_name}")
+            create_session_params = {"name": "create-session", "arguments": {"name": test_session_name}}
+            create_session_result = mcp_manager.call_tool("tmux-mcp", "tools/call", create_session_params)
+            logger.info(f"Create session result: {json.dumps(create_session_result, indent=2)}")
+
+            if create_session_result and not create_session_result.get("error") and create_session_result.get("result", {}).get("content") and not create_session_result.get("result",{}).get("isError"):
+                session_text = create_session_result["result"]["content"][0]["text"]
+                if "Session created:" in session_text:
+                    session_json_str = session_text.split("Session created:", 1)[1].strip()
+                    created_session_info = json.loads(session_json_str)
+                    created_session_id = created_session_info.get("id")
+                    logger.info(f"Successfully created session '{test_session_name}', ID: {created_session_id}")
                 else:
-                    logger.warning(f"CONCLUSION Test 4: tmux-mcp call succeeded but returned unexpected structure: {tmux_result}")
-            elif tmux_result and tmux_result.get("error"): # This is a JSON-RPC level error
-                logger.warning(f"CONCLUSION Test 4: 'tools/call' to tmux-mcp server (list-sessions) failed with JSON-RPC error: {tmux_result.get('error')}")
-            else: # This means the call_tool itself returned None or an empty dict, indicating a lower-level issue
-                logger.warning(f"CONCLUSION Test 4: 'tools/call' to tmux-mcp server (list-sessions) failed at a low level, result: {tmux_result}")
+                    # Attempt to parse as just the session JSON if "Session created:" prefix is missing
+                    try:
+                        created_session_info = json.loads(session_text)
+                        created_session_id = created_session_info.get("id")
+                        if created_session_id:
+                             logger.info(f"Successfully parsed session from direct JSON '{test_session_name}', ID: {created_session_id}")
+                        else:
+                            raise Exception(f"Failed to parse created session info (no ID found): {session_text}")
+                    except json.JSONDecodeError:
+                        raise Exception(f"Failed to parse created session info (not plain JSON either): {session_text}")
+            else:
+                error_detail = create_session_result.get("error") if create_session_result else "No result"
+                is_app_error = create_session_result.get("result",{}).get("isError") if create_session_result and not error_detail else False
+                app_error_content = create_session_result.get("result",{}).get("content") if is_app_error else "N/A"
+                raise Exception(f"Failed to create session. JSON-RPC error: {error_detail}. App error: {is_app_error}. App content: {app_error_content}. Full response: {create_session_result}")
+
+            if not created_session_id:
+                raise Exception("Could not obtain session ID after creation step.")
+
+            # Step 2: List windows in the new session (should be one default window)
+            logger.info(f"Attempting to list windows for session ID: {created_session_id}")
+            list_windows_params = {"name": "list-windows", "arguments": {"sessionId": created_session_id}}
+            list_windows_result = mcp_manager.call_tool("tmux-mcp", "tools/call", list_windows_params)
+            logger.info(f"List windows result: {json.dumps(list_windows_result, indent=2)}")
+            
+            if list_windows_result and not list_windows_result.get("error") and list_windows_result.get("result", {}).get("content") and not list_windows_result.get("result",{}).get("isError"):
+                windows_list_json = json.loads(list_windows_result["result"]["content"][0]["text"])
+                if windows_list_json and isinstance(windows_list_json, list) and len(windows_list_json) > 0:
+                    created_window_id = windows_list_json[0].get("id")
+                    logger.info(f"Successfully listed windows, using first window ID: {created_window_id}")
+                else:
+                    raise Exception(f"No windows found in new session or bad format: {windows_list_json}")
+            else:
+                error_detail_lw = list_windows_result.get("error") if list_windows_result else "No result"
+                raise Exception(f"Failed to list windows. JSON-RPC error: {error_detail_lw}. Full response: {list_windows_result}")
+
+            if not created_window_id:
+                raise Exception("Could not obtain window ID.")
+
+            # Step 3: List panes in the new window (should be one default pane)
+            logger.info(f"Attempting to list panes for window ID: {created_window_id}")
+            list_panes_params = {"name": "list-panes", "arguments": {"windowId": created_window_id}}
+            list_panes_result = mcp_manager.call_tool("tmux-mcp", "tools/call", list_panes_params)
+            logger.info(f"List panes result: {json.dumps(list_panes_result, indent=2)}")
+
+            if list_panes_result and not list_panes_result.get("error") and list_panes_result.get("result", {}).get("content") and not list_panes_result.get("result",{}).get("isError"):
+                panes_list_json = json.loads(list_panes_result["result"]["content"][0]["text"])
+                if panes_list_json and isinstance(panes_list_json, list) and len(panes_list_json) > 0:
+                    created_pane_id = panes_list_json[0].get("id")
+                    logger.info(f"Successfully listed panes, using first pane ID: {created_pane_id}")
+                else:
+                    raise Exception(f"No panes found in new window or bad format: {panes_list_json}")
+            else:
+                error_detail_lp = list_panes_result.get("error") if list_panes_result else "No result"
+                raise Exception(f"Failed to list panes. JSON-RPC error: {error_detail_lp}. Full response: {list_panes_result}")
+            
+            if not created_pane_id:
+                raise Exception("Could not obtain pane ID.")
+
+            # Step 4: Execute a command in the identified pane
+            # Change to /workspace first, then echo.
+            command_to_run = f"cd /workspace && echo hello_tmux_cd_test_{uuid.uuid4().hex[:6]} > tmux_pane_output.txt"
+            output_file_name = "tmux_pane_output.txt"
+            
+            logger.info(f"Attempting to execute command '{command_to_run}' in pane ID: {created_pane_id}")
+            exec_command_params = {
+                "name": "execute-command", 
+                "arguments": {"paneId": created_pane_id, "command": command_to_run}
+            }
+            exec_command_result = mcp_manager.call_tool("tmux-mcp", "tools/call", exec_command_params)
+            logger.info(f"Execute command result: {json.dumps(exec_command_result, indent=2)}")
+
+            if exec_command_result and not exec_command_result.get("error") and exec_command_result.get("result", {}).get("content") and not exec_command_result.get("result",{}).get("isError"):
+                exec_text = exec_command_result["result"]["content"][0]["text"]
+                if "Command execution started" in exec_text and "tmux://command/" in exec_text:
+                    logger.info(f"CONCLUSION Test 4: 'execute-command' on tmux-mcp server started successfully. Output: {exec_text}")
+                    
+                    logger.info(f"Waiting 5 seconds for command to complete and file '{output_file_name}' to be written...")
+                    time.sleep(5) # Give command more time to execute and write file
+                    
+                    if os.path.exists(output_file_name):
+                        logger.info(f"Command output file {output_file_name} created successfully.")
+                        with open(output_file_name, "r") as f_out:
+                            file_content = f_out.read().strip()
+                            logger.info(f"Content of {output_file_name}: {file_content}")
+                            if "hello_tmux_cd_test" in file_content:
+                                logger.info("Command output file content verified.")
+                            else:
+                                logger.warning("Command output file content MISMATCH.")
+                        os.remove(output_file_name) # Clean up test file
+                    else:
+                        logger.warning(f"Command output file {output_file_name} NOT found in {os.getcwd()}. Checking /workspace mapping.")
+                        # For debugging, let's also try to list /workspace content from another MCP if possible, or just note this.
+                        # This path is relative to where test_mcp_interaction.py is run.
+                else:
+                    logger.warning(f"CONCLUSION Test 4: 'execute-command' response from tmux-mcp had unexpected content: {exec_text}")
+            elif exec_command_result and exec_command_result.get("error"):
+                logger.warning(f"CONCLUSION Test 4: 'execute-command' call failed with JSON-RPC error: {exec_command_result.get('error')}")
+            else:
+                logger.warning(f"CONCLUSION Test 4: 'execute-command' call failed at a low level, result: {exec_command_result}")
 
         except Exception as e:
-            logger.error(f"Exception during 'tools/call' to tmux-mcp (name: list-sessions): {e}", exc_info=True)
+            logger.error(f"Exception during tmux-mcp full command execution flow: {e}", exc_info=True)
+        finally:
+            if created_session_id:
+                try:
+                    logger.info(f"Attempting to clean up (kill) test session: {created_session_id} ({test_session_name})")
+                    cleanup_command = f"tmux kill-session -t {created_session_id}"
+                    logger.info(f"Executing cleanup: {cleanup_command}")
+                    # Use subprocess for more control and to avoid shell=True risks if session_id could be manipulated
+                    # For this test, os.system is simpler but less secure if test_session_name was from untrusted source
+                    process = subprocess.Popen(cleanup_command.split(), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                    stdout, stderr = process.communicate(timeout=5)
+                    if process.returncode != 0:
+                        logger.warning(f"tmux kill-session for {created_session_id} exited with {process.returncode}. Stderr: {stderr.decode()}")
+                    else:
+                        logger.info(f"Successfully killed session {created_session_id}.")
+                except subprocess.TimeoutExpired:
+                    logger.error(f"Timeout during tmux session cleanup for {created_session_id}. Process might still be running.")
+                    if process: process.kill()
+                except Exception as e_cleanup:
+                    logger.error(f"Error during tmux session cleanup for {created_session_id}: {e_cleanup}")
 
     finally:
         if mcp_manager:

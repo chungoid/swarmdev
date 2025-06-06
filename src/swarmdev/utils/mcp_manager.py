@@ -272,17 +272,11 @@ class MCPManager:
                     "enabled": True,
                     "description": "Context-aware library and dependency resolution (stdio transport)"
                 },
-                "tmux-mcp": {
-                    "command": ["docker", "run", "-i", "--rm", 
-                                "-v", "$(pwd):/workspace",
-                                "-v", "/tmp/tmux-1000:/tmp/tmux-1000",
-                                "-e", "TMUX_TMPDIR=/tmp/tmux-1000",
-                                "-p", "127.0.0.1:13008:3000", 
-                                "ghcr.io/chungoid/tmux-mcp:latest"],
-                    "timeout": 30,
+                "shell": {
+                    "command": ["python", "-m", "swarmdev.mcp_tools.shell_executor"],
+                    "timeout": 60,
                     "enabled": True,
-                    "description": "TMUX Memory Context Protocol Server for session management",
-                    "init_delay": 0.5
+                    "description": "Simple shell command execution with full output capture"
                 },
                 "everything": {
                     "command": ["docker", "run", "-i", "--rm", "ghcr.io/chungoid/everything:latest"],
@@ -547,6 +541,9 @@ class MCPManager:
                         # No need to change status again, _discover_capabilities already set it.
                         return False # Initialization is not fully successful
                 
+                # Log the successful response before returning
+                self.mcp_logger.debug(f"Successful response from {server_id} (PID: {process.pid}, request_id: {init_request_id}): {response_json}")
+
                 return True
             else:
                 # Initialization failed
