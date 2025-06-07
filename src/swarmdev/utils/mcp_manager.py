@@ -38,6 +38,7 @@ class MCPManager:
         """
         self.project_dir = project_dir
         self.config = config
+        
         self.servers = {}  # server_id -> server_info
         self.connections = {}  # server_id -> connection
         self.capabilities = {}  # server_id -> discovered capabilities
@@ -341,6 +342,16 @@ class MCPManager:
                     command.extend(args)
                 else:
                     command.append(args)
+            
+            # Handle shell executor portability
+            if server_id == "shell" and len(command) >= 3 and command[1] == "-m" and command[2] == "swarmdev.mcp_tools.shell_executor":
+                # Try to find the shell_executor.py script for direct execution
+                shell_script_path = os.path.join(self.project_dir, 'src', 'swarmdev', 'mcp_tools', 'shell_executor.py')
+                if os.path.exists(shell_script_path):
+                    # Use direct path for better portability
+                    command = ["python", shell_script_path]
+                    self.mcp_logger.info(f"Shell executor: Using direct path for portability: {shell_script_path}")
+                # If not found, keep the module import approach
             
             # Handle shell expansions in command
             for i, arg in enumerate(command):

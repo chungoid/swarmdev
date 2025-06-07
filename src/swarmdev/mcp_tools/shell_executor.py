@@ -1,11 +1,23 @@
 #!/usr/bin/env python3
 """
-Simple Shell Execution MCP Server for SwarmDev
+Standalone Shell Execution MCP Server
 
 This MCP server provides reliable shell command execution with complete output capture.
-Perfect for test agents and build automation tasks.
+It is designed to be a self-contained script that can be called from any project.
 
+Perfect for test agents, build automation, and any workflow requiring shell commands.
 Based on Python subprocess module for reliable, simple execution.
+
+Usage:
+    This script is intended to be called by an MCP Manager.
+
+Example MCP Configuration:
+    "shell": {
+        "command": ["python", "/path/to/this/shell_executor.py"],
+        "timeout": 60,
+        "enabled": true,
+        "description": "Simple shell command execution with full output capture"
+    }
 """
 
 import asyncio
